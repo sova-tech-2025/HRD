@@ -370,22 +370,42 @@ def get_question_type_keyboard(is_creating_test: bool = True) -> InlineKeyboardM
     return keyboard
 
 
-def get_test_edit_menu(test_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура для главного меню редактирования теста"""
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✏️ Название/Описание", callback_data=f"edit_test_meta:{test_id}"),
-                InlineKeyboardButton(text="🔗 Материалы", callback_data=f"edit_test_materials:{test_id}")
-            ],
-            [
-                InlineKeyboardButton(text="❓ Управление вопросами", callback_data=f"edit_test_questions:{test_id}"),
-                InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"edit_test_settings:{test_id}")
-            ],
-            [InlineKeyboardButton(text="👁️ Предпросмотр", callback_data=f"preview_test:{test_id}")],
-            [InlineKeyboardButton(text="⬅️ Назад к тесту", callback_data=f"test:{test_id}")]
-        ]
-    )
+def get_test_edit_menu(test_id: int, session_id: int = None) -> InlineKeyboardMarkup:
+    """Клавиатура для главного меню редактирования теста
+    
+    Args:
+        test_id: ID теста
+        session_id: ID сессии, если тест открыт из редактора траекторий
+    """
+    # Определяем callback для кнопки "Назад"
+    if session_id:
+        # Если открыто из редактора траекторий - возвращаемся в редактор сессии
+        back_callback = f"edit_session_view:{session_id}"
+        back_text = "⬅️ Назад к сессии"
+    else:
+        # Обычный возврат к детальной информации о тесте
+        back_callback = f"test:{test_id}"
+        back_text = "⬅️ Назад к тесту"
+    
+    keyboard_buttons = [
+        [
+            InlineKeyboardButton(text="✏️ Название/Описание", callback_data=f"edit_test_meta:{test_id}"),
+            InlineKeyboardButton(text="🔗 Материалы", callback_data=f"edit_test_materials:{test_id}")
+        ],
+        [
+            InlineKeyboardButton(text="❓ Управление вопросов", callback_data=f"edit_test_questions:{test_id}"),
+            InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"edit_test_settings:{test_id}")
+        ],
+        [InlineKeyboardButton(text="👁️ Предпросмотр", callback_data=f"preview_test:{test_id}")]
+    ]
+    
+    # Добавляем кнопку удаления из сессии, только если тест открыт из редактора траекторий
+    if session_id:
+        keyboard_buttons.append([InlineKeyboardButton(text="🚫 Удалить из сессии", callback_data=f"remove_test_from_session:{session_id}:{test_id}")])
+    
+    keyboard_buttons.append([InlineKeyboardButton(text=back_text, callback_data=back_callback)])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     return keyboard
 
 
@@ -409,7 +429,7 @@ def get_simple_test_selection_keyboard(tests: list) -> InlineKeyboardMarkup:
     
     for test in tests:
         button = InlineKeyboardButton(
-            text=f"{test.name} (макс. {test.max_score} баллов)",
+            text=f"{test.name} (макс. {test.max_score:.1f} б.)",
             callback_data=f"test:{test.id}"
         )
         keyboard.append([button])
@@ -871,8 +891,15 @@ def get_question_management_keyboard(question_id: int, is_first: bool, is_last: 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_test_settings_keyboard(test_id: int, shuffle: bool, attempts: int) -> InlineKeyboardMarkup:
-    """Клавиатура настроек теста"""
+def get_test_settings_keyboard(test_id: int, shuffle: bool, attempts: int, session_id: int = None) -> InlineKeyboardMarkup:
+    """Клавиатура настроек теста
+    
+    Args:
+        test_id: ID теста
+        shuffle: Перемешивание вопросов
+        attempts: Количество попыток
+        session_id: ID сессии, если тест открыт из редактора траекторий
+    """
     shuffle_text = "✅ Перемешивать вопросы" if shuffle else "☑️ Не перемешивать вопросы"
     
     if attempts == 0:
@@ -880,11 +907,17 @@ def get_test_settings_keyboard(test_id: int, shuffle: bool, attempts: int) -> In
     else:
         attempts_text = f"🔢 Попытки: {attempts}"
 
+    # Определяем callback для кнопки "Назад"
+    if session_id:
+        back_callback = f"edit_test:{test_id}:{session_id}"
+    else:
+        back_callback = f"edit_test:{test_id}"
+
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=shuffle_text, callback_data=f"toggle_shuffle:{test_id}")],
             [InlineKeyboardButton(text=attempts_text, callback_data=f"edit_attempts:{test_id}")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_test:{test_id}")]
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback)]
         ]
     )
     return keyboard
@@ -2160,6 +2193,232 @@ def get_mentors_pagination_keyboard(mentors: list, page: int = 0, per_page: int 
     
     # Кнопка "Назад" к подменю наставников
     keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_mentors_menu")])
+    keyboard.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+# ================== РЕДАКТОР ТРАЕКТОРИЙ ==================
+
+def get_trajectory_editor_main_keyboard(stages: list, path_id: int) -> InlineKeyboardMarkup:
+    """Главное меню редактора конкретной траектории с кнопками этапов"""
+    keyboard = []
+    
+    # Кнопки для каждого этапа
+    for stage in sorted(stages, key=lambda s: s.order_number):
+        keyboard.append([InlineKeyboardButton(
+            text=f"Этап {stage.order_number}",
+            callback_data=f"edit_stage_view:{stage.id}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton(text="➕ Добавить этап", callback_data=f"add_stage_to_trajectory:{path_id}")])
+    keyboard.append([InlineKeyboardButton(text="Аттестация", callback_data=f"edit_trajectory_attestation:{path_id}")])
+    keyboard.append([InlineKeyboardButton(text="✏️ Группы траектории", callback_data=f"edit_trajectory_group:{path_id}")])
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="edit_trajectory")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_trajectory_edit_info_keyboard(path_id: int) -> InlineKeyboardMarkup:
+    """Меню редактирования информации о траектории"""
+    keyboard = [
+        [InlineKeyboardButton(text="✏️ Изменить название", callback_data=f"change_trajectory_name:{path_id}")],
+        [InlineKeyboardButton(text="🗂️ Изменить группу", callback_data=f"change_trajectory_group:{path_id}")],
+        [InlineKeyboardButton(text="🔍 Изменить аттестацию", callback_data=f"change_trajectory_attestation:{path_id}")],
+        [InlineKeyboardButton(text="🗑️ Удалить аттестацию", callback_data=f"remove_trajectory_attestation:{path_id}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"editor_main_menu:{path_id}")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_stage_editor_keyboard(stage, sessions: list, path_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура для экрана редактирования этапа (показывает сессии этапа)
+    
+    Args:
+        stage: Объект LearningStage
+        sessions: Список сессий этапа
+        path_id: ID траектории
+    """
+    keyboard = []
+    
+    # Кнопки сессий этого этапа
+    for session in sorted(sessions, key=lambda s: s.order_number):
+        keyboard.append([InlineKeyboardButton(
+            text=f"Сессия {session.order_number}",
+            callback_data=f"edit_session_view:{session.id}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton(text="➕ Добавить сессию", callback_data=f"add_session_to_stage:{stage.id}")])
+    keyboard.append([InlineKeyboardButton(text="✏️ Название этапа", callback_data=f"edit_stage_name:{stage.id}")])
+    keyboard.append([InlineKeyboardButton(text="🚫 Удалить этап", callback_data=f"delete_stage:{stage.id}")])
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"editor_main_menu:{path_id}")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+
+
+def get_session_tests_keyboard(tests: list, session_id: int, stage_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура управления тестами в сессии для экрана редактирования"""
+    keyboard = []
+    
+    # Список тестов в сессии (кнопки для редактирования)
+    for i, test in enumerate(tests, 1):
+        keyboard.append([InlineKeyboardButton(
+            text=f"Тест {i}",
+            callback_data=f"edit_test:{test.id}:{session_id}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton(text="➕ Добавить тест", callback_data=f"add_test_to_session:{session_id}")])
+    keyboard.append([InlineKeyboardButton(text="✏️ Название сессии", callback_data=f"edit_session_name:{session_id}")])
+    keyboard.append([InlineKeyboardButton(text="🚫 Удалить сессию", callback_data=f"delete_session:{session_id}")])
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_stage_view:{stage_id}")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_test_selection_for_session_keyboard(tests: list, session_id: int, existing_test_ids: list = None) -> InlineKeyboardMarkup:
+    """Клавиатура выбора тестов для добавления в сессию"""
+    keyboard = []
+    
+    if existing_test_ids is None:
+        existing_test_ids = []
+    
+    for test in tests:
+        # Показываем только тесты, которых еще нет в сессии
+        if test.id not in existing_test_ids:
+            keyboard.append([InlineKeyboardButton(
+                text=test.name,
+                callback_data=f"select_test_for_session:{session_id}:{test.id}"
+            )])
+    
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_session_view:{session_id}")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_group_selection_for_trajectory_keyboard(groups: list, path_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура выбора группы для траектории"""
+    keyboard = []
+    
+    for group in groups:
+        keyboard.append([InlineKeyboardButton(
+            text=group.name,
+            callback_data=f"select_group_for_trajectory:{path_id}:{group.id}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"editor_main_menu:{path_id}")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_attestation_selection_for_trajectory_keyboard(attestations: list, path_id: int, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
+    """Клавиатура выбора аттестации для траектории с пагинацией"""
+    keyboard = []
+    
+    # Пагинация
+    total_attestations = len(attestations)
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    page_attestations = attestations[start_idx:end_idx]
+    
+    # Кнопки аттестаций для текущей страницы
+    for attestation in page_attestations:
+        keyboard.append([InlineKeyboardButton(
+            text=attestation.name,
+            callback_data=f"select_attestation_for_trajectory:{path_id}:{attestation.id}"
+        )])
+    
+    # Навигационные кнопки
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"attestations_page_prev:{path_id}:{page-1}"))
+    
+    total_pages = (total_attestations + per_page - 1) // per_page
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"attestations_page_next:{path_id}:{page+1}"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    keyboard.append([InlineKeyboardButton(text="🚫 Не назначать", callback_data=f"remove_trajectory_attestation:{path_id}")])
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"editor_main_menu:{path_id}")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_trajectory_attestation_management_keyboard(path_id: int, has_attestation: bool = False, attestation_id: int = None) -> InlineKeyboardMarkup:
+    """Клавиатура управления аттестацией траектории"""
+    keyboard = []
+    
+    if has_attestation:
+        keyboard.append([InlineKeyboardButton(text="👁️ Просмотреть", callback_data=f"view_trajectory_attestation:{path_id}:{attestation_id}")])
+        keyboard.append([InlineKeyboardButton(text="✏️ Заменить", callback_data=f"replace_trajectory_attestation:{path_id}")])
+    else:
+        keyboard.append([InlineKeyboardButton(text="Добавить", callback_data=f"add_trajectory_attestation:{path_id}")])
+    
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"editor_main_menu:{path_id}")])
+    keyboard.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_stage_deletion_confirmation_keyboard(stage_id: int, path_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения удаления этапа"""
+    keyboard = [
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete_stage:{stage_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"edit_stage_view:{stage_id}")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_session_deletion_confirmation_keyboard(session_id: int, stage_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения удаления сессии"""
+    keyboard = [
+        [InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete_session:{session_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"edit_session_view:{session_id}")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_back_to_editor_keyboard(path_id: int) -> InlineKeyboardMarkup:
+    """Универсальная клавиатура возврата в редактор"""
+    keyboard = [
+        [InlineKeyboardButton(text="⬅️ Назад в редактор", callback_data=f"editor_main_menu:{path_id}")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_trajectory_selection_for_editor_keyboard(learning_paths: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
+    """Клавиатура выбора траектории для редактирования с пагинацией"""
+    keyboard = []
+    
+    # Пагинация
+    total_trajectories = len(learning_paths)
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    page_trajectories = learning_paths[start_idx:end_idx]
+    
+    # Кнопки траекторий для текущей страницы
+    for path in page_trajectories:
+        keyboard.append([InlineKeyboardButton(
+            text=f"{path.name}",
+            callback_data=f"edit_path:{path.id}"
+        )])
+    
+    # Навигационные кнопки
+    nav_buttons = []
+    total_pages = (total_trajectories + per_page - 1) // per_page if total_trajectories > 0 else 1
+    
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"trajectories_page_prev:{page-1}"))
+    
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"trajectories_page_next:{page+1}"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
     keyboard.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

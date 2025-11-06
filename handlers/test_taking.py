@@ -86,13 +86,13 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
         # Получаем результат последнего прохождения для отображения статуса
         test_result = await get_user_test_result(session, user.id, test.id)
         if test_result and test_result.is_passed:
-            status_info = f" | ✅ Пройден ({test_result.score}/{test_result.max_possible_score})"
+            status_info = f" | ✅ Пройден ({test_result.score:.1f}/{test_result.max_possible_score:.1f})"
         else:
             status_info = " | 📋 Доступен"
         
         tests_list.append(
             f"<b>{i}. {test.name}</b>\n"
-            f"   🎯 Порог: {test.threshold_score}/{test.max_score} баллов{stage_info}{materials_info}{status_info}\n"
+            f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}{status_info}\n"
             f"   📝 {test.description or 'Описание не указано'}"
         )
     
@@ -144,13 +144,13 @@ async def format_my_tests_display(
     for i, test in enumerate(available_tests, 1):
         test_result = await get_user_test_result(session, user.id, test.id)
         if test_result and test_result.is_passed:
-            status = f"Пройден ({test_result.score}/{test_result.max_possible_score} баллов) 🏆"
+            status = f"Пройден ({test_result.score:.1f}/{test_result.max_possible_score:.1f} б.) 🏆"
         else:
             status = "Доступен для прохождения ✅"
         
         tests_list.append(
             f"<b>{i}. {test.name}</b>\n"
-            f"   Порог: {int(test.threshold_score)}/{int(test.max_score)} баллов\n"
+            f"   Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
             f"   Статус: {status}\n"
             f"   Описание: {test.description or 'Описание не указано'}"
         )
@@ -291,7 +291,7 @@ async def show_user_test_scores(message: Message, session: AsyncSession) -> None
         
         results_list.append(
             f"<b>Тест:</b> {test.name if test else 'Неизвестный тест'}\n"
-            f"• Баллы: {result.score}/{result.max_possible_score} ({percentage:.1f}%)\n"
+            f"• Баллы: {result.score:.1f}/{result.max_possible_score:.1f} ({percentage:.1f}%)\n"
             f"• Статус: {status}\n"
             f"• Дата: {result.created_date.strftime('%d.%m.%Y %H:%M')}\n"
             f"• Время: {(result.end_time - result.start_time).total_seconds():.0f} сек"
@@ -409,7 +409,7 @@ async def process_test_selection_for_taking(callback: CallbackQuery, state: FSMC
     
     test_info = f"""📌 <b>{test.name}</b>
 
-<b>Порог:</b> {test.threshold_score}/{test.max_score} баллов
+<b>Порог:</b> {test.threshold_score:.1f}/{test.max_score:.1f} б.
 
 {test.description or 'Описание отсутствует'}
 
@@ -996,8 +996,8 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
     try:
         await message.edit_text(
             f"{status_text}\n"
-            f"Твой результат: <b>{score}</b> из <b>{test.max_score}</b> баллов.\n"
-            f"Проходной балл: {test.threshold_score}"
+            f"Твой результат: <b>{score:.1f}</b> из <b>{test.max_score:.1f}</b> б.\n"
+            f"Проходной балл: {test.threshold_score:.1f}"
             f"{progress_info}"
             f"{stage_completion_message}",
             parse_mode="HTML",
@@ -1008,8 +1008,8 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
         # отправляем новое сообщение
         await message.answer(
             f"{status_text}\n"
-            f"Твой результат: <b>{score}</b> из <b>{test.max_score}</b> баллов.\n"
-            f"Проходной балл: {test.threshold_score}"
+            f"Твой результат: <b>{score:.1f}</b> из <b>{test.max_score:.1f}</b> б.\n"
+            f"Проходной балл: {test.threshold_score:.1f}"
             f"{progress_info}"
             f"{stage_completion_message}",
             parse_mode="HTML",
@@ -1145,7 +1145,7 @@ async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, 
             
             tests_list.append(
                 f"<b>{i}. {test.name}</b>\n"
-                f"   🎯 Порог: {test.threshold_score}/{test.max_score} баллов{stage_info}{materials_info}\n"
+                f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}\n"
                 f"   📝 {test.description or 'Описание не указано'}"
             )
         
@@ -1311,7 +1311,7 @@ async def process_take_test_from_notification(callback: CallbackQuery, state: FS
     
     test_info = f"""📌 <b>{test.name}</b>
 
-<b>Порог:</b> {test.threshold_score}/{test.max_score} баллов
+<b>Порог:</b> {test.threshold_score:.1f}/{test.max_score:.1f} б.
 
 {test.description or 'Описание отсутствует'}
 
@@ -1376,7 +1376,7 @@ async def process_trajectory_tests_shortcut(callback: CallbackQuery, state: FSMC
         
         tests_list.append(
             f"<b>{i}. {test.name}</b>\n"
-            f"   🎯 Порог: {test.threshold_score}/{test.max_score} баллов{stage_info}{materials_info}\n"
+            f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}\n"
             f"   📝 {test.description or 'Описание не указано'}"
         )
     

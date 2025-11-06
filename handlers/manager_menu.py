@@ -145,7 +145,7 @@ async def callback_select_trainee_for_attestation(callback: CallbackQuery, sessi
                 trainee_info += (
                     f"📅 <b>{result.completed_date.strftime('%d.%m.%Y')}</b>\n"
                     f"📋 <b>{result.attestation.name}</b>\n"
-                    f"📊 <b>Результат:</b> {result.total_score}/{result.max_score}\n"
+                    f"📊 <b>Результат:</b> {result.total_score:.1f}/{result.max_score:.1f}\n"
                     f"🎯 <b>Статус:</b> {status}\n\n"
                 )
         else:

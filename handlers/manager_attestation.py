@@ -331,8 +331,6 @@ async def callback_save_new_schedule(callback: CallbackQuery, state: FSMContext,
             await callback.message.edit_text("❌ Ошибка при сохранении расписания")
             return
 
-        await session.commit()
-
         # Получаем обновленные данные
         assignment = await get_trainee_attestation_by_id(session, assignment_id)
         trainee = assignment.trainee
@@ -483,7 +481,7 @@ async def show_attestation_question(callback: CallbackQuery, state: FSMContext, 
         question_text = (
             f"<b>Вопрос {current_index + 1}:</b>\n\n"
             f"{question.question_text}\n\n"
-            f"🎯 <b>Максимальный балл:</b> {question.max_points}\n\n"
+            f"🎯 <b>Максимальный балл:</b> {question.max_points:.1f}\n\n"
             "💡 <b>Инструкция:</b> Задай вопрос стажеру голосом, выслушай ответ и введи балл согласно критериям в вопросе."
         )
 
@@ -534,7 +532,7 @@ async def process_question_score(message: Message, state: FSMContext, session: A
 
         # Проверяем что балл не превышает максимум
         if score > question.max_points:
-            await message.answer(f"❌ Балл не может быть больше {question.max_points}")
+            await message.answer(f"❌ Балл не может быть больше {question.max_points:.1f}")
             return
 
         if score < 0:
@@ -558,7 +556,7 @@ async def process_question_score(message: Message, state: FSMContext, session: A
         log_user_action(message.from_user.id, "score_entered", f"Введен балл {score} за вопрос {current_index + 1}")
         
         # Подтверждаем принятие балла
-        await message.answer(f"✅ Балл {score} принят за вопрос {current_index + 1}")
+        await message.answer(f"✅ Балл {score:.1f} принят за вопрос {current_index + 1}")
 
         # Показываем следующий вопрос или результат
         if next_index < len(questions):
@@ -612,15 +610,13 @@ async def show_attestation_results_message(message: Message, state: FSMContext, 
         # Завершаем сессию аттестации
         await complete_attestation_session(session, assignment_id, total_score, max_score, is_passed)
 
-        await session.commit()
-
         if is_passed:
             # Успех аттестации (ТЗ шаг 12-3)
             message_text = (
                 "✅<b>Аттестация успешно пройдена</b>\n\n"
                 f"🧑 <b>ФИО:</b> {trainee.full_name}\n"
-                f"🏁<b>Проходной балл:</b> {attestation.passing_score}\n"
-                f"🎯<b>Набрано баллов:</b> {total_score}\n"
+                f"🏁<b>Проходной балл:</b> {attestation.passing_score:.1f}\n"
+                f"🎯<b>Набрано баллов:</b> {total_score:.1f}\n"
                 f"🏁<b>Аттестация:</b> {attestation.name} ✅\n"
                 f"📍<b>2️⃣Объект работы:</b> {trainee.work_object.name if trainee.work_object else 'Не указан'}\n"
                 f"🟢<b>Дата:</b> {assignment.scheduled_date or ''}\n"
@@ -642,8 +638,8 @@ async def show_attestation_results_message(message: Message, state: FSMContext, 
             message_text = (
                 "❌<b>Аттестация провалена❌</b>\n\n"
                 f"🧑 <b>ФИО:</b> {trainee.full_name}\n"
-                f"🏁<b>Проходной балл:</b> {attestation.passing_score}\n"
-                f"🎯<b>Набрано баллов:</b> {total_score}\n"
+                f"🏁<b>Проходной балл:</b> {attestation.passing_score:.1f}\n"
+                f"🎯<b>Набрано баллов:</b> {total_score:.1f}\n"
                 f"🏁<b>Аттестация:</b> {attestation.name} ⛔️\n"
                 f"📍<b>2️⃣Объект работы:</b> {trainee.work_object.name if trainee.work_object else 'Не указан'}\n"
                 f"🟢<b>Дата:</b> {assignment.scheduled_date or ''}\n"
@@ -716,8 +712,8 @@ async def send_attestation_success_notification(session: AsyncSession, bot, trai
     try:
         notification_text = (
             "✅<b>Аттестация успешно пройдена</b>\n\n"
-            f"🏁<b>Проходной балл:</b> {passing_score}\n"
-            f"🎯<b>Набрано баллов:</b> {score}\n"
+            f"🏁<b>Проходной балл:</b> {passing_score:.1f}\n"
+            f"🎯<b>Набрано баллов:</b> {score:.1f}\n"
             f"🏁<b>Аттестация:</b> {attestation.name} ✅\n"
             f"🟢<b>Руководитель:</b> {manager_name}\n"
             f"👤 <b>Username:</b> @{manager_username or 'не указан'}\n"
@@ -747,8 +743,8 @@ async def send_attestation_failure_notification(session: AsyncSession, bot, trai
     try:
         notification_text = (
             "❌<b>Аттестация провалена❌</b>\n\n"
-            f"🏁<b>Проходной балл:</b> {passing_score}\n"
-            f"🎯<b>Набрано баллов:</b> {score}\n"
+            f"🏁<b>Проходной балл:</b> {passing_score:.1f}\n"
+            f"🎯<b>Набрано баллов:</b> {score:.1f}\n"
             f"🏁<b>Аттестация:</b> {attestation.name} ⛔️\n"
             f"🟢<b>Руководитель:</b> {manager_name}\n"
             f"👤 <b>Username:</b> @{manager_username or 'не указан'}\n"
@@ -794,8 +790,6 @@ async def callback_make_employee_anyway(callback: CallbackQuery, state: FSMConte
         if not success:
             await callback.message.edit_text("❌ Ошибка при изменении роли стажера")
             return
-            
-        await session.commit()
         
         # Подтверждение руководителю
         await callback.message.edit_text(
@@ -946,7 +940,7 @@ async def callback_cancel_schedule_change(callback: CallbackQuery, state: FSMCon
                 'data': f'select_trainee_attestation:{assignment_id}',
                 'message': callback.message,
                 'from_user': callback.from_user,
-                'answer': lambda: None
+                'answer': lambda *args, **kwargs: None
             })(), 
             state, session
         )

@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Table, Text, Float
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Table, Text, Float, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
@@ -65,6 +65,12 @@ class User(Base):
     created_tests = relationship("Test", back_populates="creator")
     test_results = relationship("TestResult", back_populates="user")
     
+    __table_args__ = (
+        Index('idx_user_tg_id_active', 'tg_id', 'is_active'),
+        Index('idx_user_is_active', 'is_active'),
+        Index('idx_user_phone', 'phone_number'),
+    )
+    
     def __repr__(self):
         return f"<User(id={self.id}, tg_id={self.tg_id}, username={self.username})>"
 
@@ -121,6 +127,10 @@ class Group(Base):
     users = relationship("User", secondary=user_groups, back_populates="groups")
     created_by = relationship("User", foreign_keys=[created_by_id])
     
+    __table_args__ = (
+        Index('idx_group_is_active', 'is_active'),
+    )
+    
     def __repr__(self):
         return f"<Group(id={self.id}, name={self.name})>"
 
@@ -139,6 +149,10 @@ class Object(Base):
     # Связи
     users = relationship("User", secondary=user_objects, back_populates="objects")
     created_by = relationship("User", foreign_keys=[created_by_id])
+    
+    __table_args__ = (
+        Index('idx_object_is_active', 'is_active'),
+    )
     
     def __repr__(self):
         return f"<Object(id={self.id}, name={self.name})>"
@@ -202,6 +216,12 @@ class Test(Base):
     results = relationship("TestResult", back_populates="test")
     sessions = relationship("LearningSession", secondary=session_tests, back_populates="tests")  # Связь с сессиями траекторий
     
+    __table_args__ = (
+        Index('idx_test_is_active', 'is_active'),
+        Index('idx_test_creator', 'creator_id'),
+        Index('idx_test_stage', 'stage_id'),
+    )
+    
     def __repr__(self):
         return f"<Test(id={self.id}, name={self.name}, threshold={self.threshold_score})>"
 
@@ -251,6 +271,12 @@ class TestResult(Base):
     user = relationship("User", back_populates="test_results")
     test = relationship("Test", back_populates="results")
     
+    __table_args__ = (
+        Index('idx_testresult_user', 'user_id'),
+        Index('idx_testresult_test', 'test_id'),
+        Index('idx_testresult_user_test', 'user_id', 'test_id'),
+    )
+    
     def __repr__(self):
         return f"<TestResult(id={self.id}, user_id={self.user_id}, test_id={self.test_id}, score={self.score})>"
 
@@ -273,6 +299,11 @@ class Mentorship(Base):
     trainee = relationship("User", foreign_keys=[trainee_id], back_populates="trainee_relationships")
     assigned_by = relationship("User", foreign_keys=[assigned_by_id])
 
+    __table_args__ = (
+        Index('idx_mentorship_mentor_active', 'mentor_id', 'is_active'),
+        Index('idx_mentorship_trainee_active', 'trainee_id', 'is_active'),
+    )
+    
     def __repr__(self):
         return f"<Mentorship(id={self.id}, mentor_id={self.mentor_id}, trainee_id={self.trainee_id})>"
 
@@ -293,6 +324,12 @@ class TraineeTestAccess(Base):
     trainee = relationship("User", foreign_keys=[trainee_id])
     test = relationship("Test")
     granted_by = relationship("User", foreign_keys=[granted_by_id])
+    
+    __table_args__ = (
+        Index('idx_trainee_test_access_trainee', 'trainee_id'),
+        Index('idx_trainee_test_access_test', 'test_id'),
+        Index('idx_trainee_test_access_active', 'is_active'),
+    )
     
     def __repr__(self):
         return f"<TraineeTestAccess(id={self.id}, trainee_id={self.trainee_id}, test_id={self.test_id})>"
@@ -318,6 +355,12 @@ class LearningPath(Base):
     created_by = relationship("User")
     stages = relationship("LearningStage", back_populates="learning_path", cascade="all, delete-orphan", order_by="LearningStage.order_number")
     assigned_trainees = relationship("TraineeLearningPath", back_populates="learning_path", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        Index('idx_learning_path_is_active', 'is_active'),
+        Index('idx_learning_path_group', 'group_id'),
+        Index('idx_learning_path_attestation', 'attestation_id'),
+    )
     
     def __repr__(self):
         return f"<LearningPath(id={self.id}, name={self.name}, group_id={self.group_id})>"
@@ -384,6 +427,10 @@ class Attestation(Base):
     questions = relationship("AttestationQuestion", back_populates="attestation", cascade="all, delete-orphan", order_by="AttestationQuestion.question_number")
     learning_path = relationship("LearningPath", back_populates="attestation", uselist=False)
     
+    __table_args__ = (
+        Index('idx_attestation_is_active', 'is_active'),
+    )
+    
     def __repr__(self):
         return f"<Attestation(id={self.id}, name={self.name}, passing_score={self.passing_score})>"
 
@@ -428,6 +475,11 @@ class AttestationResult(Base):
     trainee = relationship("User", foreign_keys=[trainee_id])
     attestation = relationship("Attestation")
     manager = relationship("User", foreign_keys=[manager_id])
+
+    __table_args__ = (
+        Index('idx_attestation_result_trainee', 'trainee_id'),
+        Index('idx_attestation_result_attestation', 'attestation_id'),
+    )
 
     def __repr__(self):
         return f"<AttestationResult(id={self.id}, trainee_id={self.trainee_id}, attestation_id={self.attestation_id}, score={self.total_score}/{self.max_score}, passed={self.is_passed}, decision={self.manager_decision})>"
@@ -476,6 +528,14 @@ class TraineeAttestation(Base):
     attestation = relationship("Attestation")
     assigned_by = relationship("User", foreign_keys=[assigned_by_id])
 
+    __table_args__ = (
+        Index('idx_trainee_attestation_trainee', 'trainee_id'),
+        Index('idx_trainee_attestation_manager', 'manager_id'),
+        Index('idx_trainee_attestation_attestation', 'attestation_id'),
+        Index('idx_trainee_attestation_active', 'is_active'),
+        Index('idx_trainee_attestation_trainee_active', 'trainee_id', 'is_active'),
+    )
+
     def __repr__(self):
         return f"<TraineeAttestation(id={self.id}, trainee_id={self.trainee_id}, manager_id={self.manager_id}, attestation_id={self.attestation_id}, status={self.status})>"
 
@@ -518,6 +578,12 @@ class TraineeLearningPath(Base):
     learning_path = relationship("LearningPath", back_populates="assigned_trainees")
     assigned_by = relationship("User", foreign_keys=[assigned_by_id])
     stage_progress = relationship("TraineeStageProgress", back_populates="trainee_path", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index('idx_trainee_learning_path_trainee', 'trainee_id'),
+        Index('idx_trainee_learning_path_path', 'learning_path_id'),
+        Index('idx_trainee_learning_path_active', 'is_active'),
+    )
 
     def __repr__(self):
         return f"<TraineeLearningPath(id={self.id}, trainee_id={self.trainee_id}, learning_path_id={self.learning_path_id})>"
@@ -596,6 +662,10 @@ class KnowledgeFolder(Base):
     materials = relationship("KnowledgeMaterial", back_populates="folder", cascade="all, delete-orphan", order_by="KnowledgeMaterial.order_number")
     accessible_groups = relationship("Group", secondary=folder_group_access)  # Группы с доступом к папке
     
+    __table_args__ = (
+        Index('idx_knowledge_folder_is_active', 'is_active'),
+    )
+    
     def __repr__(self):
         return f"<KnowledgeFolder(id={self.id}, name={self.name})>"
 
@@ -620,6 +690,11 @@ class KnowledgeMaterial(Base):
     # Связи
     folder = relationship("KnowledgeFolder", back_populates="materials")
     created_by = relationship("User", foreign_keys=[created_by_id])
+    
+    __table_args__ = (
+        Index('idx_knowledge_material_folder', 'folder_id'),
+        Index('idx_knowledge_material_is_active', 'is_active'),
+    )
     
     def __repr__(self):
         return f"<KnowledgeMaterial(id={self.id}, name={self.name}, type={self.material_type})>" 

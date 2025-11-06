@@ -170,7 +170,7 @@ async def cmd_list_tests(message: Message, state: FSMContext, session: AsyncSess
 
     tests_list = "\n\n".join([
         f"<b>{i+1}. {test.name}</b>\n"
-        f"   🎯 Порог: {test.threshold_score}/{test.max_score} баллов\n"
+        f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
         f"   📅 Создан: {test.created_date.strftime('%d.%m.%Y')}\n"
         f"   👤 Создатель: {await get_creator_name(session, test.creator_id)}"
         for i, test in enumerate(tests)
@@ -268,7 +268,7 @@ async def callback_list_tests(callback: CallbackQuery, state: FSMContext, sessio
         
         tests_list = "\n\n".join([
             f"<b>{i+1}. {test.name}</b>\n"
-            f"   🎯 Порог: {test.threshold_score}/{test.max_score} баллов\n"
+            f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
             f"   📅 Создан: {test.created_date.strftime('%d.%m.%Y')}\n"
             f"   👤 Создатель: {await get_creator_name(session, test.creator_id)}"
             for i, test in enumerate(tests)
@@ -713,7 +713,7 @@ async def process_points(message: Message, state: FSMContext):
         f"✅ <b>Вопрос №{total_questions} добавлен!</b>\n\n"
         f"Текущая статистика теста:\n"
         f" • Количество вопросов: {total_questions}\n"
-        f" • Максимальный балл: {total_score}\n\n"
+        f" • Максимальный балл: {total_score:.1f}\n\n"
         "❓ Хочешь добавить еще один вопрос?",
         parse_mode="HTML",
         reply_markup=get_yes_no_keyboard("more_questions")
@@ -721,27 +721,74 @@ async def process_points(message: Message, state: FSMContext):
     await state.set_state(TestCreationStates.waiting_for_more_questions)
 
 @router.callback_query(TestCreationStates.waiting_for_more_questions, F.data.startswith("more_questions:"))
-async def process_more_questions_choice(callback: CallbackQuery, state: FSMContext):
+async def process_more_questions_choice(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработка выбора: добавить еще вопрос или завершить"""
+    data = await state.get_data()
+    test_id = data.get('test_id_to_edit')  # Проверяем, добавляем ли вопрос к существующему тесту
+    
     if callback.data.endswith(":yes"):
+        # Продолжаем добавлять вопросы
+        is_creating_test = test_id is None
         await callback.message.edit_text(
             f"Выбери тип <b>следующего вопроса</b>:",
             parse_mode="HTML",
-            reply_markup=get_question_type_keyboard(is_creating_test=True)
+            reply_markup=get_question_type_keyboard(is_creating_test=is_creating_test)
         )
         await state.set_state(TestCreationStates.waiting_for_question_type)
     else:
-        # Переходим к настройке проходного балла
-        data = await state.get_data()
-        total_score = sum(q['points'] for q in data.get('questions', []))
-        
-        await callback.message.edit_text(
-            f"✅ <b>Добавление вопросов завершено.</b>\n\n"
-            f"Максимальный балл за тест: <b>{total_score}</b>\n\n"
-            f"Теперь введи <b>проходной балл</b> для этого теста (число от 0.5 до {total_score}):",
-            parse_mode="HTML"
-        )
-        await state.set_state(TestCreationStates.waiting_for_threshold)
+        # Завершаем добавление вопросов
+        if test_id:
+            # Добавляем вопросы к существующему тесту
+            questions_to_add = data.get('questions', [])
+            initial_count = data.get('initial_questions_count', 0)
+            
+            # Получаем текущие вопросы из БД для определения правильного question_number
+            existing_questions = await get_test_questions(session, test_id)
+            current_max_number = len(existing_questions)
+            
+            # Добавляем только новые вопросы (не те, что были в тесте изначально)
+            new_questions = questions_to_add[initial_count:]
+            
+            if new_questions:
+                # Добавляем новые вопросы в БД
+                for i, q_data in enumerate(new_questions, start=current_max_number + 1):
+                    question_db_data = {
+                        'test_id': test_id,
+                        'question_number': i,
+                        'question_type': q_data['type'],
+                        'question_text': q_data['text'],
+                        'options': q_data.get('options'),
+                        'correct_answer': q_data['answer'],
+                        'points': q_data['points']
+                    }
+                    await add_question_to_test(session, question_db_data)
+                
+                # Обновляем max_score теста
+                test = await get_test_by_id(session, test_id)
+                if test:
+                    all_questions = await get_test_questions(session, test_id)
+                    new_max_score = sum(q.points for q in all_questions)
+                    await update_test(session, test_id, {"max_score": new_max_score})
+            
+            # Сохраняем session_id перед очисткой
+            session_id = data.get('editor_session_id')
+            await state.clear()
+            if session_id:
+                await state.update_data(editor_session_id=session_id)
+            
+            # Возвращаемся к списку вопросов
+            await _show_questions_list(callback.message, state, session, test_id)
+        else:
+            # Создаем новый тест - переходим к настройке проходного балла
+            total_score = sum(q['points'] for q in data.get('questions', []))
+            
+            await callback.message.edit_text(
+                f"✅ <b>Добавление вопросов завершено.</b>\n\n"
+                f"Максимальный балл за тест: <b>{total_score:.1f}</b>\n\n"
+                f"Теперь введи <b>проходной балл</b> для этого теста (число от 0.5 до {total_score:.1f}):",
+                parse_mode="HTML"
+            )
+            await state.set_state(TestCreationStates.waiting_for_threshold)
     await callback.answer()
 
 @router.message(TestCreationStates.waiting_for_threshold)
@@ -754,10 +801,10 @@ async def process_threshold_and_create_test(message: Message, state: FSMContext,
     try:
         threshold_score = float(message.text.replace(',', '.').strip())
         if threshold_score <= 0 or threshold_score > max_score:
-            await message.answer(f"❌ Проходной балл должен быть от 0.5 до {max_score}. Попробуй еще раз:")
+            await message.answer(f"❌ Проходной балл должен быть от 0.5 до {max_score:.1f}. Попробуй еще раз:")
             return
     except ValueError:
-        await message.answer(f"❌ Пожалуйста, введи число от 0.5 до {max_score}:")
+        await message.answer(f"❌ Пожалуйста, введи число от 0.5 до {max_score:.1f}:")
         return
     
     # 1. Создаем объект теста в БД
@@ -797,8 +844,8 @@ async def process_threshold_and_create_test(message: Message, state: FSMContext,
     await message.answer(
         f"✅ <b>Тест «{test.name}» успешно создан и готов к работе!</b>\n\n"
         f"📝 <b>Вопросов добавлено:</b> {len(questions)}\n"
-        f"📊 <b>Максимальный балл:</b> {test.max_score}\n"
-        f"🎯 <b>Проходной балл:</b> {test.threshold_score} ({success_rate:.1f}%)\n\n"
+        f"📊 <b>Максимальный балл:</b> {test.max_score:.1f}\n"
+        f"🎯 <b>Проходной балл:</b> {test.threshold_score:.1f} ({success_rate:.1f}%)\n\n"
         "🎉 Теперь наставники могут предоставлять доступ к этому тесту.",
         parse_mode="HTML",
         reply_markup=get_test_created_success_keyboard()
@@ -857,8 +904,8 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
 📌 <b>Название:</b> {test.name}
 📝 <b>Описание:</b> {test.description or 'Не указано'}
 ❓ <b>Количество вопросов:</b> {questions_count}
-🎲 <b>Максимальный балл:</b> {test.max_score}
-🎯 <b>Порог:</b> {test.threshold_score} баллов
+🎲 <b>Максимальный балл:</b> {test.max_score:.1f}
+🎯 <b>Порог:</b> {test.threshold_score:.1f} б.
 {stage_info}📅 <b>Дата создания:</b> {test.created_date.strftime('%d.%m.%Y %H:%M')}
 🔗 <b>Материалы:</b> {test.material_link if test.material_link else 'Отсутствуют'}
 """
@@ -890,7 +937,7 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
         
         test_info_for_user = f"""📌 <b>{test.name}</b>
 
-<b>Порог:</b> {test.threshold_score}/{test.max_score} баллов
+<b>Порог:</b> {test.threshold_score:.1f}/{test.max_score:.1f} б.
 
 {test.description or 'Описание отсутствует'}
 
@@ -1037,7 +1084,7 @@ async def process_grant_to_trainee(callback: CallbackQuery, state: FSMContext, s
             f"✅ <b>Доступ предоставлен!</b>\n\n"
             f"👤 <b>Стажер:</b> {trainee.full_name}\n"
             f"📋 <b>Тест:</b> {test.name}\n"
-            f"🎯 <b>Проходной балл:</b> {test.threshold_score}/{test.max_score}\n\n"
+            f"🎯 <b>Проходной балл:</b> {test.threshold_score:.1f}/{test.max_score:.1f}\n\n"
             f"📬 <b>Уведомление отправлено!</b>\n"
             f"Стажер {trainee.full_name} получил уведомление о новом тесте в личном кабинете.",
             parse_mode="HTML",
@@ -1072,7 +1119,19 @@ async def process_grant_to_trainee(callback: CallbackQuery, state: FSMContext, s
 @router.callback_query(F.data.startswith("edit_test:"))
 async def process_edit_test_menu(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показывает меню редактирования теста"""
-    test_id = int(callback.data.split(':')[1])
+    parts = callback.data.split(':')
+    test_id = int(parts[1])
+    
+    # Проверяем, есть ли session_id в callback_data (открытие из редактора траекторий)
+    session_id = None
+    if len(parts) > 2:
+        try:
+            session_id = int(parts[2])
+            # Сохраняем session_id в state для возврата назад
+            await state.update_data(editor_session_id=session_id)
+        except (ValueError, IndexError):
+            pass
+    
     test = await get_test_by_id(session, test_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
@@ -1099,9 +1158,15 @@ async def process_edit_test_menu(callback: CallbackQuery, state: FSMContext, ses
         f"✏️ <b>Редактирование теста: «{test.name}»</b>\n\n"
         "Выбери, что ты хочешь изменить:",
         parse_mode="HTML",
-        reply_markup=get_test_edit_menu(test_id)
+        reply_markup=get_test_edit_menu(test_id, session_id=session_id)
     )
     await callback.answer()
+
+def _get_edit_test_callback(test_id: int, session_id: int = None) -> str:
+    """Вспомогательная функция для создания callback возврата к редактированию теста"""
+    if session_id:
+        return f"edit_test:{test_id}:{session_id}"
+    return f"edit_test:{test_id}"
 
 @router.callback_query(F.data.startswith("edit_test_meta:"))
 async def process_edit_test_meta(callback: CallbackQuery, state: FSMContext):
@@ -1109,11 +1174,15 @@ async def process_edit_test_meta(callback: CallbackQuery, state: FSMContext):
     test_id = int(callback.data.split(':')[1])
     await state.update_data(test_id_to_edit=test_id)
     
+    # Получаем session_id из state, если тест открыт из редактора траекторий
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    
     await callback.message.edit_text(
         "Введи новое <b>название</b> теста:",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_test:{test_id}")]
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=_get_edit_test_callback(test_id, session_id))]
         ])
     )
     await state.set_state(TestCreationStates.waiting_for_new_test_name)
@@ -1146,12 +1215,19 @@ async def process_skip_edit_description(callback: CallbackQuery, state: FSMConte
     await update_test(session, test_id, update_data)
     
     test = await get_test_by_id(session, test_id)
+    # Получаем session_id из state перед очисткой
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    await state.clear()
+    # Восстанавливаем session_id после очистки, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
+    
     await callback.message.edit_text(
         f"✅ Название теста <b>«{test.name}»</b> успешно обновлено. Описание удалено.",
         parse_mode="HTML",
-        reply_markup=get_test_edit_menu(test_id)
+        reply_markup=get_test_edit_menu(test_id, session_id=session_id)
     )
-    await state.clear()
     await callback.answer()
 
 @router.message(TestCreationStates.waiting_for_new_test_description)
@@ -1169,12 +1245,19 @@ async def process_new_test_description(message: Message, state: FSMContext, sess
     await update_test(session, test_id, update_data)
     
     test = await get_test_by_id(session, test_id)
+    # Получаем session_id из state перед очисткой
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    await state.clear()
+    # Восстанавливаем session_id после очистки, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
+    
     await message.answer(
         f"✅ Название и описание теста <b>«{test.name}»</b> успешно обновлены.",
         parse_mode="HTML",
-        reply_markup=get_test_edit_menu(test_id)
+        reply_markup=get_test_edit_menu(test_id, session_id=session_id)
     )
-    await state.clear()
 
 
 @router.callback_query(F.data.startswith("edit_test_threshold:"))
@@ -1188,12 +1271,16 @@ async def process_edit_threshold(callback: CallbackQuery, state: FSMContext, ses
         
     await state.update_data(test_id_to_edit=test_id)
     
+    # Получаем session_id из state, если тест открыт из редактора траекторий
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    
     await callback.message.edit_text(
-        f"Текущий проходной балл: <b>{test.threshold_score}</b> из <b>{test.max_score}</b>.\n\n"
-        f"Введи новый проходной балл (от 0.5 до {test.max_score}):",
+        f"Текущий проходной балл: <b>{test.threshold_score:.1f}</b> из <b>{test.max_score:.1f}</b>.\n\n"
+        f"Введи новый проходной балл (от 0.5 до {test.max_score:.1f}):",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_test:{test_id}")]
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=_get_edit_test_callback(test_id, session_id))]
         ])
     )
     await state.set_state(TestCreationStates.waiting_for_new_threshold)
@@ -1209,60 +1296,87 @@ async def process_new_threshold(message: Message, state: FSMContext, session: As
     try:
         new_threshold = float(message.text.replace(',', '.').strip())
         if not (0 < new_threshold <= test.max_score):
-            await message.answer(f"❌ Балл должен быть между 0 и {test.max_score}. Попробуй снова.")
+            await message.answer(f"❌ Балл должен быть между 0 и {test.max_score:.1f}. Попробуй снова.")
             return
     except ValueError:
         await message.answer("❌ Пожалуйста, введи число.")
         return
         
     await update_test(session, test_id, {"threshold_score": new_threshold})
-    await message.answer(
-        f"✅ Проходной балл для теста <b>«{test.name}»</b> обновлен на <b>{new_threshold}</b>.",
-        parse_mode="HTML",
-        reply_markup=get_test_edit_menu(test_id)
-    )
+    
+    # Получаем session_id из state перед очисткой
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
     await state.clear()
+    # Восстанавливаем session_id после очистки, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
+    
+    await message.answer(
+        f"✅ Проходной балл для теста <b>«{test.name}»</b> обновлен на <b>{new_threshold:.1f}</b>.",
+        parse_mode="HTML",
+        reply_markup=get_test_edit_menu(test_id, session_id=session_id)
+    )
 
 
-@router.callback_query(F.data.startswith("edit_test_questions:"))
-async def process_manage_questions(callback: CallbackQuery, session: AsyncSession):
-    """Показывает список вопросов для управления"""
-    test_id = int(callback.data.split(':')[1])
+async def _show_questions_list(message, state: FSMContext, session: AsyncSession, test_id: int):
+    """Внутренняя функция для отображения списка вопросов"""
+    # Получаем session_id из state, если тест открыт из редактора траекторий
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    
     questions = await get_test_questions(session, test_id)
     
     if not questions:
-        await callback.message.edit_text(
-            "В этом тесте пока нет вопросов. Ты можешь добавить их.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="➕ Добавить вопрос", callback_data=f"add_q_to_test:{test_id}")],
-                [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_test:{test_id}")]
-            ])
-        )
+        text = "В этом тесте пока нет вопросов. Ты можешь добавить их."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Добавить вопрос", callback_data=f"add_q_to_test:{test_id}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=_get_edit_test_callback(test_id, session_id))]
+        ])
+        
+        # Пытаемся отредактировать сообщение, если не получается - отправляем новое
+        try:
+            await message.edit_text(text, reply_markup=keyboard)
+        except Exception:
+            await message.answer(text, reply_markup=keyboard)
         return
-
+    
     text = "Выбери вопрос для редактирования или удаления:\n\n"
     buttons = []
     for q in questions:
-        text += f"<b>{q.question_number}.</b> {q.question_text[:50]}... ({q.points} б.)\n"
+        text += f"<b>{q.question_number}.</b> {q.question_text[:50]}... ({q.points:.1f} б.)\n"
         buttons.append([InlineKeyboardButton(
             text=f"Вопрос {q.question_number}",
             callback_data=f"select_question_for_edit:{q.id}"
         )])
         
-    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_test:{test_id}")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=_get_edit_test_callback(test_id, session_id))])
 
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    # Пытаемся отредактировать сообщение, если не получается - отправляем новое
+    try:
+        await message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    except Exception:
+        await message.answer(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+@router.callback_query(F.data.startswith("edit_test_questions:"))
+async def process_manage_questions(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Показывает список вопросов для управления"""
+    test_id = int(callback.data.split(':')[1])
+    await _show_questions_list(callback.message, state, session, test_id)
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("select_question_for_edit:"))
-async def select_question_for_edit(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
-    """Показывает меню действий для выбранного вопроса"""
-    question_id = int(callback.data.split(':')[1])
+async def _show_question_edit_menu(message, state: FSMContext, session: AsyncSession, question_id: int):
+    """Внутренняя функция для отображения меню редактирования вопроса"""
     question = await session.get(TestQuestion, question_id)
     if not question:
-        await callback.answer("❌ Вопрос не найден.", show_alert=True)
-        return
+        # Пытаемся отправить сообщение об ошибке
+        try:
+            await message.answer("❌ Вопрос не найден.")
+        except Exception:
+            pass
+        return False
         
     await state.update_data(question_id_to_edit=question_id, test_id_to_edit=question.test_id)
     
@@ -1276,22 +1390,42 @@ async def select_question_for_edit(callback: CallbackQuery, state: FSMContext, s
         options_text = "\n".join([f"  - {opt}" for opt in question.options])
         options_text = f"\n<b>Варианты:</b>\n{options_text}"
 
-    await callback.message.edit_text(
+    text = (
         f"<b>Вопрос {question.question_number}:</b> {question.question_text}\n"
         f"<b>Тип:</b> {question.question_type}\n"
         f"{options_text}\n"
         f"<b>Ответ:</b> {question.correct_answer}\n"
-        f"<b>Баллы:</b> {question.points}\n\n"
-        "Выбери действие:",
-        parse_mode="HTML",
-        reply_markup=get_question_management_keyboard(question_id, is_first, is_last)
+        f"<b>Баллы:</b> {question.points:.1f}\n\n"
+        "Выбери действие:"
     )
+
+    try:
+        await message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=get_question_management_keyboard(question_id, is_first, is_last)
+        )
+    except Exception:
+        await message.answer(
+            text,
+            parse_mode="HTML",
+            reply_markup=get_question_management_keyboard(question_id, is_first, is_last)
+        )
+    
     await state.set_state(TestCreationStates.waiting_for_question_action)
+    return True
+
+
+@router.callback_query(F.data.startswith("select_question_for_edit:"))
+async def select_question_for_edit(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Показывает меню действий для выбранного вопроса"""
+    question_id = int(callback.data.split(':')[1])
+    await _show_question_edit_menu(callback.message, state, session, question_id)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("move_q_"))
-async def move_question(callback: CallbackQuery, session: AsyncSession):
+async def move_question(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Перемещает вопрос вверх или вниз"""
     direction = callback.data.split(':')[0].split('_')[2]
     question_id = int(callback.data.split(':')[1])
@@ -1319,15 +1453,9 @@ async def move_question(callback: CallbackQuery, session: AsyncSession):
     # Обновляем нумерацию
     for i, q in enumerate(questions):
         q.question_number = i + 1
-        await session.commit()
         
     # Обновляем список вопросов
-    fake_callback = type('FakeCallback', (), {
-        'message': callback.message,
-        'data': f"edit_test_questions:{test_id}",
-        'answer': lambda: None
-    })()
-    await process_manage_questions(fake_callback, session)
+    await _show_questions_list(callback.message, state, session, test_id)
     await callback.answer("Порядок вопросов изменен")
 
 
@@ -1413,15 +1541,7 @@ async def save_new_question_text(message: Message, state: FSMContext, session: A
     
     await message.answer("✅ Текст вопроса обновлен.")
     # Возвращаемся к меню редактирования вопроса
-    fake_callback = type('FakeCallback', (), {
-        'message': type('FakeMessage', (), {
-            'edit_text': message.answer,
-            'answer': lambda: None
-        })(),
-        'data': f"select_question_for_edit:{question_id}",
-        'answer': lambda: None
-    })()
-    await select_question_for_edit(fake_callback, state, session)
+    await _show_question_edit_menu(message, state, session, question_id)
 
 
 @router.callback_query(F.data.startswith("edit_q_answer:"))
@@ -1492,15 +1612,7 @@ async def save_new_question_answer(message: Message, state: FSMContext, session:
     await update_question(session, question_id, {"correct_answer": new_answer})
     
     await message.answer("✅ Ответ на вопрос обновлен.")
-    fake_callback = type('FakeCallback', (), {
-        'message': type('FakeMessage', (), {
-            'edit_text': message.answer,
-            'answer': lambda: None
-        })(),
-        'data': f"select_question_for_edit:{question_id}",
-        'answer': lambda: None
-    })()
-    await select_question_for_edit(fake_callback, state, session)
+    await _show_question_edit_menu(message, state, session, question_id)
 
 
 @router.callback_query(F.data.startswith("edit_q_points:"))
@@ -1542,15 +1654,7 @@ async def save_new_question_points(message: Message, state: FSMContext, session:
     await update_question(session, question_id, {"points": points, "penalty_points": penalty})
     
     await message.answer("✅ Количество баллов обновлено. Максимальный балл за тест был автоматически пересчитан.")
-    fake_callback = type('FakeCallback', (), {
-        'message': type('FakeMessage', (), {
-            'edit_text': message.answer,
-            'answer': lambda: None
-        })(),
-        'data': f"select_question_for_edit:{question_id}",
-        'answer': lambda: None
-    })()
-    await select_question_for_edit(fake_callback, state, session)
+    await _show_question_edit_menu(message, state, session, question_id)
 
 
 @router.callback_query(F.data.startswith("delete_q:"))
@@ -1573,12 +1677,7 @@ async def process_delete_question(callback: CallbackQuery, state: FSMContext, se
     )
     
     # Возвращаемся к списку вопросов
-    fake_callback = type('FakeCallback', (), {
-        'message': callback.message,
-        'data': f"edit_test_questions:{test_id}",
-        'answer': lambda: None
-    })()
-    await process_manage_questions(fake_callback, session)
+    await _show_questions_list(callback.message, state, session, test_id)
     await callback.answer()
 
 
@@ -1587,12 +1686,7 @@ async def back_to_question_list(callback: CallbackQuery, state: FSMContext, sess
     """Возврат к списку вопросов"""
     data = await state.get_data()
     test_id = data['test_id_to_edit']
-    fake_callback = type('FakeCallback', (), {
-        'message': callback.message,
-        'data': f"edit_test_questions:{test_id}",
-        'answer': lambda: None
-    })()
-    await process_manage_questions(fake_callback, session)
+    await _show_questions_list(callback.message, state, session, test_id)
     await callback.answer()
 
 
@@ -1640,7 +1734,7 @@ async def process_test_results(callback: CallbackQuery, state: FSMContext, sessi
         for i, result in enumerate(results[:5]):
             user = await get_user_by_id(session, result.user_id)
             status = "✅" if result.is_passed else "❌"
-            results_text += f"\n{status} {user.full_name if user else 'Неизвестен'}: {result.score}/{result.max_possible_score} баллов"
+            results_text += f"\n{status} {user.full_name if user else 'Неизвестен'}: {result.score:.1f}/{result.max_possible_score:.1f} б."
         
         if total_attempts > 5:
             results_text += f"\n... и еще {total_attempts - 5} результатов"
@@ -1789,7 +1883,7 @@ async def process_test_filter(callback: CallbackQuery, session: AsyncSession):
     else:
         tests_list = "\n\n".join([
             f"<b>{i+1}. {test.name}</b>\n"
-            f"   🎯 Порог: {test.threshold_score}/{test.max_score} баллов\n"
+            f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
             f"   📅 Создан: {test.created_date.strftime('%d.%m.%Y')}\n"
             f"   👤 Создатель: {await get_creator_name(session, test.creator_id)}"
             for i, test in enumerate(tests)
@@ -1829,7 +1923,7 @@ async def process_back_to_tests(callback: CallbackQuery, state: FSMContext, sess
         else:
             tests_list = "\n\n".join([
                 f"<b>{i+1}. {test.name}</b>\n"
-                f"   🎯 Порог: {test.threshold_score}/{test.max_score} баллов\n"
+                f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
                 f"   📅 Создан: {test.created_date.strftime('%d.%m.%Y')}\n"
                 f"   👤 Создатель: {await get_creator_name(session, test.creator_id)}"
                 for i, test in enumerate(tests)
@@ -1882,6 +1976,7 @@ async def save_new_test_stage(callback: CallbackQuery, state: FSMContext, sessio
     
     data = await state.get_data()
     test_id = data['test_id_to_edit']
+    session_id = data.get('editor_session_id')  # Получаем session_id из state
     
     await update_test(session, test_id, {"stage_id": stage_id})
     
@@ -1891,15 +1986,23 @@ async def save_new_test_stage(callback: CallbackQuery, state: FSMContext, sessio
     await callback.message.edit_text(
         f"✅ Этап для теста <b>«{test.name}»</b> обновлен на <b>«{stage_name}»</b>.",
         parse_mode="HTML",
-        reply_markup=get_test_edit_menu(test_id)
+        reply_markup=get_test_edit_menu(test_id, session_id=session_id)
     )
+    # Восстанавливаем session_id после очистки, если был
     await state.clear()
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("preview_test:"))
 async def preview_test(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Предпросмотр теста"""
     test_id = int(callback.data.split(':')[1])
+    
+    # Получаем session_id из state, если тест открыт из редактора траекторий
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    
     test = await get_test_by_id(session, test_id)
     questions = await get_test_questions(session, test_id)
 
@@ -1911,14 +2014,14 @@ async def preview_test(callback: CallbackQuery, state: FSMContext, session: Asyn
         await callback.message.edit_text(
             f"👁️ <b>Предпросмотр теста: «{test.name}»</b>\n\n"
             "📝 <b>Описание:</b> " + (test.description or "Не указано") + "\n"
-            f"🎯 <b>Проходной балл:</b> {test.threshold_score} из {test.max_score} баллов\n"
+            f"🎯 <b>Проходной балл:</b> {test.threshold_score:.1f} из {test.max_score:.1f} б.\n"
             f"🔗 <b>Материалы:</b> {'Есть' if test.material_link else 'Отсутствуют'}\n\n"
             "❓ <b>Вопросы:</b> Пока не добавлено ни одного вопроса.\n\n"
             "💡 Добавь вопросы через раздел «Управление вопросами», чтобы тест стал полноценным.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="➕ Добавить вопрос", callback_data=f"add_q_to_test:{test_id}")],
-                [InlineKeyboardButton(text="⬅️ Назад к редактированию", callback_data=f"edit_test:{test_id}")]
+                [InlineKeyboardButton(text="⬅️ Назад к редактированию", callback_data=_get_edit_test_callback(test_id, session_id))]
             ])
         )
         await callback.answer()
@@ -1926,7 +2029,7 @@ async def preview_test(callback: CallbackQuery, state: FSMContext, session: Asyn
 
     preview_text = f"👁️ <b>Предпросмотр теста: «{test.name}»</b>\n\n"
     for q in questions:
-        preview_text += f"<b>Вопрос {q.question_number} ({q.points} б. / штраф: {q.penalty_points} б.):</b> {q.question_text}\n"
+        preview_text += f"<b>Вопрос {q.question_number} ({q.points:.1f} б. / штраф: {q.penalty_points:.1f} б.):</b> {q.question_text}\n"
         if q.options:
             for i, opt in enumerate(q.options):
                 prefix = "✔️" if opt == q.correct_answer else "➖"
@@ -1939,7 +2042,7 @@ async def preview_test(callback: CallbackQuery, state: FSMContext, session: Asyn
         preview_text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад к редактированию", callback_data=f"edit_test:{test_id}")]
+            [InlineKeyboardButton(text="⬅️ Назад к редактированию", callback_data=_get_edit_test_callback(test_id, session_id))]
         ])
     )
     await callback.answer()
@@ -1948,6 +2051,11 @@ async def preview_test(callback: CallbackQuery, state: FSMContext, session: Asyn
 async def process_edit_test_materials(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Запрашивает новую ссылку на материалы"""
     test_id = int(callback.data.split(':')[1])
+    
+    # Получаем session_id из state, если тест открыт из редактора траекторий
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    
     test = await get_test_by_id(session, test_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
@@ -1961,7 +2069,7 @@ async def process_edit_test_materials(callback: CallbackQuery, state: FSMContext
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🗑️ Удалить материалы", callback_data="edit_materials:delete")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_test:{test_id}")]
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=_get_edit_test_callback(test_id, session_id))]
         ])
     )
     await state.set_state(TestCreationStates.waiting_for_new_materials)
@@ -1981,12 +2089,19 @@ async def process_delete_materials(callback: CallbackQuery, state: FSMContext, s
     await update_test(session, test_id, update_data)
     
     test = await get_test_by_id(session, test_id)
+    # Получаем session_id из state перед очисткой
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    await state.clear()
+    # Восстанавливаем session_id после очистки, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
+    
     await callback.message.edit_text(
         f"✅ Материалы для теста <b>«{test.name}»</b> удалены.",
         parse_mode="HTML",
-        reply_markup=get_test_edit_menu(test_id)
+        reply_markup=get_test_edit_menu(test_id, session_id=session_id)
     )
-    await state.clear()
     await callback.answer()
 
 @router.message(TestCreationStates.waiting_for_new_materials)
@@ -2071,17 +2186,29 @@ async def save_new_materials(message: Message, state: FSMContext, session: Async
     await update_test(session, test_id, update_data)
     
     test = await get_test_by_id(session, test_id)
+    # Получаем session_id из state перед очисткой
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    await state.clear()
+    # Восстанавливаем session_id после очистки, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
+    
     await message.answer(
         f"✅ Материалы для теста <b>«{test.name}»</b> обновлены.",
         parse_mode="HTML",
-        reply_markup=get_test_edit_menu(test_id)
+        reply_markup=get_test_edit_menu(test_id, session_id=session_id)
     )
-    await state.clear()
 
 @router.callback_query(F.data.startswith("edit_test_settings:"))
-async def process_test_settings(callback: CallbackQuery, session: AsyncSession):
+async def process_test_settings(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показывает меню настроек теста"""
     test_id = int(callback.data.split(':')[1])
+    
+    # Получаем session_id из state, если тест открыт из редактора траекторий
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    
     test = await get_test_by_id(session, test_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
@@ -2091,14 +2218,19 @@ async def process_test_settings(callback: CallbackQuery, session: AsyncSession):
         "⚙️ <b>Настройки теста</b>\n\n"
         "Здесь ты можешь изменить параметры прохождения теста.",
         parse_mode="HTML",
-        reply_markup=get_test_settings_keyboard(test.id, test.shuffle_questions, test.max_attempts)
+        reply_markup=get_test_settings_keyboard(test.id, test.shuffle_questions, test.max_attempts, session_id=session_id)
     )
     await callback.answer()
 
 @router.callback_query(F.data.startswith("toggle_shuffle:"))
-async def toggle_shuffle_questions(callback: CallbackQuery, session: AsyncSession):
+async def toggle_shuffle_questions(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Переключает перемешивание вопросов"""
     test_id = int(callback.data.split(':')[1])
+    
+    # Получаем session_id из state, если тест открыт из редактора траекторий
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    
     test = await get_test_by_id(session, test_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
@@ -2117,7 +2249,7 @@ async def toggle_shuffle_questions(callback: CallbackQuery, session: AsyncSessio
         f"<b>Перемешивание вопросов:</b>\n{shuffle_status}\n\n"
         "Здесь ты можешь изменить параметры прохождения теста.",
         parse_mode="HTML",
-        reply_markup=get_test_settings_keyboard(test.id, test.shuffle_questions, test.max_attempts)
+        reply_markup=get_test_settings_keyboard(test.id, test.shuffle_questions, test.max_attempts, session_id=session_id)
     )
     await callback.answer()
 
@@ -2176,15 +2308,22 @@ async def save_new_attempts(message: Message, state: FSMContext, session: AsyncS
     await update_test(session, test_id, {"max_attempts": attempts})
     
     test = await get_test_by_id(session, test_id)
+    # Получаем session_id из state перед очисткой
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
+    await state.clear()
+    # Восстанавливаем session_id после очистки, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
+    
     await message.answer(
         f"✅ Количество попыток для теста <b>«{test.name}»</b> обновлено.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⚙️ К настройкам", callback_data=f"edit_test_settings:{test_id}")],
-            [InlineKeyboardButton(text="✏️ К редактированию", callback_data=f"edit_test:{test_id}")]
+            [InlineKeyboardButton(text="✏️ К редактированию", callback_data=_get_edit_test_callback(test_id, session_id))]
         ])
     )
-    await state.clear()
 
 @router.callback_query(F.data.startswith("add_q_to_test:"))
 async def add_question_to_test_handler(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
@@ -2197,10 +2336,22 @@ async def add_question_to_test_handler(callback: CallbackQuery, state: FSMContex
 
     questions = await get_test_questions(session, test_id)
     
+    # Преобразуем существующие вопросы в формат словарей для совместимости
+    questions_dict = []
+    for q in questions:
+        questions_dict.append({
+            "type": q.question_type,
+            "text": q.question_text,
+            "options": q.options,
+            "answer": q.correct_answer,
+            "points": q.points
+        })
+    
     await state.update_data(
         test_id_to_edit=test_id, 
-        questions=questions, 
-        current_question_number=len(questions) + 1
+        questions=questions_dict, 
+        initial_questions_count=len(questions_dict),  # Сохраняем изначальное количество
+        current_question_number=len(questions_dict) + 1
     )
     
     await callback.message.edit_text(
@@ -2218,51 +2369,102 @@ async def add_question_to_test_handler(callback: CallbackQuery, state: FSMContex
 @router.callback_query(F.data.startswith("edit_test:"), TestCreationStates.waiting_for_new_test_name)
 async def cancel_test_name_edit(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Отмена редактирования названия теста"""
-    test_id = int(callback.data.split(':')[1])
+    parts = callback.data.split(':')
+    test_id = int(parts[1])
+    # Сохраняем session_id перед очисткой, если был
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
     await state.clear()
+    # Восстанавливаем session_id, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
+        # Обновляем callback_data чтобы передать session_id
+        callback.data = f"edit_test:{test_id}:{session_id}"
     # Перенаправляем обратно к меню редактирования
     await process_edit_test_menu(callback, state, session)
 
 @router.callback_query(F.data.startswith("edit_test:"), TestCreationStates.waiting_for_new_threshold)
 async def cancel_threshold_edit(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Отмена редактирования порога"""
-    test_id = int(callback.data.split(':')[1])
+    parts = callback.data.split(':')
+    test_id = int(parts[1])
+    # Сохраняем session_id перед очисткой, если был
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
     await state.clear()
+    # Восстанавливаем session_id, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
+        # Обновляем callback_data чтобы передать session_id
+        callback.data = f"edit_test:{test_id}:{session_id}"
     await process_edit_test_menu(callback, state, session)
 
 @router.callback_query(F.data.startswith("edit_test:"), TestCreationStates.waiting_for_new_materials)
 async def cancel_materials_edit(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Отмена редактирования материалов"""
-    test_id = int(callback.data.split(':')[1])
+    parts = callback.data.split(':')
+    test_id = int(parts[1])
+    # Сохраняем session_id перед очисткой, если был
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
     await state.clear()
+    # Восстанавливаем session_id, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
+        # Обновляем callback_data чтобы передать session_id
+        callback.data = f"edit_test:{test_id}:{session_id}"
     await process_edit_test_menu(callback, state, session)
 
 @router.callback_query(F.data.startswith("edit_test_settings:"), TestCreationStates.waiting_for_new_attempts)
 async def cancel_attempts_edit(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Отмена редактирования количества попыток"""
     test_id = int(callback.data.split(':')[1])
+    # Сохраняем session_id перед очисткой, если был
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
     await state.clear()
-    await process_test_settings(callback, session)
+    # Восстанавливаем session_id, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
+    await process_test_settings(callback, state, session)
 
 @router.callback_query(F.data.startswith("select_question_for_edit:"), TestCreationStates.waiting_for_question_edit)
 async def cancel_question_text_edit(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Отмена редактирования текста вопроса"""
     question_id = int(callback.data.split(':')[1])
+    # Сохраняем session_id перед очисткой, если был
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
     await state.clear()
+    # Восстанавливаем session_id после очистки, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
     await select_question_for_edit(callback, state, session)
 
 @router.callback_query(F.data.startswith("select_question_for_edit:"), TestCreationStates.waiting_for_points_edit)
 async def cancel_question_points_edit(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Отмена редактирования баллов за вопрос"""
     question_id = int(callback.data.split(':')[1])
+    # Сохраняем session_id перед очисткой, если был
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
     await state.clear()
+    # Восстанавливаем session_id после очистки, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
     await select_question_for_edit(callback, state, session)
 
 @router.callback_query(F.data.startswith("select_question_for_edit:"), TestCreationStates.waiting_for_answer_edit)
 async def cancel_question_answer_edit(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Отмена редактирования ответа на вопрос"""
     question_id = int(callback.data.split(':')[1])
+    # Сохраняем session_id перед очисткой, если был
+    data = await state.get_data()
+    session_id = data.get('editor_session_id')
     await state.clear()
+    # Восстанавливаем session_id после очистки, если был
+    if session_id:
+        await state.update_data(editor_session_id=session_id)
     await select_question_for_edit(callback, state, session)
 
 @router.callback_query(F.data == "cancel_current_question")
@@ -2308,14 +2510,14 @@ async def cancel_question_creation(callback: CallbackQuery, state: FSMContext, s
     
     if test_id:
         # Если добавляли вопрос к существующему тесту - возвращаемся к списку вопросов
+        # Сохраняем session_id перед очисткой
+        data = await state.get_data()
+        session_id = data.get('editor_session_id')
         await state.clear()
-        new_callback_data = f"edit_test_questions:{test_id}"
-        fake_callback = type('FakeCallback', (), {
-            'message': callback.message,
-            'data': f"edit_test_questions:{test_id}",
-            'answer': lambda: None
-        })()
-        await process_manage_questions(fake_callback, session)
+        # Восстанавливаем session_id после очистки, если был
+        if session_id:
+            await state.update_data(editor_session_id=session_id)
+        await _show_questions_list(callback.message, state, session, test_id)
     elif questions:
         # Если создаем новый тест и уже есть добавленные вопросы - 
         # возвращаемся к выбору: добавить еще вопрос или завершить
@@ -2335,7 +2537,7 @@ async def cancel_question_creation(callback: CallbackQuery, state: FSMContext, s
             f"📋 <b>Создание теста продолжается!</b>\n\n"
             f"📊 Текущая статистика теста:\n"
             f" • Количество вопросов: {total_questions}\n"
-            f" • Максимальный балл: {total_score}\n\n"
+            f" • Максимальный балл: {total_score:.1f}\n\n"
             "❓ Хочешь добавить еще один вопрос или завершить создание теста?",
             parse_mode="HTML",
             reply_markup=get_yes_no_keyboard("more_questions")

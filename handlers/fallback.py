@@ -277,7 +277,7 @@ async def handle_unexpected_threshold_input(message: Message, state: FSMContext)
     
     await message.answer(
         f"❌ <b>Некорректный проходной балл</b>\n\n"
-        f"Проходной балл должен быть числом от 0.5 до {max_score}.\n"
+        f"Проходной балл должен быть числом от 0.5 до {max_score:.1f}.\n"
         f"Введи корректное значение проходного балла:",
         parse_mode="HTML"
     )

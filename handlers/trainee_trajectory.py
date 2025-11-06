@@ -742,7 +742,7 @@ async def callback_take_test(callback: CallbackQuery, state: FSMContext, session
         # Формируем информацию о тесте
         test_info = f"""📌 <b>{test.name}</b>
 
-<b>Порог:</b> {test.threshold_score}/{test.max_score} баллов
+<b>Порог:</b> {test.threshold_score:.1f}/{test.max_score:.1f} б.
 
 {test.description or 'Описание отсутствует'}
 

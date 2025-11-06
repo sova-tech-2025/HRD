@@ -245,10 +245,6 @@ async def process_folder_name(message: Message, state: FSMContext, session: Asyn
             await message.answer("❌ Не удалось создать папку. Возможно, папка с таким названием уже существует.")
             return
             
-        try:
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
             logger.error(f"Ошибка БД при commit: {e}")
             await message.answer("❌ Произошла ошибка при сохранении данных")
             return
@@ -881,10 +877,6 @@ async def callback_save_material(callback: CallbackQuery, state: FSMContext, ses
             await callback.message.edit_text("❌ Не удалось создать материал")
             return
             
-        try:
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
             logger.error(f"Ошибка БД при commit: {e}")
             await callback.message.edit_text("❌ Произошла ошибка при сохранении данных")
             return
@@ -1346,10 +1338,6 @@ async def callback_confirm_delete_material(callback: CallbackQuery, state: FSMCo
             await callback.message.edit_text("❌ Не удалось удалить материал")
             return
             
-        try:
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
             logger.error(f"Ошибка БД при commit: {e}")
             await callback.message.edit_text("❌ Произошла ошибка при сохранении данных")
             return
@@ -1633,10 +1621,6 @@ async def callback_save_access(callback: CallbackQuery, state: FSMContext, sessi
             await callback.message.edit_text("❌ Не удалось сохранить настройки доступа")
             return
             
-        try:
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
             logger.error(f"Ошибка БД при commit: {e}")
             await callback.message.edit_text("❌ Произошла ошибка при сохранении данных")
             return
@@ -1774,10 +1758,6 @@ async def callback_confirm_rename(callback: CallbackQuery, state: FSMContext, se
             await callback.message.edit_text("❌ Не удалось переименовать папку. Возможно, папка с таким названием уже существует.")
             return
             
-        try:
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
             logger.error(f"Ошибка БД при commit: {e}")
             await callback.message.edit_text("❌ Произошла ошибка при сохранении данных")
             return
@@ -1910,10 +1890,6 @@ async def callback_confirm_delete_folder(callback: CallbackQuery, state: FSMCont
             await callback.message.edit_text("❌ Не удалось удалить папку")
             return
             
-        try:
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
             logger.error(f"Ошибка БД при commit: {e}")
             await callback.message.edit_text("❌ Произошла ошибка при сохранении данных")
             return

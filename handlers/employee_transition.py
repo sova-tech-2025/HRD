@@ -50,8 +50,6 @@ async def callback_become_employee(callback: CallbackQuery, state: FSMContext, s
                 "Обратись к администратору."
             )
             return
-            
-        await session.commit()
         
         # Показываем ЛК сотрудника согласно ТЗ (шаг 12-8)
         await show_employee_profile(callback, session, show_congratulation=True)

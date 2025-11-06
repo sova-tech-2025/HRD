@@ -897,7 +897,7 @@ async def process_question_points(message: Message, state: FSMContext, session: 
             f"✅ Вопрос №{len(existing_questions)} добавлен!\n"
             "Текущая статистика теста:\n"
             f" • Количество вопросов: {len(existing_questions)}\n"
-            f" • Максимальный балл: {total_score}\n"
+            f" • Максимальный балл: {total_score:.1f}\n"
             "❓ Хотите добавить еще один вопрос?"
         )
         
@@ -959,8 +959,8 @@ async def callback_finish_questions(callback: CallbackQuery, state: FSMContext, 
             f"{trajectory_progress}"
             "🟡<b>Создание теста</b>\n\n"
             "✅ Добавление вопросов завершено.\n"
-            f"Максимальный балл за тест: {total_score}\n"
-            f"Теперь введи проходной балл для этого теста (число от 0.5 до {total_score}):"
+            f"Максимальный балл за тест: {total_score:.1f}\n"
+            f"Теперь введи проходной балл для этого теста (число от 0.5 до {total_score:.1f}):"
         )
         
         await callback.message.edit_text(text, parse_mode="HTML")
@@ -981,7 +981,7 @@ async def process_test_threshold(message: Message, state: FSMContext, session: A
             total_score = data.get('new_test_total_score', 0)
             
             if threshold < 0.5 or threshold > total_score:
-                raise ValueError(f"Проходной балл должен быть от 0.5 до {total_score}")
+                raise ValueError(f"Проходной балл должен быть от 0.5 до {total_score:.1f}")
         except ValueError as e:
             await message.answer(f"❌ {str(e)}")
             return
@@ -1033,8 +1033,8 @@ async def process_test_threshold(message: Message, state: FSMContext, session: A
             "🟡<b>Добавить тест к Сессии?</b>\n\n"
             f"✅ Тест «{test.name}» успешно создан и добавлен к Сессии!\n"
             f"📝 Вопросов добавлено: {len(questions)}\n"
-            f"📊 Максимальный балл: {data.get('new_test_total_score')}\n"
-            f"🎯 Проходной балл: {threshold} ({percentage:.1f}%)"
+            f"📊 Максимальный балл: {data.get('new_test_total_score'):.1f}\n"
+            f"🎯 Проходной балл: {threshold:.1f} ({percentage:.1f}%)"
         )
         
         # Получаем обновленный список тестов
@@ -1634,23 +1634,18 @@ async def callback_edit_trajectory(callback: CallbackQuery, state: FSMContext, s
             "Выбери траекторию для просмотра:"
         )
         
-        # Создаем клавиатуру с траекториями
-        keyboard = []
-        for path in learning_paths:
-            keyboard.append([InlineKeyboardButton(
-                text=f"{path.name} (Группа: {path.group.name if path.group else 'Не указана'})",
-                callback_data=f"edit_path:{path.id}"
-            )])
-        
-        keyboard.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+        # Создаем клавиатуру с пагинацией (5 траекторий на страницу)
+        from keyboards.keyboards import get_trajectory_selection_for_editor_keyboard
+        keyboard = get_trajectory_selection_for_editor_keyboard(learning_paths, page=0, per_page=5)
         
         await callback.message.edit_text(
             text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+            reply_markup=keyboard,
             parse_mode="HTML"
         )
         
         await state.set_state(LearningPathStates.waiting_for_trajectory_selection)
+        await state.update_data(all_trajectories=learning_paths, trajectory_page=0)
         
     except Exception as e:
         await callback.answer("Произошла ошибка")
@@ -1665,55 +1660,36 @@ async def callback_back_to_trajectories(callback: CallbackQuery, state: FSMConte
     await callback_edit_trajectory(callback, state, session)
 
 
-@router.callback_query(F.data.startswith("edit_path:"), LearningPathStates.waiting_for_trajectory_selection)
-async def callback_edit_specific_trajectory(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
-    """Просмотр конкретной траектории"""
+@router.callback_query(F.data.startswith("trajectories_page_prev:") | F.data.startswith("trajectories_page_next:"), LearningPathStates.waiting_for_trajectory_selection)
+async def callback_trajectories_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Навигация по страницам списка траекторий"""
     try:
         await callback.answer()
         
-        path_id = int(callback.data.split(":")[1])
+        parts = callback.data.split(":")
+        page = int(parts[1])
         
-        # Получаем траекторию
-        learning_path = await get_learning_path_by_id(session, path_id)
-        if not learning_path:
-            await callback.answer("Траектория не найдена", show_alert=True)
-            return
+        # Пытаемся получить траектории из кэша state
+        data = await state.get_data()
+        learning_paths = data.get('all_trajectories')
         
-        # Генерируем полную структуру траектории  
-        trajectory_structure = ""
-        if hasattr(learning_path, 'stages'):
-            for stage in learning_path.stages:
-                trajectory_structure += f"🟢<b>Этап {stage.order_number}:</b> {stage.name}\n"
-                if hasattr(stage, 'sessions'):
-                    for session in stage.sessions:
-                        trajectory_structure += f"🟢<b>Сессия {session.order_number}:</b> {session.name}\n"
-                        if hasattr(session, 'tests'):
-                            for i, test in enumerate(session.tests, 1):
-                                trajectory_structure += f"🟢<b>Тест {i}:</b> {test.name}\n"
-        
-        attestation_info = ""
-        if hasattr(learning_path, 'attestation') and learning_path.attestation:
-            attestation_info = f"🔍🟢<b>Аттестация:</b> {learning_path.attestation.name}\n"
-        
-        group_info = ""
-        if hasattr(learning_path, 'group') and learning_path.group:
-            group_info = f"🗂️<b>Группа:</b> {learning_path.group.name}\n"
+        # Если нет в кэше - получаем из БД
+        if not learning_paths:
+            learning_paths = await get_all_learning_paths(session)
+            if not learning_paths:
+                await callback.answer("Нет созданных траекторий для просмотра", show_alert=True)
+                return
+            await state.update_data(all_trajectories=learning_paths)
         
         text = (
             "🗺️<b>РЕДАКТОР ТРАЕКТОРИЙ</b>🗺️\n"
-            "👁️Просмотр траектории\n\n"
-            f"🟢<b>Название траектории:</b> {learning_path.name}\n"
-            f"{trajectory_structure}"
-            f"{attestation_info}"
-            f"{group_info}\n"
-            "📋 <b>Полная структура траектории</b>\n\n"
-            "💡 <i>Траектория создана и готова к использованию наставниками</i>"
+            "👁️Просмотр траекторий\n\n"
+            "Выбери траекторию для просмотра:"
         )
         
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="↩️ Назад к траекториям", callback_data="edit_trajectory")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ])
+        # Создаем клавиатуру с пагинацией (5 траекторий на страницу)
+        from keyboards.keyboards import get_trajectory_selection_for_editor_keyboard
+        keyboard = get_trajectory_selection_for_editor_keyboard(learning_paths, page=page, per_page=5)
         
         await callback.message.edit_text(
             text,
@@ -1721,8 +1697,32 @@ async def callback_edit_specific_trajectory(callback: CallbackQuery, state: FSMC
             parse_mode="HTML"
         )
         
-        await state.set_state(LearningPathStates.editing_trajectory)
+        await state.update_data(trajectory_page=page)
         
+    except (ValueError, IndexError) as e:
+        await callback.answer("Ошибка при обработке данных", show_alert=True)
+        log_user_error(callback.from_user.id, "trajectories_page_error", f"Invalid data: {callback.data}, {str(e)}")
+    except Exception as e:
+        await callback.answer("Произошла ошибка")
+        log_user_error(callback.from_user.id, "trajectories_page_error", str(e))
+
+
+@router.callback_query(F.data.startswith("edit_path:"), LearningPathStates.waiting_for_trajectory_selection)
+async def callback_edit_specific_trajectory(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Открытие редактора траектории"""
+    try:
+        await callback.answer()
+        
+        path_id = int(callback.data.split(":")[1])
+        
+        # Перенаправляем в редактор траекторий
+        from handlers.trajectory_editor import _show_editor_main_menu
+        
+        await _show_editor_main_menu(callback.message, state, session, path_id, callback.from_user.id)
+        
+    except (ValueError, IndexError) as e:
+        await callback.answer("Ошибка при обработке данных", show_alert=True)
+        log_user_error(callback.from_user.id, "edit_specific_trajectory_error", f"Invalid data: {callback.data}, {str(e)}")
     except Exception as e:
         await callback.answer("Произошла ошибка")
         log_user_error(callback.from_user.id, "edit_specific_trajectory_error", str(e))
@@ -1997,7 +1997,7 @@ async def process_attestation_passing_score(message: Message, state: FSMContext,
             f"🟢<b>Название:</b> {attestation_name}\n\n"
             f"✅ Аттестация «{attestation_name}» успешно создана!\n"
             f"📝 Вопросов добавлено: {len(questions)}\n"
-            f"🎯 Проходной балл: {passing_score}\n\n"
+            f"🎯 Проходной балл: {passing_score:.1f}\n\n"
             "Теперь ты можешь добавить данную аттестацию к любой траектории"
         )
         
@@ -2101,8 +2101,8 @@ async def render_attestation_page(session: AsyncSession, attestation_id: int, pa
         f"📋 <b>Аттестация:</b> {attestation.name}\n"
         f"📝 <b>Всего вопросов:</b> {total_questions}\n\n"
         f"{questions_text}"
-        f"🎯 <b>Проходной балл:</b> {attestation.passing_score}\n"
-        f"📊 <b>Максимальный балл:</b> {getattr(attestation, 'max_score', 20)}\n\n"
+        f"🎯 <b>Проходной балл:</b> {attestation.passing_score:.1f}\n"
+        f"📊 <b>Максимальный балл:</b> {getattr(attestation, 'max_score', 20):.1f}\n\n"
         f"{trajectories_info}"
     )
     
@@ -2250,7 +2250,7 @@ async def callback_delete_attestation_confirm(callback: CallbackQuery, state: FS
                 "⚠️ <b>ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ</b> ⚠️\n\n"
                 f"📋 <b>Аттестация:</b> {attestation.name}\n"
                 f"📝 <b>Количество вопросов:</b> {questions_count}\n"
-                f"🎯 <b>Проходной балл:</b> {attestation.passing_score}\n\n"
+                f"🎯 <b>Проходной балл:</b> {attestation.passing_score:.1f}\n\n"
                 "❗ <b>Ты уверен, что хочешь удалить эту аттестацию?</b>\n\n"
                 "⚠️ <i>Это действие нельзя будет отменить!</i>"
             )

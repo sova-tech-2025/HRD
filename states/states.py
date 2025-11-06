@@ -209,6 +209,40 @@ class LearningPathStates(StatesGroup):
     waiting_for_trajectory_selection = State()
     editing_trajectory = State()
     
+    # ===== РЕДАКТОР ТРАЕКТОРИЙ =====
+    # Основное меню редактора
+    editor_main_menu = State()
+    
+    # Редактирование основной информации траектории
+    editing_trajectory_name = State()
+    selecting_group_for_trajectory = State()
+    selecting_attestation_for_trajectory = State()
+    removing_attestation_confirmation = State()
+    
+    # Управление этапами в редакторе
+    selecting_stage_for_edit = State()
+    editing_stage = State()
+    editing_stage_name = State()
+    creating_stage_in_editor = State()
+    creating_stage_name = State()
+    creating_stage_description = State()
+    deleting_stage_confirmation = State()
+    
+    # Управление сессиями в редакторе
+    selecting_session_for_edit = State()
+    editing_session = State()
+    editing_session_name = State()
+    editing_session_description = State()
+    creating_session_in_editor = State()
+    creating_session_name = State()
+    creating_session_description = State()
+    deleting_session_confirmation = State()
+    
+    # Управление тестами в сессии
+    managing_session_tests = State()
+    selecting_test_to_add = State()
+    removing_test_confirmation = State()
+    
     # Удаление траекторий
     trajectory_deletion = State()
 

@@ -105,7 +105,7 @@ async def process_user_selection(callback: CallbackQuery, state: FSMContext, ses
     <b>Статистика стажера:</b>
     👨‍🏫 Наставник: {mentor.full_name if mentor else 'Не назначен'}
     ✅ Пройдено тестов: {passed_count}/{len(results)}
-    📊 Средний балл: {avg_score:.2f}
+    📊 Средний балл: {avg_score:.1f}
     """
 
     user_info = f"""

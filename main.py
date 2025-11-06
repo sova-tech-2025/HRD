@@ -8,7 +8,7 @@ from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN, LOG_LEVEL
 from database.db import init_db
-from handlers import auth, registration, common, admin, role_permissions, tests, mentorship, test_taking, groups, objects, user_activation, user_edit, learning_paths, mentor_assignment, trainee_trajectory, manager_attestation, manager_menu, employee_transition, broadcast, knowledge_base, fallback
+from handlers import auth, registration, common, admin, role_permissions, tests, mentorship, test_taking, groups, objects, user_activation, user_edit, learning_paths, trajectory_editor, mentor_assignment, trainee_trajectory, manager_attestation, manager_menu, employee_transition, broadcast, knowledge_base, fallback
 from middlewares.db_middleware import DatabaseMiddleware
 from middlewares.role_middleware import RoleMiddleware
 from middlewares.bot_middleware import BotMiddleware
@@ -45,6 +45,7 @@ dp.include_router(groups.router)
 dp.include_router(objects.router)
 dp.include_router(user_edit.router)  # ПОСЛЕ groups/objects, т.к. имеет глобальный обработчик cancel_edit
 dp.include_router(learning_paths.router)  # Траектории обучения
+dp.include_router(trajectory_editor.router)  # Редактор траекторий
 dp.include_router(knowledge_base.router)  # База знаний (Task 9)
 dp.include_router(employee_transition.router)  # Переход стажеров в сотрудники (Task 7)
 dp.include_router(common.router)

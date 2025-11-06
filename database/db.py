@@ -521,7 +521,16 @@ async def get_all_users(session: AsyncSession) -> List[User]:
     """ Получение списка всех пользователей"""
 
     try:
-        result = await session.execute(select(User).order_by(User.registration_date.desc()))
+        result = await session.execute(
+            select(User)
+            .options(
+                selectinload(User.roles),
+                selectinload(User.groups),
+                selectinload(User.internship_object),
+                selectinload(User.work_object)
+            )
+            .order_by(User.registration_date.desc())
+        )
         return result.scalars().all()
     except Exception as e:
         logger.error(f"Ошибка получения всех пользователей: {e}")
@@ -882,7 +891,12 @@ async def get_all_groups(session: AsyncSession) -> List[Group]:
     """Получение всех активных групп"""
     try:
         result = await session.execute(
-            select(Group).where(Group.is_active == True).order_by(Group.name)
+            select(Group)
+            .options(
+                selectinload(Group.users).selectinload(User.roles)
+            )
+            .where(Group.is_active == True)
+            .order_by(Group.name)
         )
         return result.scalars().all()
     except Exception as e:
@@ -1209,7 +1223,12 @@ async def get_all_objects(session: AsyncSession) -> List[Object]:
     """Получение всех объектов"""
     try:
         result = await session.execute(
-            select(Object).where(Object.is_active == True).order_by(Object.name)
+            select(Object)
+            .options(
+                selectinload(Object.users).selectinload(User.roles)
+            )
+            .where(Object.is_active == True)
+            .order_by(Object.name)
         )
         return result.scalars().all()
     except Exception as e:
@@ -4090,56 +4109,7 @@ async def create_attestation(session: AsyncSession, name: str, passing_score: fl
         logger.error(f"Ошибка создания аттестации: {e}")
         await session.rollback()
         
-        # Если БД не работает, добавляем в глобальное хранилище
-        try:
-            # Создаем mock аттестацию
-            class MockAttestation:
-                def __init__(self, id, name, passing_score):
-                    self.id = id
-                    self.name = name 
-                    self.passing_score = passing_score
-                    self.is_active = True
-                    self.questions = []
-            
-            # Генерируем ID для новой аттестации
-            if not hasattr(get_all_attestations, '_created_attestations'):
-                get_all_attestations._created_attestations = []
-            
-            new_id = 100 + len(get_all_attestations._created_attestations)
-            
-            # Создаем mock аттестацию с вопросами
-            class MockAttestationWithQuestions:
-                def __init__(self, id, name, passing_score, questions_data):
-                    self.id = id
-                    self.name = name 
-                    self.passing_score = passing_score
-                    self.is_active = True
-                    self.max_score = sum(q.get('max_points', 10) for q in questions_data)
-                    
-                    # Создаем mock вопросы
-                    class MockQuestion:
-                        def __init__(self, text, max_points, number):
-                            self.question_text = text
-                            self.max_points = max_points
-                            self.question_number = number
-                    
-                    self.questions = [MockQuestion(q.get('text', ''), q.get('max_points', 10), q.get('number', i)) 
-                                    for i, q in enumerate(questions_data, 1)]
-            
-            # Сохраняем данные о вопросах для mock аттестации
-            if not hasattr(create_attestation, '_pending_questions'):
-                create_attestation._pending_questions = {}
-                
-            questions_data = create_attestation._pending_questions.get('current', [])
-            mock_attestation = MockAttestationWithQuestions(new_id, name, passing_score, questions_data)
-            get_all_attestations._created_attestations.append(mock_attestation)
-            
-            logger.info(f"Mock аттестация '{name}' добавлена с ID: {new_id}")
-            return mock_attestation
-            
-        except Exception as mock_error:
-            logger.error(f"Ошибка создания mock аттестации: {mock_error}")
-            return None
+        return None
 
 
 async def add_attestation_question(session: AsyncSession, attestation_id: int, 
@@ -4187,26 +4157,8 @@ async def get_all_attestations(session: AsyncSession) -> List[Attestation]:
             attestations = result.scalars().all()
             return list(attestations)
         except Exception as table_error:
-            # Если таблица не существует, возвращаем тестовые данные
-            logger.warning(f"Таблица аттестаций еще не создана: {table_error}")
-            
-            # Создаем mock аттестации
-            class MockAttestation:
-                def __init__(self, id, name, passing_score):
-                    self.id = id
-                    self.name = name
-                    self.passing_score = passing_score
-                    self.is_active = True
-                    self.questions = []
-            
-            # Базовые mock аттестации + созданные пользователем
-            base_attestations = []
-            
-            # Добавляем созданные аттестации из глобального хранилища
-            if hasattr(get_all_attestations, '_created_attestations'):
-                base_attestations.extend(get_all_attestations._created_attestations)
-            
-            return base_attestations
+            logger.error(f"Ошибка получения аттестаций (таблица не существует?): {table_error}")
+            return []
         
     except Exception as e:
         logger.error(f"Ошибка получения аттестаций: {e}")
@@ -4291,13 +4243,7 @@ async def save_trajectory_to_database(session: AsyncSession, trajectory_data: di
             else:
                 logger.error("Неизвестная ошибка при сохранении траектории")
             
-            # Создаем mock объект для возврата
-            class MockLearningPath:
-                def __init__(self, name):
-                    self.id = 999
-                    self.name = name
-            
-            return MockLearningPath(trajectory_data['name'])
+            return None
         
     except Exception as e:
         logger.error(f"Ошибка сохранения траектории: {e}")
@@ -4318,10 +4264,6 @@ async def save_trajectory_with_attestation_and_group(session: AsyncSession, traj
         if not learning_path:
             return False
             
-        # Для mock объектов просто логируем
-        if hasattr(learning_path, '__class__') and learning_path.__class__.__name__ == 'MockLearningPath':
-            logger.info(f"ДЕМО: Траектория {learning_path.id} привязана к группе {group_id} и аттестации {attestation_id}")
-            return True
             
         # Обновляем аттестацию, привязывая её к траектории
         if attestation_id:
@@ -5451,13 +5393,646 @@ async def get_session_tests(session: AsyncSession, session_id: int) -> List[Test
                 session_tests, Test.id == session_tests.c.test_id
             ).where(
                 session_tests.c.session_id == session_id
-            ).order_by(Test.id)
+            ).order_by(session_tests.c.order_number)
         )
 
         return result.scalars().all()
     except Exception as e:
         logger.error(f"Ошибка получения тестов сессии {session_id}: {e}")
         return []
+
+
+# ===== ФУНКЦИИ ДЛЯ РЕДАКТИРОВАНИЯ ТРАЕКТОРИЙ =====
+
+async def update_learning_path_name(session: AsyncSession, path_id: int, new_name: str) -> bool:
+    """Изменение названия траектории обучения"""
+    try:
+        # Валидация и очистка входных данных
+        new_name = new_name.strip() if new_name else ""
+        if not new_name:
+            logger.error(f"Название траектории не может быть пустым")
+            return False
+        
+        # Проверяем существование траектории
+        learning_path = await get_learning_path_by_id(session, path_id)
+        if not learning_path:
+            logger.error(f"Траектория с ID {path_id} не найдена")
+            return False
+        
+        # Проверяем уникальность нового названия (в рамках активных траекторий)
+        existing_result = await session.execute(
+            select(LearningPath).where(
+                func.lower(LearningPath.name) == func.lower(new_name),
+                LearningPath.id != path_id,
+                LearningPath.is_active == True
+            )
+        )
+        if existing_result.scalar_one_or_none():
+            logger.error(f"Траектория с названием '{new_name}' уже существует")
+            return False
+        
+        old_name = learning_path.name
+        stmt = update(LearningPath).where(LearningPath.id == path_id).values(name=new_name)
+        await session.execute(stmt)
+        await session.commit()
+        
+        logger.info(f"Название траектории {path_id} изменено: '{old_name}' -> '{new_name}'")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка изменения названия траектории {path_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def update_learning_stage_name(session: AsyncSession, stage_id: int, new_name: str) -> bool:
+    """Изменение названия этапа траектории"""
+    try:
+        # Валидация и очистка входных данных
+        new_name = new_name.strip() if new_name else ""
+        if not new_name:
+            logger.error(f"Название этапа не может быть пустым")
+            return False
+        
+        # Проверяем существование этапа
+        result = await session.execute(
+            select(LearningStage).where(LearningStage.id == stage_id)
+        )
+        stage = result.scalar_one_or_none()
+        if not stage:
+            logger.error(f"Этап с ID {stage_id} не найден")
+            return False
+        
+        old_name = stage.name
+        stmt = update(LearningStage).where(LearningStage.id == stage_id).values(name=new_name)
+        await session.execute(stmt)
+        await session.commit()
+        
+        logger.info(f"Название этапа {stage_id} изменено: '{old_name}' -> '{new_name}'")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка изменения названия этапа {stage_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def update_learning_stage_description(session: AsyncSession, stage_id: int, new_description: Optional[str]) -> bool:
+    """Изменение описания этапа траектории"""
+    try:
+        # Проверяем существование этапа
+        result = await session.execute(
+            select(LearningStage).where(LearningStage.id == stage_id)
+        )
+        stage = result.scalar_one_or_none()
+        if not stage:
+            logger.error(f"Этап с ID {stage_id} не найден")
+            return False
+        
+        # Описание может быть пустым
+        description_value = new_description.strip() if new_description else None
+        
+        stmt = update(LearningStage).where(LearningStage.id == stage_id).values(description=description_value)
+        await session.execute(stmt)
+        await session.commit()
+        
+        logger.info(f"Описание этапа {stage_id} обновлено")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка изменения описания этапа {stage_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def update_learning_session_name(session: AsyncSession, session_id: int, new_name: str) -> bool:
+    """Изменение названия сессии траектории"""
+    try:
+        # Валидация и очистка входных данных
+        new_name = new_name.strip() if new_name else ""
+        if not new_name:
+            logger.error(f"Название сессии не может быть пустым")
+            return False
+        
+        # Проверяем существование сессии
+        result = await session.execute(
+            select(LearningSession).where(LearningSession.id == session_id)
+        )
+        learning_session = result.scalar_one_or_none()
+        if not learning_session:
+            logger.error(f"Сессия с ID {session_id} не найдена")
+            return False
+        
+        old_name = learning_session.name
+        stmt = update(LearningSession).where(LearningSession.id == session_id).values(name=new_name)
+        await session.execute(stmt)
+        await session.commit()
+        
+        logger.info(f"Название сессии {session_id} изменено: '{old_name}' -> '{new_name}'")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка изменения названия сессии {session_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def update_learning_session_description(session: AsyncSession, session_id: int, new_description: Optional[str]) -> bool:
+    """Изменение описания сессии траектории"""
+    try:
+        # Проверяем существование сессии
+        result = await session.execute(
+            select(LearningSession).where(LearningSession.id == session_id)
+        )
+        learning_session = result.scalar_one_or_none()
+        if not learning_session:
+            logger.error(f"Сессия с ID {session_id} не найдена")
+            return False
+        
+        # Описание может быть пустым
+        description_value = new_description.strip() if new_description else None
+        
+        stmt = update(LearningSession).where(LearningSession.id == session_id).values(description=description_value)
+        await session.execute(stmt)
+        await session.commit()
+        
+        logger.info(f"Описание сессии {session_id} обновлено")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка изменения описания сессии {session_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def update_learning_path_group(session: AsyncSession, path_id: int, new_group_id: int) -> bool:
+    """Изменение группы траектории обучения"""
+    try:
+        # Проверяем существование траектории
+        learning_path = await get_learning_path_by_id(session, path_id)
+        if not learning_path:
+            logger.error(f"Траектория с ID {path_id} не найдена")
+            return False
+        
+        # Проверяем существование новой группы
+        group = await get_group_by_id(session, new_group_id)
+        if not group:
+            logger.error(f"Группа с ID {new_group_id} не найдена")
+            return False
+        
+        old_group_id = learning_path.group_id
+        stmt = update(LearningPath).where(LearningPath.id == path_id).values(group_id=new_group_id)
+        await session.execute(stmt)
+        await session.commit()
+        
+        logger.info(f"Группа траектории {path_id} изменена: {old_group_id} -> {new_group_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка изменения группы траектории {path_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def update_learning_path_attestation(session: AsyncSession, path_id: int, new_attestation_id: Optional[int]) -> bool:
+    """Изменение аттестации траектории обучения (может быть None для удаления)"""
+    try:
+        # Проверяем существование траектории
+        learning_path = await get_learning_path_by_id(session, path_id)
+        if not learning_path:
+            logger.error(f"Траектория с ID {path_id} не найдена")
+            return False
+        
+        # Если указана новая аттестация, проверяем её существование
+        if new_attestation_id is not None:
+            attestation = await get_attestation_by_id(session, new_attestation_id)
+            if not attestation:
+                logger.error(f"Аттестация с ID {new_attestation_id} не найдена")
+                return False
+        
+        old_attestation_id = learning_path.attestation_id
+        stmt = update(LearningPath).where(LearningPath.id == path_id).values(attestation_id=new_attestation_id)
+        await session.execute(stmt)
+        await session.commit()
+        
+        action = "удалена" if new_attestation_id is None else f"изменена на {new_attestation_id}"
+        logger.info(f"Аттестация траектории {path_id} {action} (была: {old_attestation_id})")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка изменения аттестации траектории {path_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def reorder_learning_stages(session: AsyncSession, path_id: int, stage_orders: dict) -> bool:
+    """Изменение порядка этапов в траектории
+    
+    Args:
+        session: Сессия БД
+        path_id: ID траектории
+        stage_orders: Словарь {stage_id: new_order_number}
+    """
+    try:
+        # Валидация входных данных
+        if not stage_orders:
+            logger.warning(f"Словарь порядков этапов пуст для траектории {path_id}")
+            return False
+        
+        # Проверяем существование траектории
+        learning_path = await get_learning_path_by_id(session, path_id)
+        if not learning_path:
+            logger.error(f"Траектория с ID {path_id} не найдена")
+            return False
+        
+        # Валидация: проверяем, что все этапы принадлежат этой траектории
+        stage_ids = list(stage_orders.keys())
+        existing_stages_result = await session.execute(
+            select(LearningStage.id).where(
+                LearningStage.id.in_(stage_ids),
+                LearningStage.learning_path_id == path_id
+            )
+        )
+        existing_stage_ids = {row[0] for row in existing_stages_result.all()}
+        
+        if len(existing_stage_ids) != len(stage_ids):
+            missing_ids = set(stage_ids) - existing_stage_ids
+            logger.error(f"Некоторые этапы не найдены или не принадлежат траектории {path_id}: {missing_ids}")
+            return False
+        
+        # Обновляем порядок для каждого этапа
+        for stage_id, new_order in stage_orders.items():
+            if not isinstance(new_order, int) or new_order < 1:
+                logger.error(f"Некорректный порядок {new_order} для этапа {stage_id}")
+                return False
+            
+            stmt = update(LearningStage).where(
+                LearningStage.id == stage_id,
+                LearningStage.learning_path_id == path_id
+            ).values(order_number=new_order)
+            await session.execute(stmt)
+        
+        await session.commit()
+        logger.info(f"Порядок этапов траектории {path_id} обновлен")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка изменения порядка этапов траектории {path_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def reorder_learning_sessions(session: AsyncSession, stage_id: int, session_orders: dict) -> bool:
+    """Изменение порядка сессий в этапе
+    
+    Args:
+        session: Сессия БД
+        stage_id: ID этапа
+        session_orders: Словарь {session_id: new_order_number}
+    """
+    try:
+        # Валидация входных данных
+        if not session_orders:
+            logger.warning(f"Словарь порядков сессий пуст для этапа {stage_id}")
+            return False
+        
+        # Проверяем существование этапа
+        result = await session.execute(
+            select(LearningStage).where(LearningStage.id == stage_id)
+        )
+        stage = result.scalar_one_or_none()
+        if not stage:
+            logger.error(f"Этап с ID {stage_id} не найден")
+            return False
+        
+        # Валидация: проверяем, что все сессии принадлежат этому этапу
+        session_ids = list(session_orders.keys())
+        existing_sessions_result = await session.execute(
+            select(LearningSession.id).where(
+                LearningSession.id.in_(session_ids),
+                LearningSession.stage_id == stage_id
+            )
+        )
+        existing_session_ids = {row[0] for row in existing_sessions_result.all()}
+        
+        if len(existing_session_ids) != len(session_ids):
+            missing_ids = set(session_ids) - existing_session_ids
+            logger.error(f"Некоторые сессии не найдены или не принадлежат этапу {stage_id}: {missing_ids}")
+            return False
+        
+        # Обновляем порядок для каждой сессии
+        for session_id, new_order in session_orders.items():
+            if not isinstance(new_order, int) or new_order < 1:
+                logger.error(f"Некорректный порядок {new_order} для сессии {session_id}")
+                return False
+            
+            stmt = update(LearningSession).where(
+                LearningSession.id == session_id,
+                LearningSession.stage_id == stage_id
+            ).values(order_number=new_order)
+            await session.execute(stmt)
+        
+        await session.commit()
+        logger.info(f"Порядок сессий этапа {stage_id} обновлен")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка изменения порядка сессий этапа {stage_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def check_stage_has_trainees(session: AsyncSession, stage_id: int) -> bool:
+    """Проверка, есть ли стажеры с назначенной траекторией, содержащей этот этап"""
+    try:
+        # Получаем этап и его траекторию
+        result = await session.execute(
+            select(LearningStage).where(LearningStage.id == stage_id)
+        )
+        stage = result.scalar_one_or_none()
+        if not stage:
+            return False
+        
+        # Проверяем, есть ли активные назначения траектории стажерам
+        trainees_result = await session.execute(
+            select(func.count(TraineeLearningPath.id)).where(
+                TraineeLearningPath.learning_path_id == stage.learning_path_id,
+                TraineeLearningPath.is_active == True
+            )
+        )
+        trainees_count = trainees_result.scalar() or 0
+        
+        return trainees_count > 0
+    except Exception as e:
+        logger.error(f"Ошибка проверки стажеров для этапа {stage_id}: {e}")
+        return True  # В случае ошибки блокируем удаление для безопасности
+
+
+async def check_session_has_trainees(session: AsyncSession, session_id: int) -> bool:
+    """Проверка, есть ли стажеры с назначенной траекторией, содержащей эту сессию"""
+    try:
+        # Оптимизированный запрос: получаем learning_path_id через JOIN и сразу проверяем стажеров
+        result = await session.execute(
+            select(func.count(TraineeLearningPath.id))
+            .select_from(LearningSession)
+            .join(LearningStage, LearningSession.stage_id == LearningStage.id)
+            .join(TraineeLearningPath, LearningStage.learning_path_id == TraineeLearningPath.learning_path_id)
+            .where(
+                LearningSession.id == session_id,
+                TraineeLearningPath.is_active == True
+            )
+        )
+        trainees_count = result.scalar() or 0
+        
+        return trainees_count > 0
+    except Exception as e:
+        logger.error(f"Ошибка проверки стажеров для сессии {session_id}: {e}")
+        return True  # В случае ошибки блокируем удаление для безопасности
+
+
+async def delete_learning_stage(session: AsyncSession, stage_id: int) -> bool:
+    """Удаление этапа траектории с проверкой использования стажерами"""
+    try:
+        # Получаем этап с сессиями для каскадного удаления через ORM
+        result = await session.execute(
+            select(LearningStage)
+            .where(LearningStage.id == stage_id)
+            .options(selectinload(LearningStage.sessions))
+        )
+        stage = result.scalar_one_or_none()
+        
+        if not stage:
+            logger.error(f"Этап с ID {stage_id} не найден")
+            return False
+        
+        # Проверяем, есть ли стажеры с этой траекторией
+        has_trainees = await check_stage_has_trainees(session, stage_id)
+        if has_trainees:
+            logger.warning(f"Нельзя удалить этап {stage_id}: есть стажеры с назначенной траекторией")
+            return False
+        
+        # Получаем все сессии этапа для удаления связей с тестами
+        # Используем подзапрос для оптимизации
+        if stage.sessions:
+            session_ids = [s.id for s in stage.sessions]
+            await session.execute(
+                delete(session_tests).where(session_tests.c.session_id.in_(session_ids))
+            )
+            # Явно удаляем все сессии этапа
+            await session.execute(
+                delete(LearningSession).where(LearningSession.stage_id == stage_id)
+            )
+        
+        # Удаляем этап
+        await session.execute(
+            delete(LearningStage).where(LearningStage.id == stage_id)
+        )
+        await session.commit()
+        
+        logger.info(f"Этап {stage_id} '{stage.name}' удален")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка удаления этапа {stage_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def delete_learning_session(session: AsyncSession, session_id: int) -> bool:
+    """Удаление сессии траектории с проверкой использования стажерами"""
+    try:
+        # Проверяем существование сессии
+        result = await session.execute(
+            select(LearningSession).where(LearningSession.id == session_id)
+        )
+        learning_session = result.scalar_one_or_none()
+        if not learning_session:
+            logger.error(f"Сессия с ID {session_id} не найдена")
+            return False
+        
+        # Проверяем, есть ли стажеры с этой траекторией
+        has_trainees = await check_session_has_trainees(session, session_id)
+        if has_trainees:
+            logger.warning(f"Нельзя удалить сессию {session_id}: есть стажеры с назначенной траекторией")
+            return False
+        
+        # Удаляем прогресс стажеров по сессии (если остались)
+        await session.execute(
+            delete(TraineeSessionProgress).where(TraineeSessionProgress.session_id == session_id)
+        )
+        
+        # Удаляем связи тестов с сессией
+        await session.execute(
+            delete(session_tests).where(session_tests.c.session_id == session_id)
+        )
+        
+        # Удаляем саму сессию
+        await session.execute(
+            delete(LearningSession).where(LearningSession.id == session_id)
+        )
+        await session.commit()
+        
+        logger.info(f"Сессия {session_id} '{learning_session.name}' удалена")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка удаления сессии {session_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def add_test_to_session_from_editor(session: AsyncSession, session_id: int, test_id: int) -> bool:
+    """Добавление теста в сессию через редактор"""
+    try:
+        # Проверяем существование сессии
+        result = await session.execute(
+            select(LearningSession).where(LearningSession.id == session_id)
+        )
+        learning_session = result.scalar_one_or_none()
+        if not learning_session:
+            logger.error(f"Сессия с ID {session_id} не найдена")
+            return False
+        
+        # Проверяем существование теста
+        test = await session.get(Test, test_id)
+        if not test:
+            logger.error(f"Тест с ID {test_id} не найден")
+            return False
+        
+        # Проверяем, не добавлен ли уже тест в эту сессию
+        existing_result = await session.execute(
+            select(session_tests).where(
+                session_tests.c.session_id == session_id,
+                session_tests.c.test_id == test_id
+            )
+        )
+        if existing_result.first():
+            logger.warning(f"Тест {test_id} уже добавлен в сессию {session_id}")
+            return False
+        
+        # Получаем максимальный order_number для тестов в этой сессии
+        max_order_result = await session.execute(
+            select(func.max(session_tests.c.order_number)).where(
+                session_tests.c.session_id == session_id
+            )
+        )
+        max_order = max_order_result.scalar() or 0
+        
+        # Добавляем тест в сессию
+        stmt = insert(session_tests).values(
+            session_id=session_id,
+            test_id=test_id,
+            order_number=max_order + 1
+        )
+        await session.execute(stmt)
+        await session.commit()
+        
+        logger.info(f"Тест {test_id} добавлен в сессию {session_id} с порядком {max_order + 1}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления теста {test_id} в сессию {session_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def remove_test_from_session(session: AsyncSession, session_id: int, test_id: int) -> bool:
+    """Удаление теста из сессии"""
+    try:
+        # Проверяем существование связи
+        existing_result = await session.execute(
+            select(session_tests).where(
+                session_tests.c.session_id == session_id,
+                session_tests.c.test_id == test_id
+            )
+        )
+        if not existing_result.first():
+            logger.warning(f"Тест {test_id} не найден в сессии {session_id}")
+            return False
+        
+        # Удаляем связь теста с сессией (тест остается в системе)
+        await session.execute(
+            delete(session_tests).where(
+                session_tests.c.session_id == session_id,
+                session_tests.c.test_id == test_id
+            )
+        )
+        await session.commit()
+        
+        logger.info(f"Тест {test_id} удален из сессии {session_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка удаления теста {test_id} из сессии {session_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def save_stage_to_trajectory_from_editor(session: AsyncSession, path_id: int, stage_data: dict) -> Optional[LearningStage]:
+    """
+    Сохранение нового этапа в существующую траекторию из редактора
+    
+    Args:
+        session: Сессия БД
+        path_id: ID траектории
+        stage_data: Словарь с данными этапа:
+            - name: название этапа
+            - description: описание этапа (опционально)
+            - order: порядковый номер этапа
+            - sessions: список сессий с их тестами
+    
+    Returns:
+        LearningStage или None при ошибке
+    """
+    try:
+        # Валидация обязательных полей
+        if not stage_data.get('name'):
+            logger.error("Отсутствует название этапа")
+            return None
+        if not stage_data.get('order'):
+            logger.error("Отсутствует порядковый номер этапа")
+            return None
+        
+        # Проверяем существование траектории
+        learning_path = await get_learning_path_by_id(session, path_id)
+        if not learning_path:
+            logger.error(f"Траектория с ID {path_id} не найдена")
+            return None
+        
+        logger.info(f"Сохранение этапа '{stage_data['name']}' в траекторию {path_id}")
+        
+        # Создаем этап
+        stage = LearningStage(
+            name=stage_data['name'],
+            description=stage_data.get('description', ''),
+            learning_path_id=path_id,
+            order_number=stage_data['order']
+        )
+        session.add(stage)
+        await session.flush()
+        logger.info(f"Этап создан с ID: {stage.id}")
+        
+        # Создаем сессии для этапа
+        for session_data in stage_data.get('sessions', []):
+            logger.info(f"Создание сессии: {session_data['name']}, order: {session_data['order']}")
+            learning_session = LearningSession(
+                name=session_data['name'],
+                description=session_data.get('description', ''),
+                stage_id=stage.id,
+                order_number=session_data['order']
+            )
+            session.add(learning_session)
+            await session.flush()
+            logger.info(f"Сессия создана с ID: {learning_session.id}")
+            
+            # Привязываем тесты к сессии
+            for test_data in session_data.get('tests', []):
+                test_id = test_data.get('id') if isinstance(test_data, dict) else test_data
+                test_order = test_data.get('order', 1) if isinstance(test_data, dict) else 1
+                
+                logger.info(f"Привязка теста ID:{test_id} к сессии ID:{learning_session.id}")
+                stmt = insert(session_tests).values(
+                    session_id=learning_session.id,
+                    test_id=test_id,
+                    order_number=test_order
+                )
+                await session.execute(stmt)
+        
+        await session.commit()
+        logger.info(f"Этап '{stage_data['name']}' успешно сохранен в траекторию {path_id}")
+        return stage
+        
+    except Exception as e:
+        logger.error(f"Ошибка сохранения этапа в траекторию {path_id}: {e}")
+        await session.rollback()
+        return None
 
 
 # ===== ФУНКЦИИ ДЛЯ АТТЕСТАЦИОННОЙ СИСТЕМЫ =====
@@ -5866,7 +6441,7 @@ async def send_attestation_completed_notification(session: AsyncSession, trainee
         notification_message = (
             "🎓 <b>Аттестация завершена!</b>\n\n"
             f"👤 <b>Стажер:</b> {trainee.full_name}\n"
-            f"📊 <b>Результат:</b> {attestation_result.total_score}/{attestation_result.max_score}\n"
+            f"📊 <b>Результат:</b> {attestation_result.total_score:.1f}/{attestation_result.max_score:.1f}\n"
             f"📅 <b>Дата:</b> {attestation_result.completed_date.strftime('%d.%m.%Y %H:%M')}\n"
             f"🎯 <b>Статус по баллам:</b> {'✅ Пройдена' if attestation_result.is_passed else '❌ Не пройдена'}\n\n"
             "⚖️ <b>Ожидает решения руководителя</b>\n"
@@ -6245,42 +6820,90 @@ async def broadcast_test_to_groups(session: AsyncSession, test_id: int, group_id
             
             logger.info(f"Фильтрация по ролям {target_roles}: {len(final_users)} получателей")
         
-        # Статистика рассылки
-        total_sent = 0
-        failed_sends = 0
-        
-        # Отправляем уведомления каждому пользователю
-        for user in final_users:
+        # ФАЗА 1: Оптимизированное batch создание доступов к тестам
+        if test_id:
             try:
-                # Если есть тест - предоставляем доступ
-                if test_id:
-                    await grant_test_access(session, user.id, test_id, sent_by_id, bot=None)
-                
-                # Отправляем расширенное уведомление
-                if broadcast_script and bot:
-                    success = await send_broadcast_notification(
-                        bot=bot,
-                        user_tg_id=user.tg_id,
-                        broadcast_script=broadcast_script,
-                        broadcast_photos=broadcast_photos or [],
-                        broadcast_material_id=broadcast_material_id,
-                        test_id=test_id,
-                        broadcast_docs=broadcast_docs or []
+                # 1. Получаем все существующие доступы одним запросом
+                user_ids = [user.id for user in final_users]
+                if user_ids:  # Защита от пустого списка
+                    existing_result = await session.execute(
+                        select(TraineeTestAccess.trainee_id, TraineeTestAccess.test_id)
+                        .where(
+                            TraineeTestAccess.test_id == test_id,
+                            TraineeTestAccess.trainee_id.in_(user_ids),
+                            TraineeTestAccess.is_active == True
+                        )
                     )
-                    if success:
-                        total_sent += 1
+                    existing_pairs = {(row.trainee_id, row.test_id) for row in existing_result}
+                    
+                    # 2. Формируем список новых доступов (исключаем существующие)
+                    # ВАЖНО: Явно указываем granted_date, т.к. default=datetime.now работает только для ORM объектов
+                    # datetime уже импортирован в начале файла (database/db.py:6)
+                    new_accesses = []
+                    for user in final_users:
+                        if (user.id, test_id) not in existing_pairs:
+                            new_accesses.append({
+                                'trainee_id': user.id,
+                                'test_id': test_id,
+                                'granted_by_id': sent_by_id,
+                                'granted_date': datetime.now(),  # Явно указываем дату
+                                'is_active': True
+                            })
+                    
+                    # 3. Массовая вставка через bulk insert (1 запрос вместо N)
+                    # Используем Model класс напрямую - SQLAlchemy 2.0+ поддерживает это
+                    # Альтернатива: можно использовать TraineeTestAccess.__table__ если нужна явность
+                    if new_accesses:
+                        await session.execute(
+                            insert(TraineeTestAccess).values(new_accesses)
+                        )
+                        await session.commit()
+                        logger.info(f"Массово создано {len(new_accesses)} новых доступов к тесту {test_id}")
                     else:
-                        failed_sends += 1
-                elif test_id and bot:
-                    # Старая логика для обратной совместимости
-                    await send_notification_about_new_test(session, bot, user.id, test_id, sent_by_id)
-                    total_sent += 1
+                        logger.info(f"Все доступы к тесту {test_id} уже существуют для выбранных пользователей")
                 else:
-                    failed_sends += 1
+                    logger.warning(f"Список пользователей для рассылки пуст")
                     
             except Exception as e:
-                logger.error(f"Ошибка отправки уведомления пользователю {user.id}: {e}")
-                failed_sends += 1
+                await session.rollback()
+                logger.error(f"Ошибка массового создания доступов к тесту {test_id}: {e}")
+                # Не падаем полностью - продолжаем отправку уведомлений
+        
+        # ФАЗА 2: Отправляем уведомления ПАРАЛЛЕЛЬНО
+        semaphore = asyncio.Semaphore(20)  # Максимум 20 одновременно
+        
+        async def send_to_user(user):
+            async with semaphore:
+                try:
+                    # Отправляем расширенное уведомление
+                    if broadcast_script and bot:
+                        success = await send_broadcast_notification(
+                            bot=bot,
+                            user_tg_id=user.tg_id,
+                            broadcast_script=broadcast_script,
+                            broadcast_photos=broadcast_photos or [],
+                            broadcast_material_id=broadcast_material_id,
+                            test_id=test_id,
+                            broadcast_docs=broadcast_docs or []
+                        )
+                        return (True, None) if success else (False, None)
+                    elif test_id and bot:
+                        # Старая логика для обратной совместимости
+                        await send_notification_about_new_test(session, bot, user.id, test_id, sent_by_id)
+                        return (True, None)
+                    else:
+                        return (False, None)
+                        
+                except Exception as e:
+                    logger.error(f"Ошибка отправки уведомления пользователю {user.id}: {e}")
+                    return (False, e)
+        
+        # Отправляем параллельно с ограничением
+        results = await asyncio.gather(*[send_to_user(user) for user in final_users], return_exceptions=True)
+        
+        # Подсчитываем результаты
+        total_sent = sum(1 for r in results if isinstance(r, tuple) and r[0])
+        failed_sends = len(results) - total_sent
         
         # Логируем результат рассылки
         test_name = test.name if test else "без теста"
@@ -6874,30 +7497,43 @@ async def delete_learning_path(session: AsyncSession, trajectory_id: int) -> boo
         )
         
         # 4. Удаляем только результаты тестов траектории (тесты остаются в системе)
+        # Получаем ID тестов через правильную связь через session_tests
         await session.execute(
             delete(TestResult)
             .where(TestResult.test_id.in_(
-                select(Test.id)
-                .select_from(Test)
-                .join(LearningSession, Test.id == LearningSession.id)
+                select(session_tests.c.test_id)
+                .select_from(session_tests)
+                .join(LearningSession, session_tests.c.session_id == LearningSession.id)
                 .join(LearningStage, LearningSession.stage_id == LearningStage.id)
                 .where(LearningStage.learning_path_id == trajectory_id)
             ))
         )
         
         # 5. Удаляем доступы к тестам траектории (тесты остаются в системе)
+        # Получаем ID тестов через правильную связь через session_tests
         await session.execute(
             delete(TraineeTestAccess)
             .where(TraineeTestAccess.test_id.in_(
-                select(Test.id)
-                .select_from(Test)
-                .join(LearningSession, Test.id == LearningSession.id)
+                select(session_tests.c.test_id)
+                .select_from(session_tests)
+                .join(LearningSession, session_tests.c.session_id == LearningSession.id)
                 .join(LearningStage, LearningSession.stage_id == LearningStage.id)
                 .where(LearningStage.learning_path_id == trajectory_id)
             ))
         )
         
-        # 6. Удаляем только связи тестов с сессиями (тесты остаются в системе)
+        # 6. Удаляем прогресс сессий стажеров (если остались) перед удалением сессий
+        await session.execute(
+            delete(TraineeSessionProgress)
+            .where(TraineeSessionProgress.session_id.in_(
+                select(LearningSession.id)
+                .select_from(LearningSession)
+                .join(LearningStage, LearningSession.stage_id == LearningStage.id)
+                .where(LearningStage.learning_path_id == trajectory_id)
+            ))
+        )
+        
+        # 7. Удаляем только связи тестов с сессиями (тесты остаются в системе)
         await session.execute(
             delete(session_tests)
             .where(session_tests.c.session_id.in_(
@@ -6908,7 +7544,7 @@ async def delete_learning_path(session: AsyncSession, trajectory_id: int) -> boo
             ))
         )
         
-        # 7. Удаляем сессии этапов
+        # 8. Удаляем сессии этапов
         await session.execute(
             delete(LearningSession)
             .where(LearningSession.stage_id.in_(
@@ -6918,17 +7554,27 @@ async def delete_learning_path(session: AsyncSession, trajectory_id: int) -> boo
             ))
         )
         
-        # 8. Удаляем этапы траектории
+        # 9. Удаляем прогресс этапов стажеров (если остались) перед удалением этапов
+        await session.execute(
+            delete(TraineeStageProgress)
+            .where(TraineeStageProgress.stage_id.in_(
+                select(LearningStage.id)
+                .select_from(LearningStage)
+                .where(LearningStage.learning_path_id == trajectory_id)
+            ))
+        )
+        
+        # 10. Удаляем этапы траектории
         await session.execute(
             delete(LearningStage)
             .where(LearningStage.learning_path_id == trajectory_id)
         )
         
-        # 9. Удаляем только связи с аттестацией (аттестация остается в системе)
+        # 11. Удаляем только связи с аттестацией (аттестация остается в системе)
         if trajectory.attestation_id:
             attestation_id = trajectory.attestation_id
             
-            # 9.1. Удаляем результаты ответов на вопросы аттестации
+            # 11.1. Удаляем результаты ответов на вопросы аттестации
             await session.execute(
                 delete(AttestationQuestionResult)
                 .where(AttestationQuestionResult.attestation_result_id.in_(

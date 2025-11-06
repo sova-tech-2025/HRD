@@ -1633,14 +1633,14 @@ async def process_trainee_results(callback: CallbackQuery, session: AsyncSession
     results_text = f"📊 <b>Результаты стажера: {trainee.full_name}</b>\n\n"
     results_text += f"<b>Общая статистика:</b>\n"
     results_text += f"  • Пройдено тестов: {passed_count}/{len(results)}\n"
-    results_text += f"  • Средний балл: {avg_score:.2f}\n\n"
+    results_text += f"  • Средний балл: {avg_score:.1f}\n\n"
     
     results_text += "<b>Детальные результаты:</b>\n"
     for res in results:
         test = await get_test_by_id(session, res.test_id)
         status = "✅" if res.is_passed else "❌"
         percentage = (res.score / res.max_possible_score) * 100
-        results_text += f"{status} <b>{test.name if test else 'Тест удален'}:</b> {res.score}/{res.max_possible_score} баллов ({percentage:.0f}%)\n"
+        results_text += f"{status} <b>{test.name if test else 'Тест удален'}:</b> {res.score:.1f}/{res.max_possible_score:.1f} б. ({percentage:.0f}%)\n"
 
     await callback.message.edit_text(
         results_text,
@@ -1678,7 +1678,7 @@ async def process_trainee_action_selection(callback: CallbackQuery, state: FSMCo
 
 📊 <b>Статистика тестов:</b>
 ✅ Пройдено: {passed_count}/{len(results)}
-📈 Средний балл: {avg_score:.2f}
+📈 Средний балл: {avg_score:.1f}
 
 💡 Выберите действие:"""
     
@@ -1776,7 +1776,7 @@ async def process_grant_access_to_trainee(callback: CallbackQuery, state: FSMCon
             f"✅ <b>Доступ предоставлен!</b>\n\n"
             f"👤 <b>Стажер:</b> {trainee.full_name}\n"
             f"📋 <b>Тест:</b> {test.name}\n"
-            f"🎯 <b>Проходной балл:</b> {test.threshold_score}/{test.max_score}\n\n"
+            f"🎯 <b>Проходной балл:</b> {test.threshold_score:.1f}/{test.max_score:.1f}\n\n"
             f"📬 <b>Уведомление отправлено!</b>\n"
             f"Стажер {trainee.full_name} получил уведомление о новом тесте в личном кабинете.",
             parse_mode="HTML",
@@ -1839,7 +1839,7 @@ async def process_trainee_profile(callback: CallbackQuery, session: AsyncSession
         last_test_info = f"""
 📋 <b>Последний тест:</b>
    • {last_test.name if last_test else 'Тест удален'}
-   • {status} ({last_result.score}/{last_result.max_possible_score} баллов - {percentage:.0f}%)
+   • {status} ({last_result.score:.1f}/{last_result.max_possible_score:.1f} б. - {percentage:.0f}%)
    • {last_result.created_date.strftime('%d.%m.%Y %H:%M')}"""
     
     profile_text = f"""👤 <b>Детальный профиль стажера</b>
@@ -1859,7 +1859,7 @@ async def process_trainee_profile(callback: CallbackQuery, session: AsyncSession
    • Пройдено тестов: {len(results)}
    • Успешно пройдено: {passed_count}
    • Не пройдено: {failed_count}
-   • Средний балл: {avg_score:.2f}{last_test_info}
+   • Средний балл: {avg_score:.1f}{last_test_info}
 
 📈 <b>Прогресс:</b> {passed_count}/{len(available_tests)} доступных тестов пройдено"""
 
@@ -2339,7 +2339,7 @@ async def callback_view_stage(callback: CallbackQuery, state: FSMContext, sessio
                         if test_result and test_result.is_passed:
                             # Вычисляем процент прохождения
                             percentage = (test_result.score / test_result.max_possible_score) * 100
-                            stage_info += f"      📊 Балл: {test_result.score}/{test_result.max_possible_score} ({percentage:.0f}%)\n"
+                            stage_info += f"      📊 Балл: {test_result.score:.1f}/{test_result.max_possible_score:.1f} ({percentage:.0f}%)\n"
                             if test_result.completed_date:
                                 stage_info += f"      📅 Пройден: {test_result.completed_date.strftime('%d.%m.%Y %H:%M')}\n"
                 else:
@@ -3125,8 +3125,6 @@ async def callback_confirm_attestation_assignment(callback: CallbackQuery, state
         if not assignment:
             await callback.message.edit_text("❌ Ошибка при назначении аттестации. Возможно, аттестация уже назначена.")
             return
-            
-        await session.commit()
         
         # Получаем данные для уведомлений
         trainee = await get_user_by_id(session, trainee_id)
@@ -3286,8 +3284,6 @@ async def callback_toggle_stage(callback: CallbackQuery, state: FSMContext, sess
                     TraineeSessionProgress.stage_progress_id == current_stage_progress.id
                 ).values(is_opened=False)
             )
-            
-            await session.commit()
             
             # Уведомление стажеру о закрытии этапа не отправляем
             # (стажеру не нужно знать о закрытии этапов)
