@@ -71,7 +71,7 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
         is_authenticated = data.get("is_authenticated", False)
         auth_time = data.get("auth_time", 0)
         
-        if is_authenticated and auth_time and (time.time() - auth_time) > 86400:
+        if is_authenticated and auth_time and (time.time() - auth_time) > 28800:  # 8 часов (рабочий день)
             await state.clear()
             await message.answer("Сессия истекла. Пожалуйста, войдите заново командой /login.")
             return False

@@ -2728,6 +2728,9 @@ async def callback_confirm_manager_assignment(callback: CallbackQuery, state: FS
             )
             await state.clear()
             return
+        
+        # Сохраняем изменения в базу данных
+        await session.commit()
 
         # Получаем информацию о стажере и руководителе
         trainee = await get_user_by_id(session, trainee_id)
@@ -3125,6 +3128,9 @@ async def callback_confirm_attestation_assignment(callback: CallbackQuery, state
         if not assignment:
             await callback.message.edit_text("❌ Ошибка при назначении аттестации. Возможно, аттестация уже назначена.")
             return
+        
+        # Сохраняем изменения в базу данных
+        await session.commit()
         
         # Получаем данные для уведомлений
         trainee = await get_user_by_id(session, trainee_id)

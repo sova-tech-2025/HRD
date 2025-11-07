@@ -381,6 +381,13 @@ async def callback_test_back(callback: CallbackQuery, state: FSMContext):
 @router.message(TestCreationStates.waiting_for_test_name)
 async def process_test_name(message: Message, state: FSMContext, session: AsyncSession):
     """Обработка названия теста"""
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправь название теста текстом, а не файлом или медиа.\n\n"
+            "Введи название теста текстом:"
+        )
+        return
+    
     test_name = message.text.strip()
     
     if len(test_name) < 3:

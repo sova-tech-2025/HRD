@@ -244,10 +244,9 @@ async def process_folder_name(message: Message, state: FSMContext, session: Asyn
         if not folder:
             await message.answer("❌ Не удалось создать папку. Возможно, папка с таким названием уже существует.")
             return
-            
-            logger.error(f"Ошибка БД при commit: {e}")
-            await message.answer("❌ Произошла ошибка при сохранении данных")
-            return
+        
+        # Сохраняем изменения в базу данных
+        await session.commit()
         
         # ТЗ 9-1 шаг 6: Папка создана успешно
         await message.answer(
@@ -876,10 +875,9 @@ async def callback_save_material(callback: CallbackQuery, state: FSMContext, ses
         if not material:
             await callback.message.edit_text("❌ Не удалось создать материал")
             return
-            
-            logger.error(f"Ошибка БД при commit: {e}")
-            await callback.message.edit_text("❌ Произошла ошибка при сохранении данных")
-            return
+        
+        # Сохраняем изменения в базу данных
+        await session.commit()
         
         # Получаем папку для отображения
         folder = await get_knowledge_folder_by_id(session, folder_id)
@@ -1337,10 +1335,9 @@ async def callback_confirm_delete_material(callback: CallbackQuery, state: FSMCo
         if not success:
             await callback.message.edit_text("❌ Не удалось удалить материал")
             return
-            
-            logger.error(f"Ошибка БД при commit: {e}")
-            await callback.message.edit_text("❌ Произошла ошибка при сохранении данных")
-            return
+        
+        # Сохраняем изменения в базу данных
+        await session.commit()
         
         # ТЗ 9-2 шаг 7-4
         await callback.message.edit_text(
@@ -1620,10 +1617,9 @@ async def callback_save_access(callback: CallbackQuery, state: FSMContext, sessi
         if not success:
             await callback.message.edit_text("❌ Не удалось сохранить настройки доступа")
             return
-            
-            logger.error(f"Ошибка БД при commit: {e}")
-            await callback.message.edit_text("❌ Произошла ошибка при сохранении данных")
-            return
+        
+        # Сохраняем изменения в базу данных
+        await session.commit()
         
         # Возвращаемся к просмотру папки
         await callback_view_folder_by_id(callback, state, session, folder_id)
@@ -1757,10 +1753,9 @@ async def callback_confirm_rename(callback: CallbackQuery, state: FSMContext, se
         if not success:
             await callback.message.edit_text("❌ Не удалось переименовать папку. Возможно, папка с таким названием уже существует.")
             return
-            
-            logger.error(f"Ошибка БД при commit: {e}")
-            await callback.message.edit_text("❌ Произошла ошибка при сохранении данных")
-            return
+        
+        # Сохраняем изменения в базу данных
+        await session.commit()
         
         # ТЗ 9-4 шаг 9
         await callback.message.edit_text(
@@ -1889,10 +1884,9 @@ async def callback_confirm_delete_folder(callback: CallbackQuery, state: FSMCont
         if not success:
             await callback.message.edit_text("❌ Не удалось удалить папку")
             return
-            
-            logger.error(f"Ошибка БД при commit: {e}")
-            await callback.message.edit_text("❌ Произошла ошибка при сохранении данных")
-            return
+        
+        # Сохраняем изменения в базу данных
+        await session.commit()
         
         # ТЗ 9-5 шаг 7
         await callback.message.edit_text(

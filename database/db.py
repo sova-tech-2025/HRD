@@ -25,10 +25,10 @@ import os
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    pool_size=50,
+    pool_size=100,  # Увеличено для поддержки 500-1000 пользователей
     max_overflow=100,
     pool_timeout=30,
-    pool_recycle=3600,
+    pool_recycle=900,  # Исправлено: 15 минут вместо 1 часа для свежести подключений
     pool_pre_ping=True
 )
 async_session = sessionmaker(

@@ -609,6 +609,9 @@ async def show_attestation_results_message(message: Message, state: FSMContext, 
 
         # Завершаем сессию аттестации
         await complete_attestation_session(session, assignment_id, total_score, max_score, is_passed)
+        
+        # Сохраняем все изменения в базу данных
+        await session.commit()
 
         if is_passed:
             # Успех аттестации (ТЗ шаг 12-3)
