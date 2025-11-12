@@ -17,7 +17,7 @@ from database.db import (
     update_learning_path_group, update_learning_path_attestation,
     delete_learning_stage, delete_learning_session, check_stage_has_trainees,
     check_session_has_trainees, add_test_to_session_from_editor, remove_test_from_session,
-    get_attestation_by_id, get_all_learning_paths
+    get_attestation_by_id, get_all_learning_paths, get_user_by_tg_id, ensure_company_id
 )
 from database.models import LearningStage, LearningSession, LearningPath
 from states.states import LearningPathStates
@@ -42,9 +42,9 @@ router = Router()
 # ВНУТРЕННИЕ ФУНКЦИИ БИЗНЕС-ЛОГИКИ
 # ===============================
 
-async def render_attestation_page_for_editor(session: AsyncSession, attestation_id: int, path_id: int, page: int) -> tuple[str, InlineKeyboardMarkup]:
+async def render_attestation_page_for_editor(session: AsyncSession, attestation_id: int, path_id: int, page: int, company_id: int) -> tuple[str, InlineKeyboardMarkup]:
     """Универсальная функция рендеринга страницы аттестации для редактора траекторий"""
-    attestation = await get_attestation_by_id(session, attestation_id)
+    attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
     if not attestation:
         raise ValueError("Аттестация не найдена")
     
@@ -97,8 +97,13 @@ async def render_attestation_page_for_editor(session: AsyncSession, attestation_
 
 async def _show_editor_main_menu(message: Message, state: FSMContext, session: AsyncSession, path_id: int, user_id: int):
     """Внутренняя функция для отображения главного экрана редактора"""
+    user = await get_user_by_tg_id(session, user_id)
+    if not user:
+        await message.answer("❌ Пользователь не найден")
+        return
+    
     # Получаем траекторию с полными данными
-    learning_path = await get_learning_path_by_id(session, path_id)
+    learning_path = await get_learning_path_by_id(session, path_id, company_id=user.company_id)
     if not learning_path:
         await message.answer("Траектория не найдена")
         return
@@ -133,6 +138,11 @@ async def _show_editor_main_menu(message: Message, state: FSMContext, session: A
 
 async def _show_stage_editor(message: Message, state: FSMContext, session: AsyncSession, stage_id: int, user_id: int):
     """Внутренняя функция для отображения экрана редактирования этапа"""
+    user = await get_user_by_tg_id(session, user_id)
+    if not user:
+        await message.answer("❌ Пользователь не найден")
+        return
+    
     # Получаем этап с сессиями
     result = await session.execute(
         select(LearningStage).where(LearningStage.id == stage_id)
@@ -147,7 +157,7 @@ async def _show_stage_editor(message: Message, state: FSMContext, session: Async
     learning_path = stage.learning_path
     
     # Получаем всю траекторию с полными данными для отображения полной структуры
-    learning_path = await get_learning_path_by_id(session, learning_path.id)
+    learning_path = await get_learning_path_by_id(session, learning_path.id, company_id=user.company_id)
     if not learning_path:
         await message.answer("Траектория не найдена")
         return
@@ -167,7 +177,11 @@ async def _show_stage_editor(message: Message, state: FSMContext, session: Async
     for s in learning_path.stages:
         if s.sessions:
             for session_item in s.sessions:
-                session_tests = await get_session_tests(session, session_item.id)
+                # Получаем company_id для изоляции
+                data = await state.get_data()
+                company_id = data.get('company_id') or (user.company_id if 'user' in locals() else None)
+                
+                session_tests = await get_session_tests(session, session_item.id, company_id=company_id)
                 session_item.tests = session_tests
     
     sessions = sorted(stage.sessions, key=lambda s: s.order_number) if stage.sessions else []
@@ -198,6 +212,11 @@ async def _show_stage_editor(message: Message, state: FSMContext, session: Async
 
 async def _show_session_editor(message: Message, state: FSMContext, session: AsyncSession, session_id: int, user_id: int):
     """Внутренняя функция для отображения экрана управления тестами сессии"""
+    user = await get_user_by_tg_id(session, user_id)
+    if not user:
+        await message.answer("❌ Пользователь не найден")
+        return
+    
     # Получаем сессию с этапом и траекторией
     result = await session.execute(
         select(LearningSession).where(LearningSession.id == session_id)
@@ -215,7 +234,7 @@ async def _show_session_editor(message: Message, state: FSMContext, session: Asy
     learning_path_id = stage.learning_path.id if hasattr(stage.learning_path, 'id') else stage.learning_path_id
     
     # Получаем всю траекторию с полными данными для отображения полной структуры
-    learning_path = await get_learning_path_by_id(session, learning_path_id)
+    learning_path = await get_learning_path_by_id(session, learning_path_id, company_id=user.company_id)
     if not learning_path:
         await message.answer("Траектория не найдена")
         return
@@ -237,15 +256,22 @@ async def _show_session_editor(message: Message, state: FSMContext, session: Asy
         await message.answer("Сессия не найдена")
         return
     
+    # Получаем company_id для изоляции
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    if not company_id:
+        user = await get_user_by_tg_id(session, message.from_user.id)
+        company_id = user.company_id if user else None
+    
     # Загружаем тесты для всех сессий всех этапов
     for s in learning_path.stages:
         if s.sessions:
             for session_item in s.sessions:
-                session_tests = await get_session_tests(session, session_item.id)
+                session_tests = await get_session_tests(session, session_item.id, company_id=company_id)
                 session_item.tests = session_tests
     
     # Получаем тесты редактируемой сессии с правильной сортировкой
-    tests = await get_session_tests(session, session_id)
+    tests = await get_session_tests(session, session_id, company_id=company_id)
     
     # Форматируем вид для управления тестами
     text = format_session_tests_editor_view(learning_path, stage, learning_session, tests)
@@ -365,6 +391,11 @@ async def callback_edit_stage_name(callback: CallbackQuery, state: FSMContext, s
 @router.message(LearningPathStates.editing_stage_name)
 async def process_stage_name(message: Message, state: FSMContext, session: AsyncSession):
     """Обработка нового названия этапа"""
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        await message.answer("❌ Ты не зарегистрирован в системе.")
+        return
+    
     try:
         new_name = message.text.strip()
         
@@ -382,7 +413,7 @@ async def process_stage_name(message: Message, state: FSMContext, session: Async
             return
         
         # Обновляем название этапа
-        success = await update_learning_stage_name(session, stage_id, new_name)
+        success = await update_learning_stage_name(session, stage_id, new_name, company_id=user.company_id)
         
         if not success:
             await message.answer("❌ Не удалось обновить название этапа. Попробуй еще раз:")
@@ -401,6 +432,11 @@ async def process_stage_name(message: Message, state: FSMContext, session: Async
 @router.callback_query(F.data.startswith("delete_stage:"))
 async def callback_delete_stage(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Подтверждение удаления этапа"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     try:
         await callback.answer()
         
@@ -417,7 +453,7 @@ async def callback_delete_stage(callback: CallbackQuery, state: FSMContext, sess
             return
         
         # Проверяем наличие стажеров
-        has_trainees = await check_stage_has_trainees(session, stage_id)
+        has_trainees = await check_stage_has_trainees(session, stage_id, company_id=user.company_id)
         
         if has_trainees:
             await callback.message.edit_text(
@@ -605,8 +641,12 @@ async def callback_delete_session(callback: CallbackQuery, state: FSMContext, se
             await callback.answer("Сессия не найдена", show_alert=True)
             return
         
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        
         # Проверяем наличие стажеров
-        has_trainees = await check_session_has_trainees(session, session_id)
+        has_trainees = await check_session_has_trainees(session, session_id, company_id=company_id)
         
         if has_trainees:
             await callback.message.edit_text(
@@ -705,10 +745,11 @@ async def callback_add_test_to_session(callback: CallbackQuery, state: FSMContex
         session_id = int(callback.data.split(":")[1])
         
         # Получаем все активные тесты
-        all_tests = await get_all_active_tests(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        all_tests = await get_all_active_tests(session, company_id)
         
         # Получаем тесты, уже добавленные в сессию
-        existing_tests = await get_session_tests(session, session_id)
+        existing_tests = await get_session_tests(session, session_id, company_id=company_id)
         existing_test_ids = [test.id for test in existing_tests]
         
         # Фильтруем тесты, убирая уже добавленные
@@ -759,8 +800,14 @@ async def callback_select_test_for_session(callback: CallbackQuery, state: FSMCo
         session_id = int(parts[1])
         test_id = int(parts[2])
         
+        # Получаем company_id для изоляции
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+            return
+        
         # Добавляем тест в сессию
-        success = await add_test_to_session_from_editor(session, session_id, test_id)
+        success = await add_test_to_session_from_editor(session, session_id, test_id, company_id=user.company_id)
         
         if not success:
             await callback.answer("Не удалось добавить тест", show_alert=True)
@@ -784,6 +831,11 @@ async def callback_select_test_for_session(callback: CallbackQuery, state: FSMCo
 @router.callback_query(F.data.startswith("remove_test_from_session:"))
 async def callback_remove_test_from_session(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Удаление теста из сессии"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     try:
         await callback.answer()
         
@@ -793,13 +845,13 @@ async def callback_remove_test_from_session(callback: CallbackQuery, state: FSMC
         
         # Получаем тест для отображения названия
         from database.db import get_test_by_id
-        test = await get_test_by_id(session, test_id)
+        test = await get_test_by_id(session, test_id, company_id=user.company_id)
         if not test:
             await callback.answer("Тест не найден", show_alert=True)
             return
         
         # Удаляем тест из сессии
-        success = await remove_test_from_session(session, session_id, test_id)
+        success = await remove_test_from_session(session, session_id, test_id, company_id=user.company_id)
         
         if not success:
             await callback.answer("Не удалось удалить тест из сессии", show_alert=True)
@@ -827,12 +879,17 @@ async def callback_remove_test_from_session(callback: CallbackQuery, state: FSMC
 @router.callback_query(F.data.startswith("edit_trajectory_attestation:"))
 async def callback_edit_trajectory_attestation(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Управление аттестацией траектории"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     try:
         await callback.answer()
         
         path_id = int(callback.data.split(":")[1])
         
-        learning_path = await get_learning_path_by_id(session, path_id)
+        learning_path = await get_learning_path_by_id(session, path_id, company_id=user.company_id)
         if not learning_path:
             await callback.answer("Траектория не найдена", show_alert=True)
             return
@@ -877,7 +934,8 @@ async def callback_select_attestation_for_trajectory(callback: CallbackQuery, st
         path_id = int(callback.data.split(":")[1])
         
         # Получаем все аттестации
-        attestations = await get_all_attestations(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        attestations = await get_all_attestations(session, company_id)
         
         if not attestations:
             await callback.message.edit_text(
@@ -922,8 +980,14 @@ async def callback_confirm_attestation_selection(callback: CallbackQuery, state:
         path_id = int(parts[1])
         attestation_id = int(parts[2])
         
+        # Получаем company_id для изоляции
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+            return
+        
         # Обновляем аттестацию траектории
-        success = await update_learning_path_attestation(session, path_id, attestation_id)
+        success = await update_learning_path_attestation(session, path_id, attestation_id, company_id=user.company_id)
         
         if not success:
             await callback.answer("Не удалось обновить аттестацию", show_alert=True)
@@ -951,11 +1015,16 @@ async def callback_view_trajectory_attestation(callback: CallbackQuery, state: F
     try:
         await callback.answer()
         
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+            return
+        
         parts = callback.data.split(":")
         path_id = int(parts[1])
         attestation_id = int(parts[2])
         
-        text, keyboard = await render_attestation_page_for_editor(session, attestation_id, path_id, page=0)
+        text, keyboard = await render_attestation_page_for_editor(session, attestation_id, path_id, page=0, company_id=user.company_id)
         
         await callback.message.edit_text(
             text,
@@ -980,12 +1049,17 @@ async def callback_editor_attestation_page_prev(callback: CallbackQuery, state: 
     try:
         await callback.answer()
         
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+            return
+        
         parts = callback.data.split(":")
         path_id = int(parts[1])
         attestation_id = int(parts[2])
         new_page = int(parts[3])
         
-        text, keyboard = await render_attestation_page_for_editor(session, attestation_id, path_id, new_page)
+        text, keyboard = await render_attestation_page_for_editor(session, attestation_id, path_id, new_page, company_id=user.company_id)
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         
         await state.update_data(attestation_page=new_page)
@@ -1004,12 +1078,17 @@ async def callback_editor_attestation_page_next(callback: CallbackQuery, state: 
     try:
         await callback.answer()
         
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+            return
+        
         parts = callback.data.split(":")
         path_id = int(parts[1])
         attestation_id = int(parts[2])
         new_page = int(parts[3])
         
-        text, keyboard = await render_attestation_page_for_editor(session, attestation_id, path_id, new_page)
+        text, keyboard = await render_attestation_page_for_editor(session, attestation_id, path_id, new_page, company_id=user.company_id)
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         
         await state.update_data(attestation_page=new_page)
@@ -1030,8 +1109,14 @@ async def callback_remove_trajectory_attestation(callback: CallbackQuery, state:
         
         path_id = int(callback.data.split(":")[1])
         
+        # Получаем company_id для изоляции
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+            return
+        
         # Удаляем аттестацию (устанавливаем в None)
-        success = await update_learning_path_attestation(session, path_id, None)
+        success = await update_learning_path_attestation(session, path_id, None, company_id=user.company_id)
         
         if not success:
             await callback.answer("Не удалось удалить аттестацию", show_alert=True)
@@ -1063,7 +1148,8 @@ async def callback_attestations_page(callback: CallbackQuery, state: FSMContext,
         path_id = int(parts[1])
         page = int(parts[2])
         
-        attestations = await get_all_attestations(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        attestations = await get_all_attestations(session, company_id)
         
         text = (
             "🔍 <b>Выбор аттестации для траектории</b>\n\n"
@@ -1101,7 +1187,8 @@ async def callback_edit_trajectory_group(callback: CallbackQuery, state: FSMCont
         path_id = int(callback.data.split(":")[1])
         
         # Получаем все группы
-        groups = await get_all_groups(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        groups = await get_all_groups(session, company_id)
         
         if not groups:
             await callback.message.edit_text(
@@ -1146,8 +1233,15 @@ async def callback_confirm_group_selection(callback: CallbackQuery, state: FSMCo
         path_id = int(parts[1])
         group_id = int(parts[2])
         
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        if not company_id:
+            user = await get_user_by_tg_id(session, callback.from_user.id)
+            company_id = user.company_id if user else None
+        
         # Обновляем группу траектории
-        success = await update_learning_path_group(session, path_id, group_id)
+        success = await update_learning_path_group(session, path_id, group_id, company_id=company_id)
         
         if not success:
             await callback.answer("Не удалось обновить группу", show_alert=True)
@@ -1175,13 +1269,18 @@ async def callback_confirm_group_selection(callback: CallbackQuery, state: FSMCo
 @router.callback_query(F.data.startswith("add_stage_to_trajectory:"))
 async def callback_add_stage_to_trajectory(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Начало создания нового этапа в редакторе"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     try:
         await callback.answer()
         
         path_id = int(callback.data.split(":")[1])
         
         # Получаем траекторию для отображения структуры
-        learning_path = await get_learning_path_by_id(session, path_id)
+        learning_path = await get_learning_path_by_id(session, path_id, company_id=user.company_id)
         if not learning_path:
             await callback.answer("Траектория не найдена", show_alert=True)
             return

@@ -19,7 +19,7 @@ from database.db import (
     assign_manager_to_trainee, get_trainee_manager, get_manager_trainees,
     get_stage_sessions, get_session_tests, get_attestation_by_id, get_user_attestation_result, get_user_roles,
     get_managers_for_attestation, assign_attestation_to_trainee, get_trainee_attestation_by_id,
-    check_all_stages_completed, get_trainee_attestation_status
+    check_all_stages_completed, get_trainee_attestation_status, ensure_company_id
 )
 from keyboards.keyboards import (
     get_unassigned_trainees_keyboard, get_mentor_selection_keyboard,
@@ -78,7 +78,7 @@ async def cmd_assign_mentor(message: Message, state: FSMContext, session: AsyncS
         await message.answer("У тебя нет прав для назначения наставников.")
         return
     
-    unassigned_trainees = await get_unassigned_trainees(session)
+    unassigned_trainees = await get_unassigned_trainees(session, company_id=user.company_id)
     
     if not unassigned_trainees:
         await message.answer(
@@ -119,7 +119,7 @@ async def cmd_my_mentor(message: Message, state: FSMContext, session: AsyncSessi
         await message.answer("Ты не зарегистрирован в системе.")
         return
     
-    mentor = await get_trainee_mentor(session, user.id)
+    mentor = await get_trainee_mentor(session, user.id, company_id=user.company_id)
     
     if not mentor:
         await message.answer(
@@ -156,7 +156,7 @@ async def cmd_mentor_trainees(message: Message, state: FSMContext, session: Asyn
         await message.answer("Ты не зарегистрирован в системе.")
         return
     
-    trainees = await get_mentor_trainees(session, user.id)
+    trainees = await get_mentor_trainees(session, user.id, company_id=user.company_id)
     
     if not trainees:
         await message.answer(
@@ -175,7 +175,7 @@ async def cmd_mentor_trainees(message: Message, state: FSMContext, session: Asyn
 
     for i, trainee in enumerate(trainees, 1):
         # Получаем информацию о траектории стажера
-        trainee_path = await get_trainee_learning_path(session, trainee.id)
+        trainee_path = await get_trainee_learning_path(session, trainee.id, company_id=trainee.company_id)
         trajectory_name = trainee_path.learning_path.name if trainee_path else "не выбрано"
 
         # Подсчитываем количество дней в статусе стажера
@@ -223,7 +223,7 @@ async def process_trainee_selection_for_assignment(callback: CallbackQuery, stat
         await callback.answer()
         return
     
-    available_mentors = await get_available_mentors(session)
+    available_mentors = await get_available_mentors(session, company_id=trainee.company_id)
     
     if not available_mentors:
         await callback.message.edit_text(
@@ -280,7 +280,7 @@ async def process_mentor_selection(callback: CallbackQuery, state: FSMContext, s
         return
     
     # Получаем информацию о текущих стажерах наставника
-    current_trainees = await get_mentor_trainees(session, mentor_id)
+    current_trainees = await get_mentor_trainees(session, mentor_id, company_id=mentor.company_id)
     trainees_count = len(current_trainees)
     
     confirmation_text = f"""🤝 <b>Подтверждение назначения наставника</b>
@@ -318,7 +318,10 @@ async def process_assignment_confirmation(callback: CallbackQuery, state: FSMCon
     
     user = await get_user_by_tg_id(session, callback.from_user.id)
     
-    mentorship = await assign_mentor(session, mentor_id, trainee_id, user.id, bot)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    
+    mentorship = await assign_mentor(session, mentor_id, trainee_id, user.id, bot, company_id)
     
     if mentorship:
         trainee = await get_user_by_id(session, trainee_id)
@@ -397,7 +400,12 @@ async def process_cancel_assignment(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "assign_another_mentor")
 async def process_assign_another_mentor(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик назначения еще одного наставника"""
-    unassigned_trainees = await get_unassigned_trainees(session)
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+        return
+    
+    unassigned_trainees = await get_unassigned_trainees(session, company_id=user.company_id)
     
     if not unassigned_trainees:
         await callback.message.edit_text(
@@ -425,7 +433,12 @@ async def process_assign_another_mentor(callback: CallbackQuery, state: FSMConte
 
 async def show_mentors_list(callback: CallbackQuery, session: AsyncSession, page: int = 0):
     """Отображение списка наставников с пагинацией"""
-    mentors = await get_available_mentors(session)
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+        return
+    
+    mentors = await get_available_mentors(session, company_id=user.company_id)
     
     if not mentors:
         await callback.message.edit_text(
@@ -493,7 +506,7 @@ async def callback_view_mentor_detail(callback: CallbackQuery, state: FSMContext
             return
         
         # Получаем информацию о стажерах наставника
-        trainees = await get_mentor_trainees(session, mentor.id)
+        trainees = await get_mentor_trainees(session, mentor.id, company_id=mentor.company_id)
         work_object = mentor.work_object.name if mentor.work_object else "Не указан"
         
         # Формируем детальную информацию
@@ -545,8 +558,13 @@ async def callback_mentor_assignment_management(callback: CallbackQuery, state: 
 async def callback_view_mentor_assignments(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Просмотр текущих назначений наставников"""
     try:
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+            return
+        
         # Получаем всех наставников с их стажерами
-        mentors = await get_available_mentors(session)
+        mentors = await get_available_mentors(session, company_id=user.company_id)
         
         if not mentors:
             await callback.message.edit_text(
@@ -563,7 +581,7 @@ async def callback_view_mentor_assignments(callback: CallbackQuery, state: FSMCo
         assignments_text = "👥 <b>Текущие назначения наставников</b>\n\n"
         
         for mentor in mentors:
-            trainees = await get_mentor_trainees(session, mentor.id)
+            trainees = await get_mentor_trainees(session, mentor.id, company_id=user.company_id)
             work_object = mentor.work_object.name if mentor.work_object else "Не указан"
             
             assignments_text += f"👤 <b>{mentor.full_name}</b>\n"
@@ -597,12 +615,17 @@ async def callback_view_mentor_assignments(callback: CallbackQuery, state: FSMCo
 async def callback_reassign_mentor(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Переназначение наставника - выбор стажера"""
     try:
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+            return
+        
         # Получаем всех стажеров, у которых есть наставники
-        mentors = await get_available_mentors(session)
+        mentors = await get_available_mentors(session, company_id=user.company_id)
         trainees_with_mentors = []
         
         for mentor in mentors:
-            trainees = await get_mentor_trainees(session, mentor.id)
+            trainees = await get_mentor_trainees(session, mentor.id, company_id=user.company_id)
             for trainee in trainees:
                 trainee.current_mentor = mentor  # Добавляем информацию о текущем наставнике
                 trainees_with_mentors.append(trainee)
@@ -644,10 +667,10 @@ async def callback_select_trainee_for_reassign(callback: CallbackQuery, state: F
             return
         
         # Получаем текущего наставника
-        current_mentor = await get_trainee_mentor(session, trainee_id)
+        current_mentor = await get_trainee_mentor(session, trainee_id, company_id=trainee.company_id)
         
         # Получаем доступных наставников (исключая текущего)
-        available_mentors = await get_available_mentors(session)
+        available_mentors = await get_available_mentors(session, company_id=trainee.company_id)
         available_mentors = [m for m in available_mentors if not current_mentor or m.id != current_mentor.id]
         
         if not available_mentors:
@@ -707,7 +730,7 @@ async def callback_reassign_to_mentor(callback: CallbackQuery, state: FSMContext
         
         trainee = await get_user_by_id(session, trainee_id)
         new_mentor = await get_user_by_id(session, new_mentor_id)
-        current_mentor = await get_trainee_mentor(session, trainee_id)
+        current_mentor = await get_trainee_mentor(session, trainee_id, company_id=trainee.company_id)
         
         if not trainee or not new_mentor:
             await callback.answer("Ошибка: пользователь не найден")
@@ -720,7 +743,9 @@ async def callback_reassign_to_mentor(callback: CallbackQuery, state: FSMContext
             return
         
         # Выполняем переназначение
-        success = await assign_mentor(session, new_mentor_id, trainee_id, recruiter.id, bot)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        success = await assign_mentor(session, new_mentor_id, trainee_id, recruiter.id, bot, company_id)
         
         if success:
             work_object = new_mentor.work_object.name if new_mentor.work_object else "Не указан"
@@ -807,7 +832,7 @@ async def cmd_list_mentors(message: Message, state: FSMContext, session: AsyncSe
         await message.answer("❌ У тебя нет прав для просмотра информации о наставничестве.")
         return
     
-    mentors = await get_available_mentors(session)
+    mentors = await get_available_mentors(session, company_id=user.company_id)
     
     if not mentors:
         await message.answer(
@@ -822,7 +847,7 @@ async def cmd_list_mentors(message: Message, state: FSMContext, session: AsyncSe
     total_trainees = 0
     
     for mentor in mentors:
-        trainees = await get_mentor_trainees(session, mentor.id)
+        trainees = await get_mentor_trainees(session, mentor.id, company_id=user.company_id)
         trainees_count = len(trainees)
         total_trainees += trainees_count
         
@@ -874,7 +899,7 @@ async def cmd_list_unassigned_trainees(message: Message, state: FSMContext, sess
         return
     
     # Получаем стажеров без наставника (они считаются "новыми")
-    unassigned_trainees = await get_unassigned_trainees(session)
+    unassigned_trainees = await get_unassigned_trainees(session, company_id=user.company_id)
     
     if not unassigned_trainees:
         await message.answer(
@@ -920,15 +945,18 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
         await callback.answer()
         return
 
+    # Получаем company_id для изоляции
+    company_id = trainee.company_id
+    
     # Получаем траекторию стажера
-    trainee_path = await get_trainee_learning_path(session, trainee.id)
+    trainee_path = await get_trainee_learning_path(session, trainee.id, company_id=company_id)
     trajectory_info = ""
 
     if trainee_path:
         # Получаем этапы траектории
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
         # Получаем результаты тестов стажера
-        test_results = await get_user_test_results(session, trainee.id)
+        test_results = await get_user_test_results(session, trainee.id, company_id=company_id)
         trajectory_info = generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_results)
     else:
         trajectory_info = "🗺️<b>Траектория:</b> не выбрано"
@@ -1001,8 +1029,11 @@ async def callback_select_trajectory_for_trainee(callback: CallbackQuery, sessio
         await callback.answer()
         return
 
+    # Получаем company_id для изоляции
+    company_id = mentor.company_id
+    
     # Получаем доступные траектории для наставника
-    available_paths = await get_available_learning_paths_for_mentor(session, mentor.id)
+    available_paths = await get_available_learning_paths_for_mentor(session, mentor.id, company_id=company_id)
 
     if not available_paths:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -1066,7 +1097,7 @@ async def callback_select_trajectory_for_trainee(callback: CallbackQuery, sessio
 
 
 @router.callback_query(F.data.startswith("assign_trajectory:"))
-async def callback_assign_trajectory(callback: CallbackQuery, session: AsyncSession):
+async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик назначения траектории стажеру - ПО ТЗ 6-й задачи шаг 11"""
     bot = callback.message.bot  # Получаем bot для уведомлений
     parts = callback.data.split(":")
@@ -1083,12 +1114,14 @@ async def callback_assign_trajectory(callback: CallbackQuery, session: AsyncSess
         return
 
     # Назначаем траекторию
-    success = await assign_learning_path_to_trainee(session, trainee_id, learning_path_id, mentor.id, bot)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    success = await assign_learning_path_to_trainee(session, trainee_id, learning_path_id, mentor.id, bot, company_id=company_id)
 
     if success:
         # Получаем информацию о назначенной траектории и этапах
-        learning_path = await get_learning_path_by_id(session, learning_path_id)
-        stages = await get_learning_path_stages(session, learning_path_id)
+        learning_path = await get_learning_path_by_id(session, learning_path_id, company_id=mentor.company_id)
+        stages = await get_learning_path_stages(session, learning_path_id, company_id=mentor.company_id)
 
         # Вычисляем количество дней в статусе стажера
         days_as_trainee = (datetime.now() - trainee.role_assigned_date).days
@@ -1109,12 +1142,14 @@ async def callback_assign_trajectory(callback: CallbackQuery, session: AsyncSess
             trainee_info += f" ⛔️<b>Этап {stage.order_number}:</b> {stage.name}\n"
 
             # Получаем сессии этапа
-            sessions = await get_stage_sessions(session, stage.id)
+            sessions = await get_stage_sessions(session, stage.id, company_id=mentor.company_id)
             for session_obj in sorted(sessions, key=lambda s: s.order_number):
                 trainee_info += f" ⛔️<b>Сессия {session_obj.order_number}:</b> {session_obj.name}\n"
 
                 # Получаем тесты сессии
-                tests = await get_session_tests(session, session_obj.id)
+                data = await state.get_data()
+                company_id = data.get('company_id')
+                tests = await get_session_tests(session, session_obj.id, company_id=company_id)
                 for test in tests:
                     trainee_info += f" ⛔️<b>Тест {test.id}:</b> {test.name}\n"
             
@@ -1340,8 +1375,12 @@ async def generate_trajectory_progress_with_attestation_status(session, trainee_
 
     # Аттестация с правильным статусом согласно ТЗ Task 7
     if trainee_path.learning_path.attestation:
+        # Получаем company_id для изоляции
+        trainee = await get_user_by_id(session, trainee_path.trainee_id)
+        company_id = trainee.company_id if trainee else None
+        
         attestation_status = await get_trainee_attestation_status(
-            session, trainee_path.trainee_id, trainee_path.learning_path.attestation.id
+            session, trainee_path.trainee_id, trainee_path.learning_path.attestation.id, company_id=company_id
         )
         progress += f"🏁<b>Аттестация:</b> {trainee_path.learning_path.attestation.name} {attestation_status}\n"
     else:
@@ -1359,7 +1398,7 @@ async def process_my_trainees_callback(callback: CallbackQuery, session: AsyncSe
         await callback.answer()
         return
     
-    trainees = await get_mentor_trainees(session, user.id)
+    trainees = await get_mentor_trainees(session, user.id, company_id=user.company_id)
     
     if not trainees:
         await callback.message.edit_text(
@@ -1382,7 +1421,7 @@ async def process_my_trainees_callback(callback: CallbackQuery, session: AsyncSe
 
     for i, trainee in enumerate(trainees, 1):
         # Получаем информацию о траектории стажера
-        trainee_path = await get_trainee_learning_path(session, trainee.id)
+        trainee_path = await get_trainee_learning_path(session, trainee.id, company_id=trainee.company_id)
         trajectory_name = trainee_path.learning_path.name if trainee_path else "не выбрано"
 
         # Подсчитываем количество дней в статусе стажера
@@ -1423,15 +1462,19 @@ async def callback_open_first_stage(callback: CallbackQuery, session: AsyncSessi
     """Обработчик открытия первого этапа для стажера"""
     trainee_id = int(callback.data.split(":")[1])
 
+    # Получаем стажера для company_id
+    trainee = await get_user_by_id(session, trainee_id)
+    company_id = trainee.company_id if trainee else None
+    
     # Получаем траекторию стажера
-    trainee_path = await get_trainee_learning_path(session, trainee_id)
+    trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
     if not trainee_path:
         await callback.message.edit_text("Траектория не найдена")
         await callback.answer()
         return
 
     # Получаем первый этап
-    stages = await get_learning_path_stages(session, trainee_path.learning_path_id)
+    stages = await get_learning_path_stages(session, trainee_path.learning_path_id, company_id=company_id)
     if not stages:
         await callback.message.edit_text("Этапы траектории не найдены")
         await callback.answer()
@@ -1440,7 +1483,7 @@ async def callback_open_first_stage(callback: CallbackQuery, session: AsyncSessi
     first_stage = min(stages, key=lambda s: s.order_number)
 
     # Открываем первый этап
-    success = await open_stage_for_trainee(session, trainee_id, first_stage.id, bot)
+    success = await open_stage_for_trainee(session, trainee_id, first_stage.id, bot, company_id=company_id)
 
     if success:
         success_message = (
@@ -1474,7 +1517,7 @@ async def callback_open_first_stage(callback: CallbackQuery, session: AsyncSessi
 
 
 @router.callback_query(F.data == "grant_test_access")
-async def process_grant_test_access_callback(callback: CallbackQuery, session: AsyncSession):
+async def process_grant_test_access_callback(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик кнопки 'Предоставить доступ к тестам' из уведомления"""
     user = await get_user_by_tg_id(session, callback.from_user.id)
     if not user:
@@ -1498,7 +1541,7 @@ async def process_grant_test_access_callback(callback: CallbackQuery, session: A
         return
     
     # Получаем стажеров наставника
-    trainees = await get_mentor_trainees(session, user.id)
+    trainees = await get_mentor_trainees(session, user.id, company_id=user.company_id)
     
     if not trainees:
         await callback.message.edit_text(
@@ -1514,7 +1557,8 @@ async def process_grant_test_access_callback(callback: CallbackQuery, session: A
         return
     
     # Получаем доступные тесты
-    tests = await get_all_active_tests(session)
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
+    tests = await get_all_active_tests(session, company_id)
     
     if not tests:
         await callback.message.edit_text(
@@ -1557,7 +1601,7 @@ async def process_my_mentor_info(callback: CallbackQuery, session: AsyncSession)
         await callback.answer()
         return
     
-    mentor = await get_trainee_mentor(session, user.id)
+    mentor = await get_trainee_mentor(session, user.id, company_id=user.company_id)
     
     if not mentor:
         await callback.message.edit_text(
@@ -1612,7 +1656,7 @@ async def process_trainee_results(callback: CallbackQuery, session: AsyncSession
         await callback.answer("❌ Стажер не найден.", show_alert=True)
         return
 
-    results = await get_user_test_results(session, trainee_id)
+    results = await get_user_test_results(session, trainee_id, company_id=trainee.company_id)
     
     if not results:
         await callback.message.edit_text(
@@ -1637,7 +1681,7 @@ async def process_trainee_results(callback: CallbackQuery, session: AsyncSession
     
     results_text += "<b>Детальные результаты:</b>\n"
     for res in results:
-        test = await get_test_by_id(session, res.test_id)
+        test = await get_test_by_id(session, res.test_id, company_id=trainee.company_id)
         status = "✅" if res.is_passed else "❌"
         percentage = (res.score / res.max_possible_score) * 100
         results_text += f"{status} <b>{test.name if test else 'Тест удален'}:</b> {res.score:.1f}/{res.max_possible_score:.1f} б. ({percentage:.0f}%)\n"
@@ -1662,8 +1706,8 @@ async def process_trainee_action_selection(callback: CallbackQuery, state: FSMCo
         return
 
     # Получаем информацию о стажере
-    mentor = await get_trainee_mentor(session, trainee_id)
-    results = await get_user_test_results(session, trainee_id)
+    mentor = await get_trainee_mentor(session, trainee_id, company_id=trainee.company_id)
+    results = await get_user_test_results(session, trainee_id, company_id=trainee.company_id)
     passed_count = sum(1 for r in results if r.is_passed)
     avg_score = sum(r.score for r in results) / len(results) if results else 0
     
@@ -1719,7 +1763,8 @@ async def process_add_test_access(callback: CallbackQuery, state: FSMContext, se
         return
     
     # Получаем все активные тесты
-    tests = await get_all_active_tests(session)
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
+    tests = await get_all_active_tests(session, company_id)
     
     if not tests:
         await callback.message.edit_text(
@@ -1760,7 +1805,7 @@ async def process_grant_access_to_trainee(callback: CallbackQuery, state: FSMCon
     test_id = int(parts[2])
     
     user = await get_user_by_tg_id(session, callback.from_user.id)
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     trainee = await get_user_by_id(session, trainee_id)
     
     if not all([user, test, trainee]):
@@ -1769,7 +1814,7 @@ async def process_grant_access_to_trainee(callback: CallbackQuery, state: FSMCon
         return
     
     # Предоставляем доступ с отправкой уведомления
-    success = await grant_test_access(session, trainee_id, test_id, user.id, bot)
+    success = await grant_test_access(session, trainee_id, test_id, user.id, company_id=user.company_id, bot=bot)
     
     if success:
         await callback.message.edit_text(
@@ -1818,11 +1863,11 @@ async def process_trainee_profile(callback: CallbackQuery, session: AsyncSession
         return
 
     # Получаем детальную информацию
-    mentor = await get_trainee_mentor(session, trainee_id)
-    results = await get_user_test_results(session, trainee_id)
+    mentor = await get_trainee_mentor(session, trainee_id, company_id=trainee.company_id)
+    results = await get_user_test_results(session, trainee_id, company_id=trainee.company_id)
     
     # Получаем список доступных тестов
-    available_tests = await get_trainee_available_tests(session, trainee_id)
+    available_tests = await get_trainee_available_tests(session, trainee_id, company_id=trainee.company_id)
     
     # Статистика
     passed_count = sum(1 for r in results if r.is_passed)
@@ -1833,7 +1878,7 @@ async def process_trainee_profile(callback: CallbackQuery, session: AsyncSession
     last_test_info = ""
     if results:
         last_result = results[0]  # Результаты отсортированы по дате
-        last_test = await get_test_by_id(session, last_result.test_id)
+        last_test = await get_test_by_id(session, last_result.test_id, company_id=trainee.company_id)
         status = "✅ Пройден" if last_result.is_passed else "❌ Не пройден"
         percentage = (last_result.score / last_result.max_possible_score) * 100
         last_test_info = f"""
@@ -1876,7 +1921,7 @@ async def process_trainee_profile(callback: CallbackQuery, session: AsyncSession
 async def process_back_to_trainees(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Возврат к списку стажеров"""
     user = await get_user_by_tg_id(session, callback.from_user.id)
-    trainees = await get_mentor_trainees(session, user.id)
+    trainees = await get_mentor_trainees(session, user.id, company_id=user.company_id)
     
     if not trainees:
         await callback.message.edit_text(
@@ -1929,7 +1974,7 @@ async def process_assign_mentor_callback(callback: CallbackQuery, state: FSMCont
         await callback.answer()
         return
     
-    unassigned_trainees = await get_unassigned_trainees(session)
+    unassigned_trainees = await get_unassigned_trainees(session, company_id=user.company_id)
     
     if not unassigned_trainees:
         await callback.message.edit_text(
@@ -1985,7 +2030,7 @@ async def process_new_trainees_list_callback(callback: CallbackQuery, session: A
         return
     
     # Получаем стажеров без наставника (они считаются "новыми")
-    unassigned_trainees = await get_unassigned_trainees(session)
+    unassigned_trainees = await get_unassigned_trainees(session, company_id=user.company_id)
     
     if not unassigned_trainees:
         await callback.message.edit_text(
@@ -2041,7 +2086,7 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
             return
 
         # Получаем стажеров наставника  
-        trainees = await get_mentor_trainees(session, mentor.id)
+        trainees = await get_mentor_trainees(session, mentor.id, company_id=mentor.company_id)
 
         if not trainees:
             await callback.message.edit_text(
@@ -2061,7 +2106,7 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
 
         for i, trainee in enumerate(trainees, 1):
             # Получаем информацию о траектории стажера
-            trainee_path = await get_trainee_learning_path(session, trainee.id)
+            trainee_path = await get_trainee_learning_path(session, trainee.id, company_id=trainee.company_id)
             trajectory_name = trainee_path.learning_path.name if trainee_path else "не выбрано"
 
             # Добавляем информацию о стажере согласно ТЗ
@@ -2116,7 +2161,7 @@ async def callback_select_trajectory(callback: CallbackQuery, state: FSMContext,
 
         # Получаем данные стажера и траектории
         trainee = await get_user_by_id(session, trainee_id)
-        trajectory = await get_learning_path_by_id(session, trajectory_id)
+        trajectory = await get_learning_path_by_id(session, trajectory_id, company_id=trainee.company_id)
 
         if not trainee or not trajectory:
             await callback.message.edit_text("Ошибка: данные не найдены")
@@ -2126,7 +2171,7 @@ async def callback_select_trajectory(callback: CallbackQuery, state: FSMContext,
         await state.update_data(selected_trajectory_id=trajectory_id)
 
         # Получаем этапы траектории для отображения
-        stages = await get_learning_path_stages(session, trajectory_id)
+        stages = await get_learning_path_stages(session, trajectory_id, company_id=trainee.company_id)
 
         # Формируем информацию о траектории
         stages_info = ""
@@ -2194,7 +2239,7 @@ async def callback_confirm_trajectory_assignment(callback: CallbackQuery, state:
         if success:
             # Получаем обновленные данные для отображения
             trainee = await get_user_by_id(session, trainee_id)
-            trajectory = await get_learning_path_by_id(session, trajectory_id)
+            trajectory = await get_learning_path_by_id(session, trajectory_id, company_id=trainee.company_id)
             mentor = await get_user_by_tg_id(session, mentor_id)
 
             success_message = (
@@ -2278,14 +2323,17 @@ async def callback_view_stage(callback: CallbackQuery, state: FSMContext, sessio
             await callback.message.edit_text("Стажер не найден")
             return
 
+        # Получаем company_id для изоляции
+        company_id = trainee.company_id
+        
         # Получаем траекторию стажера
-        trainee_path = await get_trainee_learning_path(session, trainee_id)
+        trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
         if not trainee_path:
             await callback.message.edit_text("Траектория не найдена")
             return
 
         # Получаем этапы и находим нужный
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
         stage_progress = next((sp for sp in stages_progress if sp.stage_id == stage_id), None)
 
         if not stage_progress:
@@ -2331,7 +2379,7 @@ async def callback_view_stage(callback: CallbackQuery, state: FSMContext, sessio
                 if tests:
                     for i, test in enumerate(tests, 1):
                         # Определяем статус теста
-                        test_result = await get_user_test_result(session, trainee_id, test.id)
+                        test_result = await get_user_test_result(session, trainee_id, test.id, company_id=company_id)
                         test_icon = "✅" if (test_result and test_result.is_passed) else "⛔️"
                         test_status = "пройден" if (test_result and test_result.is_passed) else "не пройден"
                         stage_info += f"   {test_icon}Тест {i}: {test.name} ({test_status})\n"
@@ -2401,8 +2449,11 @@ async def callback_view_trajectory(callback: CallbackQuery, state: FSMContext, s
             await callback.message.edit_text("Стажер не найден")
             return
 
+        # Получаем company_id для изоляции
+        company_id = trainee.company_id
+        
         # Получаем траекторию стажера
-        trainee_path = await get_trainee_learning_path(session, trainee_id)
+        trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
 
         if not trainee_path:
             await callback.message.edit_text(
@@ -2414,9 +2465,9 @@ async def callback_view_trajectory(callback: CallbackQuery, state: FSMContext, s
             return
 
         # Получаем этапы траектории
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
         # Получаем результаты тестов стажера
-        test_results = await get_user_test_results(session, trainee_id)
+        test_results = await get_user_test_results(session, trainee_id, company_id=company_id)
 
         # Формируем информацию о траектории
         trajectory_info = (
@@ -2496,19 +2547,23 @@ async def callback_open_stage(callback: CallbackQuery, state: FSMContext, sessio
         trainee_id = int(parts[1])
         stage_id = int(parts[2])
 
+        # Получаем company_id для изоляции
+        trainee = await get_user_by_id(session, trainee_id)
+        company_id = trainee.company_id if trainee else None
+        
         # Открываем этап
-        success = await open_stage_for_trainee(session, trainee_id, stage_id, bot)
+        success = await open_stage_for_trainee(session, trainee_id, stage_id, bot, company_id=company_id)
 
         if success:
             # Получаем информацию для отображения
             trainee = await get_user_by_id(session, trainee_id)
-            trainee_path = await get_trainee_learning_path(session, trainee_id)
-            stages = await get_learning_path_stages(session, trainee_path.learning_path_id)
+            trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
+            stages = await get_learning_path_stages(session, trainee_path.learning_path_id, company_id=company_id)
             current_stage = next((s for s in stages if s.id == stage_id), None)
             
             # Получаем обновленные этапы и результаты тестов
-            stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
-            test_results = await get_user_test_results(session, trainee_id)
+            stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
+            test_results = await get_user_test_results(session, trainee_id, company_id=company_id)
 
             # Формируем полную информацию согласно ТЗ шаг 9
             success_message = (
@@ -2595,7 +2650,7 @@ async def callback_assign_manager(callback: CallbackQuery, state: FSMContext, se
             return
 
         # Получаем доступных руководителей
-        available_managers = await get_available_managers_for_trainee(session, trainee_id)
+        available_managers = await get_available_managers_for_trainee(session, trainee_id, company_id=trainee.company_id)
 
         if not available_managers:
             await callback.message.edit_text(
@@ -2716,8 +2771,12 @@ async def callback_confirm_manager_assignment(callback: CallbackQuery, state: FS
             await callback.message.edit_text("Пользователь не найден")
             return
 
+        # Получаем company_id для изоляции
+        trainee = await get_user_by_id(session, trainee_id)
+        company_id = trainee.company_id if trainee else mentor.company_id
+        
         # Назначаем руководителя
-        trainee_manager = await assign_manager_to_trainee(session, trainee_id, manager_id, mentor.id)
+        trainee_manager = await assign_manager_to_trainee(session, trainee_id, manager_id, mentor.id, company_id=company_id)
 
         if not trainee_manager:
             await callback.message.edit_text(
@@ -2787,8 +2846,12 @@ async def callback_view_manager(callback: CallbackQuery, session: AsyncSession):
         # Получаем ID стажера
         trainee_id = int(callback.data.split(":")[1])
 
+        # Получаем company_id для изоляции
+        trainee = await get_user_by_id(session, trainee_id)
+        company_id = trainee.company_id if trainee else None
+
         # Получаем связь стажер-руководитель
-        trainee_manager = await get_trainee_manager(session, trainee_id)
+        trainee_manager = await get_trainee_manager(session, trainee_id, company_id=company_id)
 
         if not trainee_manager:
             await callback.message.edit_text(
@@ -2859,8 +2922,11 @@ async def callback_manager_actions(callback: CallbackQuery, session: AsyncSessio
             await callback.message.edit_text("Стажер не найден")
             return
 
+        # Получаем company_id для изоляции
+        company_id = trainee.company_id
+
         # Получаем руководителя стажера
-        trainee_manager = await get_trainee_manager(session, trainee_id)
+        trainee_manager = await get_trainee_manager(session, trainee_id, company_id=company_id)
 
         if trainee_manager:
             manager = await get_user_by_id(session, trainee_manager.manager_id)
@@ -2926,8 +2992,11 @@ async def callback_view_trainee_attestation(callback: CallbackQuery, state: FSMC
             await callback.message.edit_text("❌ У тебя нет прав для управления аттестациями")
             return
             
+        # Получаем company_id для изоляции
+        company_id = trainee.company_id
+        
         # Получаем аттестацию из траектории стажера
-        trainee_path = await get_trainee_learning_path(session, trainee.id)
+        trainee_path = await get_trainee_learning_path(session, trainee.id, company_id=company_id)
         if not trainee_path or not trainee_path.learning_path.attestation:
             await callback.message.edit_text(
                 "❌ У стажера нет назначенной траектории с аттестацией.\n"
@@ -2954,9 +3023,12 @@ async def callback_view_trainee_attestation(callback: CallbackQuery, state: FSMC
             
         attestation = trainee_path.learning_path.attestation
         
+        # Получаем company_id для изоляции
+        company_id = trainee.company_id
+        
         # Получаем список руководителей для аттестации
         group_id = trainee.groups[0].id if trainee.groups else None
-        managers = await get_managers_for_attestation(session, group_id)
+        managers = await get_managers_for_attestation(session, group_id, company_id=company_id)
         
         if not managers:
             await callback.message.edit_text(
@@ -3042,8 +3114,9 @@ async def callback_select_manager_for_attestation(callback: CallbackQuery, state
         # Получаем данные
         trainee = await get_user_by_id(session, trainee_id)
         manager = await get_user_by_id(session, manager_id)
-        attestation = await get_attestation_by_id(session, attestation_id)
-        trainee_path = await get_trainee_learning_path(session, trainee_id)
+        company_id = trainee.company_id if trainee else None
+        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+        trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
         
         if not trainee or not manager or not attestation:
             await callback.message.edit_text("Ошибка: данные не найдены")
@@ -3120,9 +3193,13 @@ async def callback_confirm_attestation_assignment(callback: CallbackQuery, state
             await callback.message.edit_text("Ошибка: наставник не найден")
             return
             
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id')
+            
         # Назначаем аттестацию
         assignment = await assign_attestation_to_trainee(
-            session, trainee_id, manager_id, attestation_id, mentor.id
+            session, trainee_id, manager_id, attestation_id, mentor.id, company_id=company_id
         )
         
         if not assignment:
@@ -3135,7 +3212,7 @@ async def callback_confirm_attestation_assignment(callback: CallbackQuery, state
         # Получаем данные для уведомлений
         trainee = await get_user_by_id(session, trainee_id)
         manager = await get_user_by_id(session, manager_id)
-        attestation = await get_attestation_by_id(session, attestation_id)
+        attestation = await get_attestation_by_id(session, attestation_id, company_id=mentor.company_id)
         
         # Очищаем состояние
         await state.clear()
@@ -3155,12 +3232,12 @@ async def callback_confirm_attestation_assignment(callback: CallbackQuery, state
         
         # Отправляем уведомление стажеру согласно ТЗ
         await send_attestation_assignment_notification_to_trainee(
-            session, callback.message.bot, assignment.id
+            session, callback.message.bot, assignment.id, company_id=mentor.company_id
         )
         
         # Отправляем уведомление руководителю согласно ТЗ
         await send_attestation_assignment_notification_to_manager(
-            session, callback.message.bot, assignment.id
+            session, callback.message.bot, assignment.id, company_id=mentor.company_id
         )
         
         log_user_action(callback.from_user.id, "attestation_assigned", f"Назначена аттестация {attestation.name} стажеру {trainee.full_name} с руководителем {manager.full_name}")
@@ -3171,11 +3248,11 @@ async def callback_confirm_attestation_assignment(callback: CallbackQuery, state
 
 
 # Функции уведомлений для Task 7
-async def send_attestation_assignment_notification_to_trainee(session: AsyncSession, bot, assignment_id: int):
+async def send_attestation_assignment_notification_to_trainee(session: AsyncSession, bot, assignment_id: int, company_id: int = None):
     """Отправка уведомления стажеру о назначении аттестации (ТЗ шаг 14)"""
     try:
-        # Получаем данные назначения
-        assignment = await get_trainee_attestation_by_id(session, assignment_id)
+        # Получаем данные назначения с изоляцией по компании
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             return
             
@@ -3208,11 +3285,11 @@ async def send_attestation_assignment_notification_to_trainee(session: AsyncSess
         log_user_error(0, "send_attestation_notification_to_trainee_error", str(e))
 
 
-async def send_attestation_assignment_notification_to_manager(session: AsyncSession, bot, assignment_id: int):
+async def send_attestation_assignment_notification_to_manager(session: AsyncSession, bot, assignment_id: int, company_id: int = None):
     """Отправка уведомления руководителю о назначении стажера на аттестацию (ТЗ шаг 15)"""
     try:
-        # Получаем данные назначения
-        assignment = await get_trainee_attestation_by_id(session, assignment_id)
+        # Получаем данные назначения с изоляцией по компании
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             return
             
@@ -3256,13 +3333,17 @@ async def callback_toggle_stage(callback: CallbackQuery, state: FSMContext, sess
         trainee_id = int(parts[1])
         stage_id = int(parts[2])
 
+        # Получаем company_id для изоляции
+        trainee = await get_user_by_id(session, trainee_id)
+        company_id = trainee.company_id if trainee else None
+        
         # Получаем текущий статус этапа
-        trainee_path = await get_trainee_learning_path(session, trainee_id)
+        trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
         if not trainee_path:
             await callback.message.edit_text("Траектория не найдена")
             return
 
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
         current_stage_progress = next((sp for sp in stages_progress if sp.stage_id == stage_id), None)
         
         if not current_stage_progress:
@@ -3297,7 +3378,7 @@ async def callback_toggle_stage(callback: CallbackQuery, state: FSMContext, sess
             action_text = "закрыт"
         else:
             # Открываем этап
-            success = await open_stage_for_trainee(session, trainee_id, stage_id, bot)
+            success = await open_stage_for_trainee(session, trainee_id, stage_id, bot, company_id=company_id)
             if not success:
                 await callback.message.edit_text("Ошибка при открытии этапа")
                 return
@@ -3328,14 +3409,18 @@ async def callback_stage_completed_stub(callback: CallbackQuery):
 async def update_stages_management_interface(callback: CallbackQuery, session: AsyncSession, trainee_id: int):
     """Обновление интерфейса управления этапами (вынесенная логика)"""
     try:
+        # Получаем company_id для изоляции
+        trainee = await get_user_by_id(session, trainee_id)
+        company_id = trainee.company_id if trainee else None
+        
         # Получаем траекторию стажера
-        trainee_path = await get_trainee_learning_path(session, trainee_id)
+        trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
         if not trainee_path:
             await callback.message.edit_text("Траектория не найдена")
             return
 
         # Получаем этапы
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
 
         # Формируем информацию об этапах
         stages_info = ""
@@ -3386,7 +3471,7 @@ async def update_stages_management_interface(callback: CallbackQuery, session: A
         days_word = get_days_word(days_as_trainee)
         
         # Получаем результаты тестов для правильной индикации
-        test_results = await get_user_test_results(session, trainee_id)
+        test_results = await get_user_test_results(session, trainee_id, company_id=trainee.company_id)
         
         # Формируем полную информацию согласно ТЗ шаг 6
         header_info = (

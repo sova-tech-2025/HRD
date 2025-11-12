@@ -60,7 +60,9 @@ async def button_manage_users(message: Message, state: FSMContext, session: Asyn
 
 async def show_user_list(message: Message, state: FSMContext, session: AsyncSession):
     """Отображает список пользователей с возможностью выбора"""
-    users = await get_all_users(session)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    users = await get_all_users(session, company_id)
     
     if not users:
         await message.answer("В системе пока нет зарегистрированных пользователей.")
@@ -96,8 +98,11 @@ async def process_user_selection(callback: CallbackQuery, state: FSMContext, ses
     
     extra_info = ""
     if "Стажер" in roles_str:
-        mentor = await get_trainee_mentor(session, user.id)
-        results = await get_user_test_results(session, user.id)
+        # ИЗОЛЯЦИЯ: получаем company_id из состояния
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        mentor = await get_trainee_mentor(session, user.id, company_id=company_id)
+        results = await get_user_test_results(session, user.id, company_id=company_id)
         passed_count = sum(1 for r in results if r.is_passed)
         avg_score = sum(r.score for r in results) / len(results) if results else 0
         
@@ -415,14 +420,16 @@ async def button_trainees(message: Message, state: FSMContext, session: AsyncSes
     if not await check_admin_permission(message, state, session, permission="view_trainee_list"):
         return
     
-    await show_trainees_list(message, session, page=0)
+    await show_trainees_list(message, state, session, page=0)
 
 
-async def show_trainees_list(message: Message, session: AsyncSession, page: int = 0):
+async def show_trainees_list(message: Message, state: FSMContext, session: AsyncSession, page: int = 0):
     """Показать список стажеров с пагинацией"""
     from keyboards.keyboards import get_trainees_list_keyboard
     
-    trainees = await get_all_trainees(session)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    trainees = await get_all_trainees(session, company_id)
     
     if not trainees:
         await message.answer("В системе пока нет зарегистрированных Стажеров.")
@@ -438,13 +445,15 @@ async def show_trainees_list(message: Message, session: AsyncSession, page: int 
 
 
 @router.callback_query(F.data.startswith("trainees_page:"))
-async def callback_trainees_page(callback: CallbackQuery, session: AsyncSession):
+async def callback_trainees_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик пагинации списка стажеров"""
     try:
         from keyboards.keyboards import get_trainees_list_keyboard
         
         page = int(callback.data.split(":")[1])
-        trainees = await get_all_trainees(session)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        trainees = await get_all_trainees(session, company_id)
         
         if not trainees:
             await callback.message.edit_text("В системе пока нет зарегистрированных Стажеров.")
@@ -474,12 +483,14 @@ async def callback_view_trainee(callback: CallbackQuery, session: AsyncSession):
 
 
 @router.callback_query(F.data == "back_to_recruiter_trainees")
-async def callback_back_to_recruiter_trainees(callback: CallbackQuery, session: AsyncSession):
+async def callback_back_to_recruiter_trainees(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик возврата к списку стажеров"""
     try:
         from keyboards.keyboards import get_trainees_list_keyboard
         
-        trainees = await get_all_trainees(session)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        trainees = await get_all_trainees(session, company_id)
         
         if not trainees:
             await callback.message.edit_text("В системе пока нет зарегистрированных Стажеров.")
@@ -508,8 +519,9 @@ async def show_trainee_detail(callback: CallbackQuery, session: AsyncSession, tr
         await callback.answer("Стажер не найден", show_alert=True)
         return
     
-    # Получаем траекторию стажера
-    trainee_path = await get_trainee_learning_path(session, trainee_id)
+    # Получаем траекторию стажера с изоляцией по компании
+    company_id = trainee.company_id
+    trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
     trajectory_name = trainee_path.learning_path.name if trainee_path else "не выбрано"
     
     # Формируем сообщение согласно ТЗ
@@ -571,8 +583,11 @@ async def show_trainee_progress(callback: CallbackQuery, session: AsyncSession, 
         await callback.answer("Стажер не найден", show_alert=True)
         return
     
+    # ИЗОЛЯЦИЯ: используем company_id стажера
+    company_id = trainee.company_id
+    
     # Получаем результаты тестов
-    test_results = await get_user_test_results(session, trainee_id)
+    test_results = await get_user_test_results(session, trainee_id, company_id=company_id)
     
     # Рассчитываем количество дней в статусе стажера
     days_as_trainee = (datetime.now() - trainee.role_assigned_date).days
@@ -598,8 +613,8 @@ async def show_trainee_progress(callback: CallbackQuery, session: AsyncSession, 
     
     if test_results:
         for result in test_results:
-            # Получаем информацию о тесте
-            test = await get_test_by_id(session, result.test_id)
+            # Получаем информацию о тесте с изоляцией
+            test = await get_test_by_id(session, result.test_id, company_id=company_id)
             test_name = test.name if test else "Неизвестный тест"
             
             # Рассчитываем процент

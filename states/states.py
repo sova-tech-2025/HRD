@@ -336,3 +336,27 @@ class KnowledgeBaseStates(StatesGroup):
     employee_browsing = State()
     employee_viewing_folder = State()
     employee_viewing_material = State()
+
+
+class CompanyCreationStates(StatesGroup):
+    """Состояния для создания компании"""
+    waiting_for_name = State()
+    waiting_for_description = State()
+    waiting_for_invite_code = State()
+    waiting_for_full_name = State()
+    waiting_for_phone = State()
+
+
+class CompanyJoinStates(StatesGroup):
+    """Состояния для присоединения к компании"""
+    waiting_for_invite_code = State()
+    waiting_for_registration_type = State()  # Выбор типа регистрации (normal/with_code)
+    waiting_for_full_name = State()
+    waiting_for_phone = State()
+    waiting_for_role_selection = State()
+
+
+class CompanyManagementStates(StatesGroup):
+    """Состояния для управления компанией (для рекрутеров)"""
+    waiting_for_company_name_edit = State()
+    waiting_for_company_description_edit = State()

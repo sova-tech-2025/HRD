@@ -11,7 +11,7 @@ from database.db import (
     update_test, delete_test, get_test_by_id, check_user_permission,
     get_user_by_tg_id, get_test_results_summary, get_user_by_id, get_user_roles,
     get_mentor_trainees, grant_test_access, update_question, delete_question,
-    get_question_analytics, get_user_test_result, check_test_access
+    get_question_analytics, get_user_test_result, check_test_access, ensure_company_id
 )
 from database.models import InternshipStage, TestQuestion
 from sqlalchemy import select
@@ -159,7 +159,8 @@ async def cmd_list_tests(message: Message, state: FSMContext, session: AsyncSess
         return
 
     # Наставники (без права create_tests) видят все тесты
-    tests = await get_all_active_tests(session)
+    company_id = await ensure_company_id(session, state, message.from_user.id)
+    tests = await get_all_active_tests(session, company_id)
     if not tests:
         await message.answer(
             "📋 <b>Список доступных тестов</b>\n\n"
@@ -257,7 +258,8 @@ async def callback_list_tests(callback: CallbackQuery, state: FSMContext, sessio
             return
         
         # Наставники (без права create_tests) видят все тесты
-        tests = await get_all_active_tests(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        tests = await get_all_active_tests(session, company_id)
         if not tests:
             await callback.message.edit_text(
                 "📋 <b>Список доступных тестов</b>\n\n"
@@ -730,6 +732,11 @@ async def process_points(message: Message, state: FSMContext):
 @router.callback_query(TestCreationStates.waiting_for_more_questions, F.data.startswith("more_questions:"))
 async def process_more_questions_choice(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработка выбора: добавить еще вопрос или завершить"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     data = await state.get_data()
     test_id = data.get('test_id_to_edit')  # Проверяем, добавляем ли вопрос к существующему тесту
     
@@ -750,7 +757,7 @@ async def process_more_questions_choice(callback: CallbackQuery, state: FSMConte
             initial_count = data.get('initial_questions_count', 0)
             
             # Получаем текущие вопросы из БД для определения правильного question_number
-            existing_questions = await get_test_questions(session, test_id)
+            existing_questions = await get_test_questions(session, test_id, company_id=user.company_id)
             current_max_number = len(existing_questions)
             
             # Добавляем только новые вопросы (не те, что были в тесте изначально)
@@ -768,14 +775,14 @@ async def process_more_questions_choice(callback: CallbackQuery, state: FSMConte
                         'correct_answer': q_data['answer'],
                         'points': q_data['points']
                     }
-                    await add_question_to_test(session, question_db_data)
+                    await add_question_to_test(session, question_db_data, company_id=user.company_id)
                 
                 # Обновляем max_score теста
-                test = await get_test_by_id(session, test_id)
+                test = await get_test_by_id(session, test_id, company_id=user.company_id)
                 if test:
-                    all_questions = await get_test_questions(session, test_id)
+                    all_questions = await get_test_questions(session, test_id, company_id=user.company_id)
                     new_max_score = sum(q.points for q in all_questions)
-                    await update_test(session, test_id, {"max_score": new_max_score})
+                    await update_test(session, test_id, {"max_score": new_max_score}, company_id=user.company_id)
             
             # Сохраняем session_id перед очисткой
             session_id = data.get('editor_session_id')
@@ -825,10 +832,18 @@ async def process_threshold_and_create_test(message: Message, state: FSMContext,
         'material_type': data.get('material_type'),
         'creator_id': data['creator_id']
     }
-    test = await create_test(session, test_data)
+    company_id = data.get('company_id')
+    test = await create_test(session, test_data, company_id)
     
     if not test:
         await message.answer("❌ Произошла критическая ошибка при создании теста. Попробуй еще раз.")
+        await state.clear()
+        return
+    
+    # Получаем пользователя для company_id
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        await message.answer("❌ Ты не зарегистрирован в системе.")
         await state.clear()
         return
         
@@ -843,7 +858,7 @@ async def process_threshold_and_create_test(message: Message, state: FSMContext,
             'correct_answer': q_data['answer'],
             'points': q_data['points']
         }
-        await add_question_to_test(session, question_db_data)
+        await add_question_to_test(session, question_db_data, company_id=user.company_id)
         
     # 3. Финальное сообщение
     success_rate = (threshold_score / max_score) * 100
@@ -873,6 +888,11 @@ async def process_threshold_and_create_test(message: Message, state: FSMContext,
 )
 async def process_test_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик выбора теста для управления (не для прохождения)"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
     # Удаляем медиа-файл с материалами, если он был отправлен
@@ -889,14 +909,14 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
     # Очищаем сохраненные message_id
     await state.update_data(material_message_id=None, material_text_message_id=None)
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     
     if not test:
         await callback.message.answer("❌ Тест не найден.")
         await callback.answer()
         return
     
-    questions = await get_test_questions(session, test_id)
+    questions = await get_test_questions(session, test_id, company_id=user.company_id)
     questions_count = len(questions)
     
     stage_info = ""
@@ -929,7 +949,10 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
     
     # Если у пользователя есть доступ (через рассылку или индивидуально), показываем интерфейс прохождения
     # Но ТОЛЬКО если контекст = 'taking' (из "Мои тесты")
-    has_access = await check_test_access(session, user.id, test_id)
+    # Получаем company_id для изоляции
+    company_id = user.company_id
+    
+    has_access = await check_test_access(session, user.id, test_id, company_id=company_id)
     is_mentor = "Наставник" in role_names
     is_recruiter = "Рекрутер" in role_names
     is_trainee = "Стажер" in role_names
@@ -940,7 +963,7 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
     # показываем интерфейс ПРОХОЖДЕНИЯ для ВСЕХ ролей (стажер, сотрудник, наставник, рекрутер, руководитель)
     if context == 'taking' and has_access:
         # УНИВЕРСАЛЬНО: Любая роль из "Мои тесты 📋" с доступом к тесту
-        existing_result = await get_user_test_result(session, user.id, test_id)
+        existing_result = await get_user_test_result(session, user.id, test_id, company_id=user.company_id)
         
         test_info_for_user = f"""📌 <b>{test.name}</b>
 
@@ -1024,7 +1047,7 @@ async def process_grant_access_to_test(callback: CallbackQuery, state: FSMContex
         return
     
     # Проверяем, является ли пользователь наставником
-    trainees = await get_mentor_trainees(session, user.id)
+    trainees = await get_mentor_trainees(session, user.id, company_id=user.company_id)
     
     if not trainees:
         await callback.message.edit_text(
@@ -1040,7 +1063,7 @@ async def process_grant_access_to_test(callback: CallbackQuery, state: FSMContex
         await callback.answer()
         return
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.message.answer("❌ Тест не найден.")
         await callback.answer()
@@ -1075,7 +1098,7 @@ async def process_grant_to_trainee(callback: CallbackQuery, state: FSMContext, s
     trainee_id = int(parts[2])
     
     user = await get_user_by_tg_id(session, callback.from_user.id)
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     trainee = await get_user_by_id(session, trainee_id)
     
     if not all([user, test, trainee]):
@@ -1084,7 +1107,7 @@ async def process_grant_to_trainee(callback: CallbackQuery, state: FSMContext, s
         return
     
     # Предоставляем доступ с отправкой уведомления
-    success = await grant_test_access(session, trainee_id, test_id, user.id, bot)
+    success = await grant_test_access(session, trainee_id, test_id, user.id, company_id=user.company_id, bot=bot)
     
     if success:
         await callback.message.edit_text(
@@ -1126,6 +1149,11 @@ async def process_grant_to_trainee(callback: CallbackQuery, state: FSMContext, s
 @router.callback_query(F.data.startswith("edit_test:"))
 async def process_edit_test_menu(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показывает меню редактирования теста"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     parts = callback.data.split(':')
     test_id = int(parts[1])
     
@@ -1139,7 +1167,7 @@ async def process_edit_test_menu(callback: CallbackQuery, state: FSMContext, ses
         except (ValueError, IndexError):
             pass
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
         return
@@ -1211,6 +1239,11 @@ async def process_new_test_name(message: Message, state: FSMContext):
 @router.callback_query(TestCreationStates.waiting_for_new_test_description, F.data == "edit_description:skip")
 async def process_skip_edit_description(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработка пропуска описания при редактировании"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     data = await state.get_data()
     test_id = data['test_id_to_edit']
     
@@ -1219,9 +1252,9 @@ async def process_skip_edit_description(callback: CallbackQuery, state: FSMConte
         "description": None
     }
     
-    await update_test(session, test_id, update_data)
+    await update_test(session, test_id, update_data, company_id=user.company_id)
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     # Получаем session_id из state перед очисткой
     data = await state.get_data()
     session_id = data.get('editor_session_id')
@@ -1240,6 +1273,11 @@ async def process_skip_edit_description(callback: CallbackQuery, state: FSMConte
 @router.message(TestCreationStates.waiting_for_new_test_description)
 async def process_new_test_description(message: Message, state: FSMContext, session: AsyncSession):
     """Обновляет метаданные теста"""
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        await message.answer("❌ Ты не зарегистрирован в системе.")
+        return
+    
     data = await state.get_data()
     test_id = data['test_id_to_edit']
     description = None if message.text.lower() == 'пропустить' else message.text.strip()
@@ -1249,9 +1287,9 @@ async def process_new_test_description(message: Message, state: FSMContext, sess
         "description": description
     }
     
-    await update_test(session, test_id, update_data)
+    await update_test(session, test_id, update_data, company_id=user.company_id)
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     # Получаем session_id из state перед очисткой
     data = await state.get_data()
     session_id = data.get('editor_session_id')
@@ -1270,8 +1308,13 @@ async def process_new_test_description(message: Message, state: FSMContext, sess
 @router.callback_query(F.data.startswith("edit_test_threshold:"))
 async def process_edit_threshold(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Запрашивает новый проходной балл"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
         return
@@ -1296,9 +1339,14 @@ async def process_edit_threshold(callback: CallbackQuery, state: FSMContext, ses
 @router.message(TestCreationStates.waiting_for_new_threshold)
 async def process_new_threshold(message: Message, state: FSMContext, session: AsyncSession):
     """Обновляет проходной балл"""
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        await message.answer("❌ Ты не зарегистрирован в системе.")
+        return
+    
     data = await state.get_data()
     test_id = data['test_id_to_edit']
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     
     try:
         new_threshold = float(message.text.replace(',', '.').strip())
@@ -1328,11 +1376,16 @@ async def process_new_threshold(message: Message, state: FSMContext, session: As
 
 async def _show_questions_list(message, state: FSMContext, session: AsyncSession, test_id: int):
     """Внутренняя функция для отображения списка вопросов"""
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        await message.answer("❌ Ты не зарегистрирован в системе.")
+        return
+    
     # Получаем session_id из state, если тест открыт из редактора траекторий
     data = await state.get_data()
     session_id = data.get('editor_session_id')
     
-    questions = await get_test_questions(session, test_id)
+    questions = await get_test_questions(session, test_id, company_id=user.company_id)
     
     if not questions:
         text = "В этом тесте пока нет вопросов. Ты можешь добавить их."
@@ -1374,7 +1427,7 @@ async def process_manage_questions(callback: CallbackQuery, state: FSMContext, s
     await callback.answer()
 
 
-async def _show_question_edit_menu(message, state: FSMContext, session: AsyncSession, question_id: int):
+async def _show_question_edit_menu(message, state: FSMContext, session: AsyncSession, question_id: int, company_id: int):
     """Внутренняя функция для отображения меню редактирования вопроса"""
     question = await session.get(TestQuestion, question_id)
     if not question:
@@ -1388,7 +1441,7 @@ async def _show_question_edit_menu(message, state: FSMContext, session: AsyncSes
     await state.update_data(question_id_to_edit=question_id, test_id_to_edit=question.test_id)
     
     # Определяем, первый ли и последний ли это вопрос
-    questions = await get_test_questions(session, question.test_id)
+    questions = await get_test_questions(session, question.test_id, company_id=company_id)
     is_first = question.question_number == 1
     is_last = question.question_number == len(questions)
 
@@ -1426,14 +1479,24 @@ async def _show_question_edit_menu(message, state: FSMContext, session: AsyncSes
 @router.callback_query(F.data.startswith("select_question_for_edit:"))
 async def select_question_for_edit(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показывает меню действий для выбранного вопроса"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     question_id = int(callback.data.split(':')[1])
-    await _show_question_edit_menu(callback.message, state, session, question_id)
+    await _show_question_edit_menu(callback.message, state, session, question_id, company_id=user.company_id)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("move_q_"))
 async def move_question(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Перемещает вопрос вверх или вниз"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     direction = callback.data.split(':')[0].split('_')[2]
     question_id = int(callback.data.split(':')[1])
     
@@ -1443,7 +1506,7 @@ async def move_question(callback: CallbackQuery, state: FSMContext, session: Asy
         return
         
     test_id = question.test_id
-    questions = await get_test_questions(session, test_id)
+    questions = await get_test_questions(session, test_id, company_id=user.company_id)
     
     # Находим индекс вопроса
     current_index = -1
@@ -1469,20 +1532,25 @@ async def move_question(callback: CallbackQuery, state: FSMContext, session: Asy
 @router.callback_query(F.data.startswith("q_stats:"))
 async def question_statistics(callback: CallbackQuery, session: AsyncSession):
     """Показывает статистику по вопросу"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     question_id = int(callback.data.split(':')[1])
     question = await session.get(TestQuestion, question_id)
     if not question:
         await callback.answer("❌ Вопрос не найден.", show_alert=True)
         return
 
-    stats = await get_question_analytics(session, question_id)
+    stats = await get_question_analytics(session, question_id, company_id=user.company_id)
     
     total = stats.get("total_answers", 0)
     correct = stats.get("correct_answers", 0)
     success_rate = (correct / total * 100) if total > 0 else 0
     
     # Получаем информацию о тесте для контекста
-    test = await get_test_by_id(session, question.test_id)
+    test = await get_test_by_id(session, question.test_id, company_id=user.company_id)
     test_name = test.name if test else "Неизвестный тест"
     
     if total == 0:
@@ -1542,13 +1610,18 @@ async def process_edit_question_text(callback: CallbackQuery, state: FSMContext)
 @router.message(TestCreationStates.waiting_for_question_edit)
 async def save_new_question_text(message: Message, state: FSMContext, session: AsyncSession):
     """Сохраняет новый текст вопроса"""
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        await message.answer("❌ Ты не зарегистрирован в системе.")
+        return
+    
     data = await state.get_data()
     question_id = data['question_id_to_edit']
-    await update_question(session, question_id, {"question_text": message.text.strip()})
+    await update_question(session, question_id, {"question_text": message.text.strip()}, company_id=user.company_id)
     
     await message.answer("✅ Текст вопроса обновлен.")
     # Возвращаемся к меню редактирования вопроса
-    await _show_question_edit_menu(message, state, session, question_id)
+    await _show_question_edit_menu(message, state, session, question_id, company_id=user.company_id)
 
 
 @router.callback_query(F.data.startswith("edit_q_answer:"))
@@ -1592,6 +1665,11 @@ async def process_edit_question_answer(callback: CallbackQuery, state: FSMContex
 @router.message(TestCreationStates.waiting_for_answer_edit)
 async def save_new_question_answer(message: Message, state: FSMContext, session: AsyncSession):
     """Сохраняет новый ответ на вопрос"""
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        await message.answer("❌ Ты не зарегистрирован в системе.")
+        return
+    
     data = await state.get_data()
     question_id = data['question_id_to_edit']
     question = await session.get(TestQuestion, question_id)
@@ -1616,10 +1694,10 @@ async def save_new_question_answer(message: Message, state: FSMContext, session:
             await message.answer(f"❌ Введи номер от 1 до {len(question.options)}.")
             return
 
-    await update_question(session, question_id, {"correct_answer": new_answer})
+    await update_question(session, question_id, {"correct_answer": new_answer}, company_id=user.company_id)
     
     await message.answer("✅ Ответ на вопрос обновлен.")
-    await _show_question_edit_menu(message, state, session, question_id)
+    await _show_question_edit_menu(message, state, session, question_id, company_id=user.company_id)
 
 
 @router.callback_query(F.data.startswith("edit_q_points:"))
@@ -1640,6 +1718,11 @@ async def process_edit_question_points(callback: CallbackQuery, state: FSMContex
 @router.message(TestCreationStates.waiting_for_points_edit)
 async def save_new_question_points(message: Message, state: FSMContext, session: AsyncSession):
     """Сохраняет новое количество баллов"""
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        await message.answer("❌ Ты не зарегистрирован в системе.")
+        return
+    
     data = await state.get_data()
     question_id = data['question_id_to_edit']
     
@@ -1658,10 +1741,10 @@ async def save_new_question_points(message: Message, state: FSMContext, session:
         await message.answer("❌ Пожалуйста, введи число.")
         return
 
-    await update_question(session, question_id, {"points": points, "penalty_points": penalty})
+    await update_question(session, question_id, {"points": points, "penalty_points": penalty}, company_id=user.company_id)
     
     await message.answer("✅ Количество баллов обновлено. Максимальный балл за тест был автоматически пересчитан.")
-    await _show_question_edit_menu(message, state, session, question_id)
+    await _show_question_edit_menu(message, state, session, question_id, company_id=user.company_id)
 
 
 @router.callback_query(F.data.startswith("delete_q:"))
@@ -1674,8 +1757,14 @@ async def process_delete_question(callback: CallbackQuery, state: FSMContext, se
         await callback.answer("❌ Вопрос не найден.", show_alert=True)
         return
 
+    # Получаем пользователя для company_id
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+
     test_id = question.test_id
-    await delete_question(session, question_id)
+    await delete_question(session, question_id, company_id=user.company_id)
     
     await callback.message.edit_text(
         f"✅ Вопрос №{question.question_number} был успешно удален.\n"
@@ -1700,16 +1789,21 @@ async def back_to_question_list(callback: CallbackQuery, state: FSMContext, sess
 @router.callback_query(F.data.startswith("test_results:"))
 async def process_test_results(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик просмотра результатов теста"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     
     if not test:
         await callback.message.answer("❌ Тест не найден.")
         await callback.answer()
         return
     
-    results = await get_test_results_summary(session, test_id)
+    results = await get_test_results_summary(session, test_id, company_id=user.company_id)
     
     if not results:
         await callback.message.edit_text(
@@ -1760,9 +1854,14 @@ async def process_test_results(callback: CallbackQuery, state: FSMContext, sessi
 @router.callback_query(F.data.startswith("delete_test:"))
 async def process_delete_test(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик удаления теста"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     
     if not test:
         await callback.message.answer("❌ Тест не найден.")
@@ -1802,9 +1901,14 @@ async def process_delete_test(callback: CallbackQuery, state: FSMContext, sessio
 @router.callback_query(F.data.startswith("confirm_delete_test:"))
 async def process_confirm_delete_test(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Подтверждение удаления теста"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     
     if not test:
         await callback.message.answer("❌ Тест не найден.")
@@ -1828,7 +1932,7 @@ async def process_confirm_delete_test(callback: CallbackQuery, state: FSMContext
         await callback.answer()
         return
     
-    success = await delete_test(session, test_id)
+    success = await delete_test(session, test_id, company_id=user.company_id)
     
     if success:
         await callback.message.edit_text(
@@ -1859,7 +1963,7 @@ async def process_confirm_delete_test(callback: CallbackQuery, state: FSMContext
     await callback.answer()
 
 @router.callback_query(F.data.startswith("test_filter:"))
-async def process_test_filter(callback: CallbackQuery, session: AsyncSession):
+async def process_test_filter(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик выбора фильтра тестов"""
     filter_type = callback.data.split(':')[1]
     
@@ -1872,12 +1976,14 @@ async def process_test_filter(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("❌ Пользователь не найден.", show_alert=True)
         return
 
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
+
     if filter_type == "my":
-        tests = await get_tests_by_creator(session, user.id)
+        tests = await get_tests_by_creator(session, user.id, company_id=user.company_id)
         list_title = "📋 <b>Список твоих тестов</b>"
         empty_message = "У тебя пока нет созданных тестов."
     else:  # all
-        tests = await get_all_active_tests(session)
+        tests = await get_all_active_tests(session, company_id)
         list_title = "📋 <b>Список всех тестов в системе</b>"
         empty_message = "В системе пока нет созданных тестов."
 
@@ -1920,7 +2026,8 @@ async def process_back_to_tests(callback: CallbackQuery, state: FSMContext, sess
         )
     # Наставники (без права create_tests) возвращаются к списку всех тестов
     else:
-        tests = await get_all_active_tests(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        tests = await get_all_active_tests(session, company_id)
         if not tests:
             await callback.message.edit_text(
                 "📋 <b>Список доступных тестов</b>\n\n"
@@ -1978,6 +2085,11 @@ async def process_edit_test_stage(callback: CallbackQuery, state: FSMContext, se
 @router.callback_query(TestCreationStates.waiting_for_new_stage, F.data.startswith("stage:"))
 async def save_new_test_stage(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Сохраняет новый этап для теста"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     stage_id_str = callback.data.split(':')[1]
     stage_id = int(stage_id_str) if stage_id_str != 'none' else None
     
@@ -1985,9 +2097,9 @@ async def save_new_test_stage(callback: CallbackQuery, state: FSMContext, sessio
     test_id = data['test_id_to_edit']
     session_id = data.get('editor_session_id')  # Получаем session_id из state
     
-    await update_test(session, test_id, {"stage_id": stage_id})
+    await update_test(session, test_id, {"stage_id": stage_id}, company_id=user.company_id)
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     stage_name = (await session.get(InternshipStage, stage_id)).name if stage_id else "не назначен"
 
     await callback.message.edit_text(
@@ -2004,14 +2116,19 @@ async def save_new_test_stage(callback: CallbackQuery, state: FSMContext, sessio
 @router.callback_query(F.data.startswith("preview_test:"))
 async def preview_test(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Предпросмотр теста"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
     # Получаем session_id из state, если тест открыт из редактора траекторий
     data = await state.get_data()
     session_id = data.get('editor_session_id')
     
-    test = await get_test_by_id(session, test_id)
-    questions = await get_test_questions(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
+    questions = await get_test_questions(session, test_id, company_id=user.company_id)
 
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
@@ -2057,13 +2174,18 @@ async def preview_test(callback: CallbackQuery, state: FSMContext, session: Asyn
 @router.callback_query(F.data.startswith("edit_test_materials:"))
 async def process_edit_test_materials(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Запрашивает новую ссылку на материалы"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
     # Получаем session_id из state, если тест открыт из редактора траекторий
     data = await state.get_data()
     session_id = data.get('editor_session_id')
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
         return
@@ -2085,6 +2207,11 @@ async def process_edit_test_materials(callback: CallbackQuery, state: FSMContext
 @router.callback_query(TestCreationStates.waiting_for_new_materials, F.data == "edit_materials:delete")
 async def process_delete_materials(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработка удаления материалов"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     data = await state.get_data()
     test_id = data['test_id_to_edit']
     
@@ -2093,9 +2220,9 @@ async def process_delete_materials(callback: CallbackQuery, state: FSMContext, s
         "material_file_path": None
     }
     
-    await update_test(session, test_id, update_data)
+    await update_test(session, test_id, update_data, company_id=user.company_id)
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     # Получаем session_id из state перед очисткой
     data = await state.get_data()
     session_id = data.get('editor_session_id')
@@ -2114,6 +2241,11 @@ async def process_delete_materials(callback: CallbackQuery, state: FSMContext, s
 @router.message(TestCreationStates.waiting_for_new_materials)
 async def save_new_materials(message: Message, state: FSMContext, session: AsyncSession):
     """Сохраняет новую ссылку на материалы или документ"""
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        await message.answer("❌ Ты не зарегистрирован в системе.")
+        return
+    
     data = await state.get_data()
     test_id = data['test_id_to_edit']
     
@@ -2190,9 +2322,9 @@ async def save_new_materials(message: Message, state: FSMContext, session: Async
         )
         return
     
-    await update_test(session, test_id, update_data)
+    await update_test(session, test_id, update_data, company_id=user.company_id)
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     # Получаем session_id из state перед очисткой
     data = await state.get_data()
     session_id = data.get('editor_session_id')
@@ -2210,13 +2342,18 @@ async def save_new_materials(message: Message, state: FSMContext, session: Async
 @router.callback_query(F.data.startswith("edit_test_settings:"))
 async def process_test_settings(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показывает меню настроек теста"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
     # Получаем session_id из state, если тест открыт из редактора траекторий
     data = await state.get_data()
     session_id = data.get('editor_session_id')
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
         return
@@ -2232,13 +2369,18 @@ async def process_test_settings(callback: CallbackQuery, state: FSMContext, sess
 @router.callback_query(F.data.startswith("toggle_shuffle:"))
 async def toggle_shuffle_questions(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Переключает перемешивание вопросов"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
     # Получаем session_id из state, если тест открыт из редактора траекторий
     data = await state.get_data()
     session_id = data.get('editor_session_id')
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
         return
@@ -2277,8 +2419,13 @@ async def process_bool_answer(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("edit_attempts:"))
 async def process_edit_attempts(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Запрашивает новое количество попыток"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
         return
@@ -2300,6 +2447,11 @@ async def process_edit_attempts(callback: CallbackQuery, state: FSMContext, sess
 @router.message(TestCreationStates.waiting_for_new_attempts)
 async def save_new_attempts(message: Message, state: FSMContext, session: AsyncSession):
     """Сохраняет новое количество попыток"""
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        await message.answer("❌ Ты не зарегистрирован в системе.")
+        return
+    
     data = await state.get_data()
     test_id = data['test_id_to_edit']
     
@@ -2312,9 +2464,9 @@ async def save_new_attempts(message: Message, state: FSMContext, session: AsyncS
         await message.answer("❌ Пожалуйста, введи число.")
         return
         
-    await update_test(session, test_id, {"max_attempts": attempts})
+    await update_test(session, test_id, {"max_attempts": attempts}, company_id=user.company_id)
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     # Получаем session_id из state перед очисткой
     data = await state.get_data()
     session_id = data.get('editor_session_id')
@@ -2335,13 +2487,18 @@ async def save_new_attempts(message: Message, state: FSMContext, session: AsyncS
 @router.callback_query(F.data.startswith("add_q_to_test:"))
 async def add_question_to_test_handler(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Начинает процесс добавления нового вопроса к существующему тесту"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
         return
 
-    questions = await get_test_questions(session, test_id)
+    questions = await get_test_questions(session, test_id, company_id=user.company_id)
     
     # Преобразуем существующие вопросы в формат словарей для совместимости
     questions_dict = []
@@ -2568,9 +2725,14 @@ async def cancel_question_creation(callback: CallbackQuery, state: FSMContext, s
 )
 async def process_view_materials_admin(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик просмотра материалов для рекрутера/наставника (только в контексте управления)"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.answer("❌ Тест не найден.", show_alert=True)
         return

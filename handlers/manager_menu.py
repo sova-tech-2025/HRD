@@ -47,8 +47,12 @@ async def cmd_my_attestations(message: Message, state: FSMContext, session: Asyn
             )
             return
 
-        # Получаем стажеров руководителя
-        trainees = await get_manager_trainees(session, user.id)
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id') or user.company_id
+
+        # Получаем стажеров руководителя с изоляцией по компании
+        trainees = await get_manager_trainees(session, user.id, company_id=company_id)
 
         if not trainees:
             await message.answer(
@@ -75,8 +79,8 @@ async def cmd_my_attestations(message: Message, state: FSMContext, session: Asyn
         for trainee_manager in trainees:
             trainee = trainee_manager.trainee
 
-            # Получаем результаты аттестаций стажера
-            results = await get_attestation_results(session, trainee.id)
+            # Получаем результаты аттестаций стажера с изоляцией по компании
+            results = await get_attestation_results(session, trainee.id, company_id=company_id)
             last_result = results[0] if results else None
 
             status_text = "Не проводилась"
@@ -125,8 +129,11 @@ async def callback_select_trainee_for_attestation(callback: CallbackQuery, sessi
             await callback.message.edit_text("Стажер не найден")
             return
 
-        # Получаем результаты аттестаций
-        results = await get_attestation_results(session, trainee_id)
+        # Получаем company_id для изоляции
+        company_id = trainee.company_id
+
+        # Получаем результаты аттестаций с изоляцией по компании
+        results = await get_attestation_results(session, trainee_id, company_id=company_id)
 
         # Формируем информацию о стажере
         trainee_info = (
@@ -192,8 +199,11 @@ async def callback_back_to_my_attestations(callback: CallbackQuery, session: Asy
             await callback.message.edit_text("Пользователь не найден")
             return
 
-        # Получаем стажеров руководителя
-        trainees = await get_manager_trainees(session, user.id)
+        # Получаем company_id для изоляции
+        company_id = user.company_id
+
+        # Получаем стажеров руководителя с изоляцией по компании
+        trainees = await get_manager_trainees(session, user.id, company_id=company_id)
 
         if not trainees:
             await callback.message.edit_text(
@@ -214,8 +224,8 @@ async def callback_back_to_my_attestations(callback: CallbackQuery, session: Asy
         for trainee_manager in trainees:
             trainee = trainee_manager.trainee
 
-            # Получаем результаты аттестаций стажера
-            results = await get_attestation_results(session, trainee.id)
+            # Получаем результаты аттестаций стажера с изоляцией по компании
+            results = await get_attestation_results(session, trainee.id, company_id=company_id)
             last_result = results[0] if results else None
 
             status_text = "Не проводилась"
@@ -272,8 +282,12 @@ async def cmd_my_trainees(message: Message, state: FSMContext, session: AsyncSes
             )
             return
 
-        # Получаем стажеров руководителя
-        trainees = await get_manager_trainees(session, user.id)
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id') or user.company_id
+
+        # Получаем стажеров руководителя с изоляцией по компании
+        trainees = await get_manager_trainees(session, user.id, company_id=company_id)
 
         if not trainees:
             await message.answer(
@@ -299,8 +313,8 @@ async def cmd_my_trainees(message: Message, state: FSMContext, session: AsyncSes
         for trainee_manager in trainees:
             trainee = trainee_manager.trainee
 
-            # Получаем результаты аттестаций стажера
-            results = await get_attestation_results(session, trainee.id)
+            # Получаем результаты аттестаций стажера с изоляцией по компании
+            results = await get_attestation_results(session, trainee.id, company_id=company_id)
             last_result = results[0] if results else None
 
             status_text = "Не проводилась"

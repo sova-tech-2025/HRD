@@ -31,4 +31,23 @@ MANAGER_IDS = [int(id.strip()) for id in MANAGER_IDS_STR.split(",") if id.strip(
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Роль по умолчанию для новых пользователей
-DEFAULT_ROLE = os.getenv("DEFAULT_ROLE", "Стажер") 
+DEFAULT_ROLE = os.getenv("DEFAULT_ROLE", "Стажер")
+
+# =================================================================
+# НАСТРОЙКИ КОМПАНИЙ И ПОДПИСОК
+# =================================================================
+
+# Период пробной подписки (в днях)
+TRIAL_PERIOD_DAYS = int(os.getenv("TRIAL_PERIOD_DAYS", "5"))
+
+# Лимит пользователей по умолчанию для новых компаний
+DEFAULT_MEMBERS_LIMIT = int(os.getenv("DEFAULT_MEMBERS_LIMIT", "15"))
+
+# Длина кода приглашения
+INVITE_CODE_LENGTH = int(os.getenv("INVITE_CODE_LENGTH", "10"))
+
+# Префикс для кода приглашения (опционально)
+INVITE_CODE_PREFIX = os.getenv("INVITE_CODE_PREFIX", "")
+
+# Дни предупреждения об окончании подписки
+SUBSCRIPTION_WARNING_DAYS = [int(d) for d in os.getenv("SUBSCRIPTION_WARNING_DAYS", "3,7,14").split(",")] 

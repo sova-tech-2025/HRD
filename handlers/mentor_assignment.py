@@ -48,7 +48,7 @@ async def cmd_assign_mentor(message: Message, state: FSMContext, session: AsyncS
             return
 
         # Получаем список стажеров без наставника
-        trainees_without_mentor = await get_trainees_without_mentor(session)
+        trainees_without_mentor = await get_trainees_without_mentor(session, company_id=user.company_id)
 
         if not trainees_without_mentor:
             await message.answer(
@@ -126,7 +126,7 @@ async def callback_select_trainee(callback: CallbackQuery, state: FSMContext, se
             return
 
         # Получаем доступных наставников для этого стажера
-        available_mentors = await get_available_mentors_for_trainee(session, trainee_id)
+        available_mentors = await get_available_mentors_for_trainee(session, trainee_id, company_id=trainee.company_id)
 
         if not available_mentors:
             await callback.message.edit_text(
@@ -265,6 +265,7 @@ async def callback_confirm_mentor_assignment(callback: CallbackQuery, state: FSM
         trainee_id = state_data.get("selected_trainee_id")
         mentor_id = state_data.get("selected_mentor_id")
         recruiter_id = callback.from_user.id
+        company_id = state_data.get('company_id')
 
         if not trainee_id or not mentor_id:
             await callback.message.edit_text("Ошибка: данные не найдены")
@@ -272,7 +273,7 @@ async def callback_confirm_mentor_assignment(callback: CallbackQuery, state: FSM
 
         # Назначаем наставника
         from main import bot
-        success = await assign_mentor_to_trainee(session, trainee_id, mentor_id, recruiter_id, bot)
+        success = await assign_mentor_to_trainee(session, trainee_id, mentor_id, recruiter_id, bot, company_id)
 
         if success:
             # Получаем обновленные данные для отображения
@@ -369,7 +370,7 @@ async def callback_assign_mentor(callback: CallbackQuery, state: FSMContext, ses
             return
 
         # Получаем список стажеров без наставника
-        trainees_without_mentor = await get_trainees_without_mentor(session)
+        trainees_without_mentor = await get_trainees_without_mentor(session, company_id=user.company_id)
 
         if not trainees_without_mentor:
             await callback.message.edit_text(

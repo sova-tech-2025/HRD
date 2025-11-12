@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Table, Text, Float, Index
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Table, Text, Float, Index, CheckConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
@@ -45,10 +45,12 @@ class User(Base):
     is_activated = Column(Boolean, default=False)  # Активация рекрутером
     internship_object_id = Column(Integer, ForeignKey('objects.id'), nullable=True)  # Объект стажировки
     work_object_id = Column(Integer, ForeignKey('objects.id'), nullable=True)  # Объект работы
+    company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания пользователя
     
     roles = relationship("Role", secondary=user_roles, back_populates="users")
     groups = relationship("Group", secondary=user_groups, back_populates="users")
     objects = relationship("Object", secondary=user_objects, back_populates="users")
+    company = relationship("Company", foreign_keys=[company_id], back_populates="users")
     
     # Связи для объектов стажировки и работы
     internship_object = relationship("Object", foreign_keys=[internship_object_id])
@@ -69,6 +71,8 @@ class User(Base):
         Index('idx_user_tg_id_active', 'tg_id', 'is_active'),
         Index('idx_user_is_active', 'is_active'),
         Index('idx_user_phone', 'phone_number'),
+        Index('idx_user_company', 'company_id'),
+        Index('idx_user_company_active', 'company_id', 'is_active'),
     )
     
     def __repr__(self):
@@ -122,13 +126,16 @@ class Group(Base):
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Было: nullable=False
     created_date = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
+    company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания группы
     
     # Связи
     users = relationship("User", secondary=user_groups, back_populates="groups")
     created_by = relationship("User", foreign_keys=[created_by_id])
+    company = relationship("Company")
     
     __table_args__ = (
         Index('idx_group_is_active', 'is_active'),
+        Index('idx_group_company_active', 'company_id', 'is_active'),
     )
     
     def __repr__(self):
@@ -145,13 +152,16 @@ class Object(Base):
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Было: nullable=False
     created_date = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
+    company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания объекта
     
     # Связи
     users = relationship("User", secondary=user_objects, back_populates="objects")
     created_by = relationship("User", foreign_keys=[created_by_id])
+    company = relationship("Company")
     
     __table_args__ = (
         Index('idx_object_is_active', 'is_active'),
+        Index('idx_object_company_active', 'company_id', 'is_active'),
     )
     
     def __repr__(self):
@@ -204,6 +214,7 @@ class Test(Base):
     creator_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Было: nullable=False
     created_date = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
+    company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания теста
     
     # Расширенные настройки
     shuffle_questions = Column(Boolean, default=False)
@@ -215,11 +226,13 @@ class Test(Base):
     questions = relationship("TestQuestion", back_populates="test", cascade="all, delete-orphan")
     results = relationship("TestResult", back_populates="test")
     sessions = relationship("LearningSession", secondary=session_tests, back_populates="tests")  # Связь с сессиями траекторий
+    company = relationship("Company")
     
     __table_args__ = (
         Index('idx_test_is_active', 'is_active'),
         Index('idx_test_creator', 'creator_id'),
         Index('idx_test_stage', 'stage_id'),
+        Index('idx_test_company_active', 'company_id', 'is_active'),
     )
     
     def __repr__(self):
@@ -293,15 +306,18 @@ class Mentorship(Base):
     assigned_date = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
+    company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания наставничества
     
     # Связи
     mentor = relationship("User", foreign_keys=[mentor_id], back_populates="mentoring_relationships")
     trainee = relationship("User", foreign_keys=[trainee_id], back_populates="trainee_relationships")
     assigned_by = relationship("User", foreign_keys=[assigned_by_id])
+    company = relationship("Company")
 
     __table_args__ = (
         Index('idx_mentorship_mentor_active', 'mentor_id', 'is_active'),
         Index('idx_mentorship_trainee_active', 'trainee_id', 'is_active'),
+        Index('idx_mentorship_company_active', 'company_id', 'is_active'),
     )
     
     def __repr__(self):
@@ -319,16 +335,19 @@ class TraineeTestAccess(Base):
     granted_by_id = Column(Integer, ForeignKey('users.id'), nullable=False)  # Наставник, который открыл доступ
     granted_date = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
+    company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания доступа
     
     # Связи
     trainee = relationship("User", foreign_keys=[trainee_id])
     test = relationship("Test")
     granted_by = relationship("User", foreign_keys=[granted_by_id])
+    company = relationship("Company")
     
     __table_args__ = (
         Index('idx_trainee_test_access_trainee', 'trainee_id'),
         Index('idx_trainee_test_access_test', 'test_id'),
         Index('idx_trainee_test_access_active', 'is_active'),
+        Index('idx_trainee_test_access_company_active', 'company_id', 'is_active'),
     )
     
     def __repr__(self):
@@ -348,6 +367,7 @@ class LearningPath(Base):
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Рекрутер-создатель, было: nullable=False
     created_date = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
+    company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания траектории
     
     # Связи
     group = relationship("Group")
@@ -355,11 +375,13 @@ class LearningPath(Base):
     created_by = relationship("User")
     stages = relationship("LearningStage", back_populates="learning_path", cascade="all, delete-orphan", order_by="LearningStage.order_number")
     assigned_trainees = relationship("TraineeLearningPath", back_populates="learning_path", cascade="all, delete-orphan")
+    company = relationship("Company")
     
     __table_args__ = (
         Index('idx_learning_path_is_active', 'is_active'),
         Index('idx_learning_path_group', 'group_id'),
         Index('idx_learning_path_attestation', 'attestation_id'),
+        Index('idx_learning_path_company_active', 'company_id', 'is_active'),
     )
     
     def __repr__(self):
@@ -421,14 +443,17 @@ class Attestation(Base):
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Рекрутер-создатель, было: nullable=False
     created_date = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
+    company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания аттестации
     
     # Связи
     created_by = relationship("User")
     questions = relationship("AttestationQuestion", back_populates="attestation", cascade="all, delete-orphan", order_by="AttestationQuestion.question_number")
     learning_path = relationship("LearningPath", back_populates="attestation", uselist=False)
+    company = relationship("Company")
     
     __table_args__ = (
         Index('idx_attestation_is_active', 'is_active'),
+        Index('idx_attestation_company_active', 'company_id', 'is_active'),
     )
     
     def __repr__(self):
@@ -656,14 +681,17 @@ class KnowledgeFolder(Base):
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Рекрутер-создатель, было: nullable=False
     created_date = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
+    company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания папки
     
     # Связи
     created_by = relationship("User", foreign_keys=[created_by_id])
     materials = relationship("KnowledgeMaterial", back_populates="folder", cascade="all, delete-orphan", order_by="KnowledgeMaterial.order_number")
     accessible_groups = relationship("Group", secondary=folder_group_access)  # Группы с доступом к папке
+    company = relationship("Company")
     
     __table_args__ = (
         Index('idx_knowledge_folder_is_active', 'is_active'),
+        Index('idx_knowledge_folder_company_active', 'company_id', 'is_active'),
     )
     
     def __repr__(self):
@@ -697,4 +725,52 @@ class KnowledgeMaterial(Base):
     )
     
     def __repr__(self):
-        return f"<KnowledgeMaterial(id={self.id}, name={self.name}, type={self.material_type})>" 
+        return f"<KnowledgeMaterial(id={self.id}, name={self.name}, type={self.material_type})>"
+
+
+# =====================================================================
+# МОДЕЛЬ ДЛЯ УПРАВЛЕНИЯ КОМПАНИЯМИ И ПОДПИСКАМИ
+# =====================================================================
+
+class Company(Base):
+    """Модель компании с управлением подписками"""
+    
+    __tablename__ = 'companies'
+    
+    # Основные поля
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)  # max 500 символов (валидация на уровне приложения)
+    invite_code = Column(String(50), unique=True, nullable=False, index=True)
+    
+    # Подписка
+    subscribe = Column(Boolean, default=True, nullable=False, index=True)
+    start_date = Column(DateTime, nullable=False, default=datetime.now)
+    finish_date = Column(DateTime, nullable=False)  # Дата окончания подписки
+    trial = Column(Boolean, default=True, nullable=False)
+    
+    # Пользователи
+    members = Column(Integer, default=1, nullable=False)  # Текущее количество
+    members_limit = Column(Integer, default=15, nullable=False)  # Максимальное количество
+    
+    # Метаданные
+    created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Первый пользователь (Рекрутер)
+    created_date = Column(DateTime, default=datetime.now, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    
+    # Связи (будут определены после добавления company_id в User)
+    created_by = relationship("User", foreign_keys=[created_by_id], post_update=True)
+    users = relationship("User", foreign_keys="User.company_id", back_populates="company")
+    
+    # Индексы и ограничения
+    __table_args__ = (
+        Index('idx_company_subscribe_active', 'subscribe', 'is_active'),
+        Index('idx_company_finish_date', 'finish_date'),
+        Index('idx_company_invite_code', 'invite_code'),
+        CheckConstraint('members_limit >= members', name='chk_members_limit'),
+        CheckConstraint('finish_date >= start_date', name='chk_finish_date'),
+        CheckConstraint('NOT (subscribe = FALSE AND trial = TRUE)', name='chk_subscribe_trial'),
+    )
+    
+    def __repr__(self):
+        return f"<Company(id={self.id}, name={self.name}, subscribe={self.subscribe}, members={self.members}/{self.members_limit})>" 

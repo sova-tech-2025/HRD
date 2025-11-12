@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import (
     get_user_by_tg_id, get_unactivated_users, get_all_roles, 
     get_all_groups, get_all_objects, activate_user,
-    get_user_by_id, check_user_permission, search_unactivated_users_by_name
+    get_user_by_id, check_user_permission, search_unactivated_users_by_name, ensure_company_id
 )
 from utils.logger import logger
 from keyboards.keyboards import get_main_menu_keyboard, get_new_users_list_keyboard
@@ -70,15 +70,24 @@ async def show_role_selection(callback: CallbackQuery, state: FSMContext, sessio
     await state.set_state(UserActivationStates.waiting_for_role_selection)
     return True
 
-async def show_group_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession, user_id: int, role_name: str):
+async def show_group_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession, user_id: int, role_name: str, company_id: int = None):
     """Универсальная функция для показа выбора группы"""
     user = await get_user_by_id(session, user_id)
     if not user:
         await callback.message.edit_text("❌ Пользователь не найден")
         return False
     
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None and user and user.company_id:
+        company_id = user.company_id
+    if company_id is None:
+        await callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+        await state.clear()
+        log_user_error(callback.from_user.id, "show_group_selection_company_missing", "company_id not resolved")
+        return False
     # Получаем список групп
-    groups = await get_all_groups(session)
+    groups = await get_all_groups(session, company_id)
     
     if not groups:
         await callback.message.edit_text("❌ В системе нет групп. Сначала создай группы.")
@@ -120,15 +129,24 @@ async def show_group_selection(callback: CallbackQuery, state: FSMContext, sessi
     return True
 
 
-async def show_work_object_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession, user_id: int, role_name: str):
+async def show_work_object_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession, user_id: int, role_name: str, company_id: int = None):
     """Универсальная функция для показа выбора объекта работы"""
     user = await get_user_by_id(session, user_id)
     if not user:
         await callback.message.edit_text("❌ Пользователь не найден")
         return False
     
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None and user and user.company_id:
+        company_id = user.company_id
+    if company_id is None:
+        await callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+        await state.clear()
+        log_user_error(callback.from_user.id, "show_work_object_selection_company_missing", "company_id not resolved")
+        return False
     # Получаем список объектов
-    objects = await get_all_objects(session)
+    objects = await get_all_objects(session, company_id)
     
     if not objects:
         await callback.message.edit_text("❌ В системе нет объектов. Сначала создай объекты.")
@@ -187,8 +205,16 @@ async def cmd_new_users_list(message: Message, state: FSMContext, session: Async
         await message.answer("❌ Недостаточно прав\nУ тебя нет прав для управления пользователями.")
         return
 
+    # Получаем company_id
+    company_id = await ensure_company_id(session, state, message.from_user.id)
+    if company_id is None:
+        await message.answer("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+        await state.clear()
+        log_user_error(message.from_user.id, "user_activation_company_missing", "company_id not resolved")
+        return
+
     # Получаем список неактивированных пользователей
-    unactivated_users = await get_unactivated_users(session)
+    unactivated_users = await get_unactivated_users(session, company_id)
     
     if not unactivated_users:
         await message.answer(
@@ -285,7 +311,13 @@ async def process_search_query_new_users(message: Message, state: FSMContext, se
             return
         
         # Выполняем поиск
-        users = await search_unactivated_users_by_name(session, query)
+        company_id = await ensure_company_id(session, state, message.from_user.id)
+        if company_id is None:
+            await message.answer("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await state.clear()
+            log_user_error(message.from_user.id, "search_new_users_company_missing", "company_id not resolved")
+            return
+        users = await search_unactivated_users_by_name(session, query, company_id=company_id)
         
         if not users:
             # Пользователи не найдены
@@ -353,8 +385,16 @@ async def callback_back_to_new_users_list(callback: CallbackQuery, state: FSMCon
     try:
         await callback.answer()
         
+        # Получаем company_id
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.answer("Не удалось определить компанию. Обнови сессию командой /start.", show_alert=True)
+            await state.clear()
+            log_user_error(callback.from_user.id, "back_to_new_users_company_missing", "company_id not resolved")
+            return
+        
         # Получаем список неактивированных пользователей
-        unactivated_users = await get_unactivated_users(session)
+        unactivated_users = await get_unactivated_users(session, company_id)
         
         if not unactivated_users:
             await callback.message.edit_text(
@@ -422,8 +462,16 @@ async def process_user_selection(callback: CallbackQuery, state: FSMContext, ses
 async def process_back_to_user_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработка кнопки 'Назад' - возврат к выбору пользователя"""
     try:
+        # Получаем company_id
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.answer("Не удалось определить компанию. Обнови сессию командой /start.", show_alert=True)
+            await state.clear()
+            log_user_error(callback.from_user.id, "back_to_user_selection_company_missing", "company_id not resolved")
+            return
+        
         # Получаем список неактивированных пользователей
-        unactivated_users = await get_unactivated_users(session)
+        unactivated_users = await get_unactivated_users(session, company_id)
         
         if not unactivated_users:
             await callback.message.edit_text(
@@ -469,13 +517,21 @@ async def process_role_selection(callback: CallbackQuery, state: FSMContext, ses
     # Сохраняем роль в состоянии
     await state.update_data(selected_role=role_name)
     
-    # Получаем данные пользователя
+    # Получаем данные пользователя и компании
     state_data = await state.get_data()
     user_id = state_data['selected_user_id']
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
     user = await get_user_by_id(session, user_id)
     
+    if company_id is None and user and user.company_id:
+        company_id = user.company_id
+    if company_id is None:
+        await callback.answer("Не удалось определить компанию. Обнови сессию командой /start.", show_alert=True)
+        await state.clear()
+        log_user_error(callback.from_user.id, "select_role_company_missing", "company_id not resolved")
+        return
     # Получаем список групп
-    groups = await get_all_groups(session)
+    groups = await get_all_groups(session, company_id)
     
     if not groups:
         await callback.message.edit_text("❌ В системе нет групп. Сначала создай группы.")
@@ -554,13 +610,22 @@ async def process_group_selection(callback: CallbackQuery, state: FSMContext, se
     
     # Получаем название группы
     from database.db import get_group_by_id
-    group = await get_group_by_id(session, group_id)
+    group = await get_group_by_id(session, group_id, company_id=user.company_id)
     group_name = group.name if group else "Неизвестна"
     
-    # Проверяем роль - объект стажировки показывается ТОЛЬКО для стажеров
+        # Проверяем роль - объект стажировки показывается ТОЛЬКО для стажеров
     if role_name == "Стажер":
+        company_id_for_objects = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id_for_objects is None and user and user.company_id:
+            company_id_for_objects = user.company_id
+        if company_id_for_objects is None:
+            await callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await callback.answer()
+            await state.clear()
+            log_user_error(callback.from_user.id, "select_group_company_missing", "company_id not resolved")
+            return
         # Получаем список объектов для стажировки
-        objects = await get_all_objects(session)
+        objects = await get_all_objects(session, company_id_for_objects)
         
         if not objects:
             await callback.message.edit_text("❌ В системе нет объектов. Сначала создай объекты.")
@@ -649,8 +714,8 @@ async def process_internship_object_selection(callback: CallbackQuery, state: FS
     
     # Получаем названия группы и объекта стажировки
     from database.db import get_group_by_id, get_object_by_id
-    group = await get_group_by_id(session, group_id)
-    internship_object = await get_object_by_id(session, internship_object_id)
+    group = await get_group_by_id(session, group_id, company_id=user.company_id)
+    internship_object = await get_object_by_id(session, internship_object_id, company_id=user.company_id)
     
     group_name = group.name if group else "Неизвестна"
     internship_object_name = internship_object.name if internship_object else "Неизвестен"
@@ -668,6 +733,7 @@ async def process_back_to_previous_step(callback: CallbackQuery, state: FSMConte
         state_data = await state.get_data()
         user_id = state_data['selected_user_id']
         role_name = state_data['selected_role']
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
         
         if role_name == "Стажер":
             # Для стажеров возвращаемся к выбору объекта стажировки
@@ -677,8 +743,16 @@ async def process_back_to_previous_step(callback: CallbackQuery, state: FSMConte
                 await callback.answer()
                 return
             
+            if company_id is None and user and user.company_id:
+                company_id = user.company_id
+            if company_id is None:
+                await callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+                await callback.answer()
+                await state.clear()
+                log_user_error(callback.from_user.id, "back_to_previous_company_missing", "company_id not resolved")
+                return
             # Получаем список объектов для стажировки
-            objects = await get_all_objects(session)
+            objects = await get_all_objects(session, company_id)
             
             if not objects:
                 await callback.message.edit_text("❌ В системе нет объектов. Сначала создай объекты.")
@@ -721,7 +795,7 @@ async def process_back_to_previous_step(callback: CallbackQuery, state: FSMConte
             await callback.answer()
         else:
             # Для остальных ролей возвращаемся к выбору группы
-            success = await show_group_selection(callback, state, session, user_id, role_name)
+            success = await show_group_selection(callback, state, session, user_id, role_name, company_id)
             if success:
                 await callback.answer()
         
@@ -749,9 +823,9 @@ async def process_work_object_selection(callback: CallbackQuery, state: FSMConte
     
     # Получаем названия
     from database.db import get_group_by_id, get_object_by_id
-    group = await get_group_by_id(session, group_id)
-    internship_object = await get_object_by_id(session, internship_object_id)
-    work_object = await get_object_by_id(session, work_object_id)
+    group = await get_group_by_id(session, group_id, company_id=user.company_id)
+    internship_object = await get_object_by_id(session, internship_object_id, company_id=user.company_id)
+    work_object = await get_object_by_id(session, work_object_id, company_id=user.company_id)
     
     group_name = group.name if group else "Неизвестна"
     internship_object_name = internship_object.name if internship_object else "Неизвестен"
@@ -805,18 +879,31 @@ async def process_activation_confirmation(callback: CallbackQuery, state: FSMCon
     
     user = await get_user_by_id(session, user_id)
     
+    # Получаем company_id рекрутера для установки пользователю
+    recruiter = await get_user_by_tg_id(session, callback.from_user.id)
+    company_id = recruiter.company_id if recruiter and recruiter.company_id else None
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None:
+        await callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+        await callback.answer()
+        await state.clear()
+        log_user_error(callback.from_user.id, "activation_company_missing", "company_id not resolved")
+        return
+    
     # Активируем пользователя
     success = await activate_user(
         session, user_id, role_name, group_id, 
-        internship_object_id, work_object_id, bot
+        internship_object_id, work_object_id, company_id=company_id, bot=bot
     )
     
     if success:
         # Получаем названия для отчета
         from database.db import get_group_by_id, get_object_by_id
-        group = await get_group_by_id(session, group_id)
-        internship_object = await get_object_by_id(session, internship_object_id)
-        work_object = await get_object_by_id(session, work_object_id)
+        user = await get_user_by_id(session, user_id)
+        group = await get_group_by_id(session, group_id, company_id=user.company_id)
+        internship_object = await get_object_by_id(session, internship_object_id, company_id=user.company_id)
+        work_object = await get_object_by_id(session, work_object_id, company_id=user.company_id)
         
         group_name = group.name if group else "Неизвестна"
         internship_object_name = internship_object.name if internship_object else "Неизвестен"
@@ -926,8 +1013,16 @@ async def callback_show_new_users(callback: CallbackQuery, state: FSMContext, se
         await callback.answer("❌ Недостаточно прав\nУ тебя нет прав для управления пользователями.", show_alert=True)
         return
 
+    # Получаем company_id
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None:
+        await callback.answer("Не удалось определить компанию. Обнови сессию командой /start.", show_alert=True)
+        await state.clear()
+        log_user_error(callback.from_user.id, "show_new_users_company_missing", "company_id not resolved")
+        return
+
     # Получаем список неактивированных пользователей
-    unactivated_users = await get_unactivated_users(session)
+    unactivated_users = await get_unactivated_users(session, company_id)
     
     if not unactivated_users:
         await callback.message.answer(

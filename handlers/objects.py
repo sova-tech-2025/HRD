@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import (
     create_object, get_all_objects, get_object_by_id, 
     update_object_name, get_object_users, get_user_roles,
-    check_user_permission, get_user_by_tg_id, delete_object
+    check_user_permission, get_user_by_tg_id, delete_object, ensure_company_id
 )
 from handlers.auth import check_auth
 from states.states import ObjectManagementStates
@@ -115,6 +115,16 @@ async def process_object_name(message: Message, state: FSMContext, session: Asyn
             await state.clear()
             return
         
+        # Получаем company_id
+        company_id = await ensure_company_id(session, state, message.from_user.id)
+        if company_id is None:
+            await message.answer(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await state.clear()
+            log_user_error(message.from_user.id, "object_company_missing", "company_id not resolved")
+            return
+        
         object_name = message.text.strip()
         
         # Валидация названия
@@ -127,7 +137,7 @@ async def process_object_name(message: Message, state: FSMContext, session: Asyn
             return
         
         # Создаем объект
-        obj = await create_object(session, object_name, user.id)
+        obj = await create_object(session, object_name, user.id, company_id)
         if obj:
             await message.answer(
                 f"📍<b>УПРАВЛЕНИЕ ОБЪЕКТАМИ</b>📍\n"
@@ -162,6 +172,17 @@ async def callback_edit_object(callback: CallbackQuery, state: FSMContext, sessi
             await callback.answer()
             return
         
+        # Получаем company_id
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await callback.answer()
+            await state.clear()
+            log_user_error(callback.from_user.id, "object_edit_company_missing", "company_id not resolved")
+            return
+        
         # Проверка прав доступа
         has_permission = await check_user_permission(session, user.id, "manage_objects")
         if not has_permission:
@@ -173,7 +194,7 @@ async def callback_edit_object(callback: CallbackQuery, state: FSMContext, sessi
             await callback.answer()
             return
         
-        objects = await get_all_objects(session)
+        objects = await get_all_objects(session, company_id)
         
         if not objects:
             await callback.message.edit_text(
@@ -213,7 +234,7 @@ async def callback_select_object(callback: CallbackQuery, state: FSMContext, ses
             return
         
         object_id = int(callback.data.split(":")[1])
-        obj = await get_object_by_id(session, object_id)
+        obj = await get_object_by_id(session, object_id, company_id=user.company_id)
         
         if not obj:
             await callback.message.edit_text("Объект не найден")
@@ -221,8 +242,19 @@ async def callback_select_object(callback: CallbackQuery, state: FSMContext, ses
             await state.clear()
             return
         
+        # Получаем company_id
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await callback.answer()
+            await state.clear()
+            log_user_error(callback.from_user.id, "object_selection_company_missing", "company_id not resolved")
+            return
+        
         # Получаем пользователей объекта
-        object_users = await get_object_users(session, object_id)
+        object_users = await get_object_users(session, object_id, company_id=company_id)
         user_list = ""
         if object_users:
             for object_user in object_users:
@@ -370,8 +402,17 @@ async def callback_confirm_object_rename(callback: CallbackQuery, state: FSMCont
         data = await state.get_data()
         new_name = data.get("new_name")
         old_name = data.get("old_name")
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await callback.answer()
+            await state.clear()
+            log_user_error(callback.from_user.id, "object_rename_company_missing", "company_id not resolved")
+            return
         
-        if await update_object_name(session, object_id, new_name):
+        if await update_object_name(session, object_id, new_name, company_id=company_id):
             await callback.message.edit_text(
                 f"📍<b>УПРАВЛЕНИЕ ОБЪЕКТАМИ</b>📍\n"
                 f"✅<b>Название успешно изменено на:</b>\n"
@@ -423,8 +464,16 @@ async def callback_manage_delete_object(callback: CallbackQuery, state: FSMConte
             await callback.answer("У тебя нет прав для удаления объектов", show_alert=True)
             return
         
+        # Получаем company_id
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.answer("Не удалось определить компанию. Обнови сессию командой /start.", show_alert=True)
+            await state.clear()
+            log_user_error(callback.from_user.id, "object_delete_company_missing", "company_id not resolved")
+            return
+
         # Получаем все объекты
-        objects = await get_all_objects(session)
+        objects = await get_all_objects(session, company_id)
         if not objects:
             await callback.message.edit_text(
                 "📍<b>УПРАВЛЕНИЕ ОБЪЕКТАМИ</b>📍\n"
@@ -461,8 +510,16 @@ async def callback_object_delete_page(callback: CallbackQuery, state: FSMContext
     try:
         page = int(callback.data.split(":")[1])
         
+        # Получаем company_id
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.answer("Не удалось определить компанию. Обнови сессию командой /start.", show_alert=True)
+            await state.clear()
+            log_user_error(callback.from_user.id, "object_delete_page_company_missing", "company_id not resolved")
+            return
+
         # Получаем все объекты
-        objects = await get_all_objects(session)
+        objects = await get_all_objects(session, company_id)
         if not objects:
             await callback.answer("Объекты не найдены", show_alert=True)
             return
@@ -493,6 +550,11 @@ async def callback_object_delete_page(callback: CallbackQuery, state: FSMContext
 async def callback_delete_object(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик выбора объекта для удаления"""
     try:
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+            return
+        
         object_id = int(callback.data.split(":")[1])
         
         # Проверяем повторное нажатие на тот же объект
@@ -506,13 +568,17 @@ async def callback_delete_object(callback: CallbackQuery, state: FSMContext, ses
             return
         
         # Получаем информацию об объекте
-        object_obj = await get_object_by_id(session, object_id)
+        object_obj = await get_object_by_id(session, object_id, company_id=user.company_id)
         if not object_obj:
             await callback.answer("Объект не найден", show_alert=True)
             return
         
+        # Получаем company_id из контекста
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        
         # Проверяем, можно ли удалить объект (включает все проверки: user_objects, internship_object_id, work_object_id)
-        users_in_object = await get_object_users(session, object_id)
+        users_in_object = await get_object_users(session, object_id, company_id=company_id)
         if users_in_object:
             error_msg = f"❌ В объекте есть пользователи ({len(users_in_object)} чел.)"
             await callback.message.edit_text(
@@ -558,17 +624,23 @@ async def callback_delete_object(callback: CallbackQuery, state: FSMContext, ses
 async def callback_confirm_delete_object(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик подтверждения удаления объекта"""
     try:
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+            await state.clear()
+            return
+        
         object_id = int(callback.data.split(":")[1])
         
         # Получаем информацию об объекте
-        object_obj = await get_object_by_id(session, object_id)
+        object_obj = await get_object_by_id(session, object_id, company_id=user.company_id)
         if not object_obj:
             await callback.message.edit_text("Объект не найден")
             await state.clear()
             return
         
         # Удаляем объект
-        success = await delete_object(session, object_id, callback.from_user.id)
+        success = await delete_object(session, object_id, callback.from_user.id, company_id=user.company_id)
         
         if success:
             await callback.message.edit_text(

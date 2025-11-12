@@ -12,7 +12,8 @@ from states.states import (
     GroupManagementStates, ObjectManagementStates, UserActivationStates,
     UserEditStates, LearningPathStates, AttestationStates,
     TraineeTrajectoryStates, MentorAssignmentStates, AttestationAssignmentStates, 
-    ManagerAttestationStates, BroadcastStates, KnowledgeBaseStates
+    ManagerAttestationStates, BroadcastStates, KnowledgeBaseStates,
+    CompanyManagementStates
 )
 from keyboards.keyboards import get_role_selection_keyboard, get_yes_no_keyboard, get_question_type_keyboard, get_fallback_keyboard
 from utils.logger import log_user_action
@@ -1194,18 +1195,43 @@ async def handle_unexpected_broadcast_test_input(message: Message, state: FSMCon
 async def handle_unexpected_broadcast_groups_input(message: Message, state: FSMContext):
     """Обработчик неожиданного ввода при выборе групп для рассылки"""
     await send_fallback_message(message, state)
+
+# =================================
+# ОБРАБОТЧИКИ ДЛЯ СОСТОЯНИЙ УПРАВЛЕНИЯ КОМПАНИЕЙ
+# =================================
+
+@router.message(StateFilter(CompanyManagementStates.waiting_for_company_name_edit))
+async def handle_unexpected_company_name_edit_input(message: Message, state: FSMContext):
+    """Обработчик неожиданного ввода при редактировании названия компании (для не-текстовых сообщений)"""
+    await message.answer(
+        "❌ <b>Ожидается текстовое сообщение</b>\n\n"
+        "Пожалуйста, введи новое название для компании текстом.\n"
+        "Название должно содержать от 3 до 100 символов.",
+        parse_mode="HTML"
+    )
+
+@router.message(StateFilter(CompanyManagementStates.waiting_for_company_description_edit))
+async def handle_unexpected_company_description_edit_input(message: Message, state: FSMContext):
+    """Обработчик неожиданного ввода при редактировании описания компании (для не-текстовых сообщений)"""
+    await message.answer(
+        "❌ <b>Ожидается текстовое сообщение</b>\n\n"
+        "Пожалуйста, введи новое описание для компании текстом.\n"
+        "Описание не должно превышать 500 символов.",
+        parse_mode="HTML"
+    )
+
 @router.message(F.text)
 async def handle_unexpected_input_with_state(message: Message, state: FSMContext, session: AsyncSession):
     """Универсальный обработчик для неожиданного ввода в любых состояниях"""
     # Проверяем, зарегистрирован ли пользователь
     user = await get_user_by_tg_id(session, message.from_user.id)
     if not user:
-        # Если пользователь не зарегистрирован, показываем приветственное сообщение
-        from keyboards.keyboards import get_welcome_keyboard
+        # Если пользователь не зарегистрирован, показываем выбор: создать или присоединиться к компании
+        from keyboards.keyboards import get_company_selection_keyboard
         await message.answer(
             "Привет! Добро пожаловать в чат-бот.\n\n"
-            "Ты ещё не зарегистрирован. Давай подключим тебе доступ.",
-            reply_markup=get_welcome_keyboard()
+            "🏢 Выбери действие:",
+            reply_markup=get_company_selection_keyboard()
         )
         log_user_action(message.from_user.id, message.from_user.username, "unregistered user sent text")
         return

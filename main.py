@@ -8,10 +8,12 @@ from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN, LOG_LEVEL
 from database.db import init_db
-from handlers import auth, registration, common, admin, role_permissions, tests, mentorship, test_taking, groups, objects, user_activation, user_edit, learning_paths, trajectory_editor, mentor_assignment, trainee_trajectory, manager_attestation, manager_menu, employee_transition, broadcast, knowledge_base, fallback
+from handlers import auth, common, admin, role_permissions, tests, mentorship, test_taking, groups, objects, user_activation, user_edit, learning_paths, trajectory_editor, mentor_assignment, trainee_trajectory, manager_attestation, manager_menu, employee_transition, broadcast, knowledge_base, fallback, company, registration
+# registration - используется для флоу регистрации при присоединении к компании
 from middlewares.db_middleware import DatabaseMiddleware
 from middlewares.role_middleware import RoleMiddleware
 from middlewares.bot_middleware import BotMiddleware
+from middlewares.company_middleware import CompanyMiddleware
 from utils.errors import router as error_router
 from utils.config_validator import validate_env_vars
 from utils.logger import logger
@@ -29,7 +31,8 @@ dp = Dispatcher(storage=storage)
 
 dp.include_router(error_router)
 dp.include_router(auth.router)
-dp.include_router(registration.router)
+dp.include_router(company.router)  # Управление компаниями - ВАЖНО: после auth
+dp.include_router(registration.router)  # Регистрация - используется при присоединении к компании
 dp.include_router(admin.router)
 dp.include_router(role_permissions.router)
 dp.include_router(broadcast.router)  # Массовая рассылка тестов (Task 8) - ДОЛЖЕН БЫТЬ РАНЬШЕ tests.router
@@ -54,6 +57,7 @@ dp.include_router(fallback.router)
 
 dp.update.middleware(DatabaseMiddleware())
 dp.update.middleware(BotMiddleware())
+dp.update.middleware(CompanyMiddleware())  # Проверка подписки компании
 dp.update.middleware(RoleMiddleware())
 
 async def main():
@@ -77,6 +81,11 @@ async def main():
         # Установка команд бота
         logger.info("Настройка команд бота...")
         await set_bot_commands(bot)
+        
+        # Запуск планировщика задач для проверки подписок
+        logger.info("Запуск планировщика задач...")
+        from utils.scheduler import start_scheduler
+        scheduler = start_scheduler(bot)
         
         # Запуск бота
         logger.info("Запуск бота...")

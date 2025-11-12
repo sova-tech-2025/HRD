@@ -89,7 +89,8 @@ def get_recruiter_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="База знаний 📁")],
             [KeyboardButton(text="Все пользователи 🚸")],
             [KeyboardButton(text="Новые пользователи ➕")],
-            [KeyboardButton(text="Помощь ❓")]
+            [KeyboardButton(text="Помощь ❓")],
+            [KeyboardButton(text="Компания 🏢")]
         ],
         resize_keyboard=True
     )
@@ -995,6 +996,7 @@ def format_help_message(role_name: str) -> str:
 
 <b>Основные функции:</b>
 • <b>Мой профиль 🦸🏻‍♂️</b> — посмотреть информацию о себе
+• <b>Компания 🏢</b> — просмотреть и редактировать информацию о компании, код приглашения и ссылку на бот
 • <b>Рассылка ✈️</b> — массовая рассылка тестов сотрудникам по группам
 • <b>Тесты 📄</b> — управление тестами (создание и просмотр)
 • <b>Мои тесты 📋</b> — прохождение тестов из рассылок
@@ -1009,6 +1011,7 @@ def format_help_message(role_name: str) -> str:
 • <b>Новые пользователи ➕</b> — активировать новых пользователей
 
 <b>Возможности:</b>
+• Управление информацией о компании (название, описание, код приглашения)
 • Создание и управление траекториями обучения
 • Создание аттестаций для руководителей
 • Активация новых пользователей и назначение им наставников
@@ -2422,3 +2425,69 @@ def get_trajectory_selection_for_editor_keyboard(learning_paths: list, page: int
     keyboard.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_company_selection_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для выбора: создать или присоединиться к компании"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏢 Создать компанию", callback_data="company:create")],
+        [InlineKeyboardButton(text="🔗 Присоединиться к компании", callback_data="company:join")]
+    ])
+    return keyboard
+
+
+# =================================
+# КЛАВИАТУРЫ ДЛЯ УПРАВЛЕНИЯ КОМПАНИЕЙ (РЕКРУТЕР)
+# =================================
+
+def get_company_info_keyboard() -> InlineKeyboardMarkup:
+    """Главная клавиатура с информацией о компании и кнопками редактирования"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Название", callback_data="company:edit_name")],
+        [InlineKeyboardButton(text="✏️ Описание", callback_data="company:edit_description")],
+        [InlineKeyboardButton(text="🔑 Код компании", callback_data="company:view_code")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu")]
+    ])
+    return keyboard
+
+
+def get_company_edit_name_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для редактирования названия компании"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="company:info")]
+    ])
+    return keyboard
+
+
+def get_company_edit_description_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для редактирования описания компании"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="company:info")]
+    ])
+    return keyboard
+
+
+def get_company_code_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для просмотра кода компании"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔑 Код отдельно", callback_data="company:code_only")],
+        [InlineKeyboardButton(text="📎 Ссылка на бот", callback_data="company:bot_link")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="company:info")]
+    ])
+    return keyboard
+
+
+def get_company_code_only_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для показа кода отдельно"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="company:view_code")]
+    ])
+    return keyboard
+
+
+def get_company_bot_link_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для показа ссылки на бот"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="company:view_code")]
+    ])
+    return keyboard

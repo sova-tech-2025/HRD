@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import (
     create_group, get_all_groups, get_group_by_id, 
     update_group_name, get_group_users, get_user_roles,
-    check_user_permission, get_user_by_tg_id, delete_group
+    check_user_permission, get_user_by_tg_id, delete_group, ensure_company_id
 )
 from handlers.auth import check_auth
 from states.states import GroupManagementStates
@@ -112,6 +112,16 @@ async def process_group_name(message: Message, state: FSMContext, session: Async
             await state.clear()
             return
         
+        # Получаем company_id
+        company_id = await ensure_company_id(session, state, message.from_user.id)
+        if company_id is None:
+            await message.answer(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await state.clear()
+            log_user_error(message.from_user.id, "group_create_company_missing", "company_id not resolved")
+            return
+        
         group_name = message.text.strip()
         
         # Валидация названия
@@ -124,7 +134,7 @@ async def process_group_name(message: Message, state: FSMContext, session: Async
             return
         
         # Создаем группу
-        group = await create_group(session, group_name, user.id)
+        group = await create_group(session, group_name, user.id, company_id)
         if group:
             await message.answer(
                 f"🗂️<b>УПРАВЛЕНИЕ ГРУППАМИ</b>🗂️\n"
@@ -159,6 +169,17 @@ async def callback_edit_group(callback: CallbackQuery, state: FSMContext, sessio
             await callback.answer()
             return
         
+        # Получаем company_id с помощью общего helper
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await callback.answer()
+            await state.clear()
+            log_user_error(callback.from_user.id, "group_edit_company_missing", "company_id not resolved")
+            return
+        
         # Проверка прав доступа
         has_permission = await check_user_permission(session, user.id, "manage_groups")
         if not has_permission:
@@ -170,7 +191,7 @@ async def callback_edit_group(callback: CallbackQuery, state: FSMContext, sessio
             await callback.answer()
             return
         
-        groups = await get_all_groups(session)
+        groups = await get_all_groups(session, company_id)
         
         if not groups:
             await callback.message.edit_text(
@@ -202,7 +223,16 @@ async def callback_select_group(callback: CallbackQuery, state: FSMContext, sess
     """Обработчик выбора группы для изменения"""
     try:
         group_id = int(callback.data.split(":")[1])
-        group = await get_group_by_id(session, group_id)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await callback.answer()
+            await state.clear()
+            log_user_error(callback.from_user.id, "group_selection_company_missing", "company_id not resolved")
+            return
+        group = await get_group_by_id(session, group_id, company_id=company_id)
         
         if not group:
             await callback.message.edit_text(
@@ -213,8 +243,8 @@ async def callback_select_group(callback: CallbackQuery, state: FSMContext, sess
             await state.clear()
             return
         
-        # Получаем пользователей группы
-        group_users = await get_group_users(session, group_id)
+        # Получаем пользователей группы с изоляцией по компании
+        group_users = await get_group_users(session, group_id, company_id=company_id)
         
         # Формируем список пользователей
         user_list = ""
@@ -378,9 +408,18 @@ async def callback_confirm_rename(callback: CallbackQuery, state: FSMContext, se
         data = await state.get_data()
         new_name = data.get('new_name')
         old_name = data.get('old_name')
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await callback.answer()
+            await state.clear()
+            log_user_error(callback.from_user.id, "group_rename_company_missing", "company_id not resolved")
+            return
         
         # Обновляем название группы
-        success = await update_group_name(session, group_id, new_name)
+        success = await update_group_name(session, group_id, new_name, company_id=company_id)
         
         if success:
             await callback.message.edit_text(
@@ -439,6 +478,17 @@ async def callback_manage_delete_group(callback: CallbackQuery, state: FSMContex
             await callback.answer()
             return
         
+        # Получаем company_id с помощью helper
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await callback.answer()
+            await state.clear()
+            log_user_error(callback.from_user.id, "group_delete_company_missing", "company_id not resolved")
+            return
+        
         # Проверка прав доступа
         has_permission = await check_user_permission(session, user.id, "manage_groups")
         if not has_permission:
@@ -451,7 +501,7 @@ async def callback_manage_delete_group(callback: CallbackQuery, state: FSMContex
             return
         
         # Получаем все активные группы
-        groups = await get_all_groups(session)
+        groups = await get_all_groups(session, company_id)
         if not groups:
             await callback.message.edit_text(
                 "🗂️<b>УПРАВЛЕНИЕ ГРУППАМИ</b>🗂️\n"
@@ -489,8 +539,16 @@ async def callback_delete_group_page(callback: CallbackQuery, state: FSMContext,
     try:
         page = int(callback.data.split(":")[1])
         
+        # Получаем company_id
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.answer("Не удалось определить компанию. Повтори попытку позже.", show_alert=True)
+            await state.clear()
+            log_user_error(callback.from_user.id, "group_delete_pagination_company_missing", "company_id not resolved")
+            return
+
         # Получаем все активные группы
-        groups = await get_all_groups(session)
+        groups = await get_all_groups(session, company_id)
         
         # Проверяем, есть ли группы для отображения на этой странице
         start_index = page * 5
@@ -523,16 +581,25 @@ async def callback_delete_group(callback: CallbackQuery, state: FSMContext, sess
     """Обработчик выбора группы для удаления"""
     try:
         group_id = int(callback.data.split(":")[1])
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await callback.answer()
+            await state.clear()
+            log_user_error(callback.from_user.id, "group_delete_selection_company_missing", "company_id not resolved")
+            return
         
         # Получаем информацию о группе
-        group = await get_group_by_id(session, group_id)
+        group = await get_group_by_id(session, group_id, company_id=company_id)
         if not group:
             await callback.message.edit_text("Группа не найдена.")
             await callback.answer()
             return
         
-        # Проверяем, можно ли удалить группу
-        users_in_group = await get_group_users(session, group_id)
+        # Проверяем, можно ли удалить группу (с изоляцией по компании)
+        users_in_group = await get_group_users(session, group_id, company_id=company_id)
         
         if users_in_group:
             # Проверяем, не пытается ли пользователь повторно выбрать ту же группу
@@ -541,6 +608,7 @@ async def callback_delete_group(callback: CallbackQuery, state: FSMContext, sess
                 await callback.answer("Эта группа уже выбрана. В ней есть пользователи.", show_alert=True)
                 return
             
+            groups_for_keyboard = await get_all_groups(session, company_id)
             await callback.message.edit_text(
                 f"🗂️<b>УПРАВЛЕНИЕ ГРУППАМИ</b>🗂️\n"
                 f"🗑️<b>Удаление группы</b>🗑️\n\n"
@@ -548,7 +616,7 @@ async def callback_delete_group(callback: CallbackQuery, state: FSMContext, sess
                 f"<b>Группа:</b> {group.name}\n"
                 f"<b>Причина:</b> В группе есть пользователи ({len(users_in_group)} чел.)\n\n"
                 f"Сначала удали всех пользователей из группы или перемести их в другие группы.",
-                reply_markup=get_group_delete_selection_keyboard(await get_all_groups(session)),
+                reply_markup=get_group_delete_selection_keyboard(groups_for_keyboard),
                 parse_mode="HTML"
             )
             await state.update_data(selected_group_id=group_id, last_error_message='users_in_group')
@@ -597,15 +665,15 @@ async def callback_confirm_delete_group(callback: CallbackQuery, state: FSMConte
             await callback.answer()
             return
         
-        # Получаем информацию о группе
-        group = await get_group_by_id(session, group_id)
+        # Получаем информацию о группе с изоляцией по company_id
+        group = await get_group_by_id(session, group_id, company_id=user.company_id)
         if not group:
             await callback.message.edit_text("Группа не найдена.")
             await callback.answer()
             return
         
         # Удаляем группу
-        success = await delete_group(session, group_id, user.id)
+        success = await delete_group(session, group_id, user.id, company_id=user.company_id)
         
         if success:
             await callback.message.edit_text(
@@ -620,6 +688,16 @@ async def callback_confirm_delete_group(callback: CallbackQuery, state: FSMConte
             )
             log_user_action(user.tg_id, "group_deleted", f"Удалил группу {group.name} (ID: {group_id})")
         else:
+            company_id = user.company_id
+            if company_id is None:
+                await callback.message.edit_text(
+                    "❌ Не удалось определить компанию. Обнови сессию командой /start."
+                )
+                await callback.answer()
+                await state.clear()
+                log_user_error(user.tg_id, "group_delete_confirmation_company_missing", "company_id not resolved")
+                return
+            groups_for_keyboard = await get_all_groups(session, company_id)
             await callback.message.edit_text(
                 f"🗂️<b>УПРАВЛЕНИЕ ГРУППАМИ</b>🗂️\n"
                 f"🗑️<b>Удаление группы</b>🗑️\n\n"
@@ -630,7 +708,7 @@ async def callback_confirm_delete_group(callback: CallbackQuery, state: FSMConte
                 f"• Группа используется в траекториях\n"
                 f"• Группа используется в базе знаний\n\n"
                 f"Проверь зависимости и попробуй снова.",
-                reply_markup=get_group_delete_selection_keyboard(await get_all_groups(session)),
+                reply_markup=get_group_delete_selection_keyboard(groups_for_keyboard),
                 parse_mode="HTML"
             )
             log_user_error(user.tg_id, "group_deletion_failed", f"Не удалось удалить группу {group.name}")

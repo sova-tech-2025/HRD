@@ -10,7 +10,7 @@ from database.db import (
     update_user_full_name, update_user_phone_number, update_user_role,
     update_user_group, update_user_internship_object, update_user_work_object,
     get_all_groups, get_all_objects, get_object_by_id, get_group_by_id, get_user_roles,
-    get_role_change_warnings, delete_user, search_activated_users_by_name
+    get_role_change_warnings, delete_user, search_activated_users_by_name, ensure_company_id
 )
 from handlers.auth import check_auth
 from states.states import UserEditStates
@@ -28,9 +28,9 @@ from utils.validators import validate_full_name, validate_phone_number
 router = Router()
 
 
-async def show_user_info_detail(callback: CallbackQuery, user_id: int, session: AsyncSession, filter_type: str = "all"):
+async def show_user_info_detail(callback: CallbackQuery, user_id: int, session: AsyncSession, filter_type: str = "all", company_id: int = None):
     """Общая функция для отображения детальной информации о пользователе"""
-    user = await get_user_with_details(session, user_id)
+    user = await get_user_with_details(session, user_id, company_id=company_id)
     if not user:
         await callback.answer("Пользователь не найден", show_alert=True)
         return False
@@ -89,12 +89,14 @@ async def cmd_all_users(message: Message, session: AsyncSession, state: FSMConte
         log_user_error(message.from_user.id, "all_users_access_denied", "Insufficient permissions")
         return
         
+    # Получение company_id из контекста (добавлен CompanyMiddleware)
+    company_id = await ensure_company_id(session, state, message.from_user.id)
     # Получаем группы и объекты для фильтров
-    groups = await get_all_groups(session)
-    objects = await get_all_objects(session)
+    groups = await get_all_groups(session, company_id)
+    objects = await get_all_objects(session, company_id)
     
     # Проверяем, есть ли пользователи вообще
-    users = await get_all_activated_users(session)
+    users = await get_all_activated_users(session, company_id=company_id)
     if not users:
         await message.answer("📭 Нет активированных пользователей в системе")
         return
@@ -122,7 +124,9 @@ async def callback_filter_all_users(callback: CallbackQuery, state: FSMContext, 
     try:
         await callback.answer()
         
-        users = await get_all_activated_users(session)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        users = await get_all_activated_users(session, company_id=company_id)
         
         if not users:
             await callback.message.edit_text("📭 Нет активированных пользователей в системе")
@@ -152,7 +156,9 @@ async def callback_filter_by_groups(callback: CallbackQuery, state: FSMContext, 
     try:
         await callback.answer()
         
-        groups = await get_all_groups(session)
+        # Получение company_id из контекста (добавлен CompanyMiddleware)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        groups = await get_all_groups(session, company_id)
         
         if not groups:
             await callback.message.edit_text("📭 Нет доступных групп для фильтрации")
@@ -182,7 +188,9 @@ async def callback_filter_by_objects(callback: CallbackQuery, state: FSMContext,
     try:
         await callback.answer()
         
-        objects = await get_all_objects(session)
+        # Получение company_id из контекста (добавлен CompanyMiddleware)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        objects = await get_all_objects(session, company_id)
         
         if not objects:
             await callback.message.edit_text("📭 Нет доступных объектов для фильтрации")
@@ -212,14 +220,19 @@ async def callback_filter_group(callback: CallbackQuery, state: FSMContext, sess
     try:
         await callback.answer()
         
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+            return
+        
         group_id = int(callback.data.split(":")[1])
-        group = await get_group_by_id(session, group_id)
+        group = await get_group_by_id(session, group_id, company_id=user.company_id)
         
         if not group:
             await callback.answer("Группа не найдена", show_alert=True)
             return
         
-        users = await get_users_by_group(session, group_id)
+        users = await get_users_by_group(session, group_id, company_id=user.company_id)
         
         text = (
             f"🗂️ <b>ГРУППА: {group.name}</b> 🗂️\n\n"
@@ -233,7 +246,8 @@ async def callback_filter_group(callback: CallbackQuery, state: FSMContext, sess
             await state.update_data(current_users=users, filter_type=f"group:{group_id}", current_page=0)
         else:
             text += "В данной группе пока нет пользователей."
-            keyboard = get_users_filter_keyboard(await get_all_groups(session), await get_all_objects(session))
+            company_id = await ensure_company_id(session, state, callback.from_user.id)
+            keyboard = get_users_filter_keyboard(await get_all_groups(session, company_id), await get_all_objects(session, company_id))
             await state.set_state(UserEditStates.waiting_for_filter_selection)
         
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
@@ -251,14 +265,19 @@ async def callback_filter_object(callback: CallbackQuery, state: FSMContext, ses
     try:
         await callback.answer()
         
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+            return
+        
         object_id = int(callback.data.split(":")[1])
-        obj = await get_object_by_id(session, object_id)
+        obj = await get_object_by_id(session, object_id, company_id=user.company_id)
         
         if not obj:
             await callback.answer("Объект не найден", show_alert=True)
             return
         
-        users = await get_users_by_object(session, object_id)
+        users = await get_users_by_object(session, object_id, company_id=user.company_id)
         
         text = (
             f"📍 <b>ОБЪЕКТ: {obj.name}</b> 📍\n\n"
@@ -272,7 +291,8 @@ async def callback_filter_object(callback: CallbackQuery, state: FSMContext, ses
             await state.update_data(current_users=users, filter_type=f"object:{object_id}", current_page=0)
         else:
             text += "К данному объекту пока не привязаны пользователи."
-            keyboard = get_users_filter_keyboard(await get_all_groups(session), await get_all_objects(session))
+            company_id = await ensure_company_id(session, state, callback.from_user.id)
+            keyboard = get_users_filter_keyboard(await get_all_groups(session, company_id), await get_all_objects(session, company_id))
             await state.set_state(UserEditStates.waiting_for_filter_selection)
         
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
@@ -324,7 +344,9 @@ async def process_search_query_all_users(message: Message, state: FSMContext, se
             return
         
         # Выполняем поиск
-        users = await search_activated_users_by_name(session, query)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        users = await search_activated_users_by_name(session, query, company_id=company_id)
         
         if not users:
             # Пользователи не найдены
@@ -397,7 +419,9 @@ async def callback_view_user(callback: CallbackQuery, state: FSMContext, session
         filter_type = data.get('filter_type', 'all')
         
         # Используем общую функцию для отображения информации
-        success = await show_user_info_detail(callback, user_id, session, filter_type)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        success = await show_user_info_detail(callback, user_id, session, filter_type, company_id=company_id)
         
         if success:
             await state.set_state(UserEditStates.viewing_user_info)
@@ -418,7 +442,9 @@ async def callback_edit_user(callback: CallbackQuery, state: FSMContext, session
         await callback.answer()
         
         user_id = int(callback.data.split(":")[1])
-        user = await get_user_with_details(session, user_id)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        user = await get_user_with_details(session, user_id, company_id=company_id)
         
         if not user:
             await callback.answer("Пользователь не найден", show_alert=True)
@@ -476,10 +502,12 @@ async def callback_back_to_filters(callback: CallbackQuery, state: FSMContext, s
     try:
         await callback.answer()
         
+        # Получение company_id из контекста (добавлен CompanyMiddleware)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
         # Получаем группы и объекты для фильтров
-        groups = await get_all_groups(session)
-        objects = await get_all_objects(session)
-        users = await get_all_activated_users(session)
+        groups = await get_all_groups(session, company_id)
+        objects = await get_all_objects(session, company_id)
+        users = await get_all_activated_users(session, company_id=company_id)
         
         text = (
             "👥 <b>УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ</b> 👥\n\n"
@@ -515,13 +543,21 @@ async def callback_back_to_users(callback: CallbackQuery, state: FSMContext, ses
         if filter_type == "all":
             text = f"👥 <b>ВСЕ ПОЛЬЗОВАТЕЛИ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
         elif filter_type.startswith("group:"):
-            group_id = int(filter_type.split(":")[1])
-            group = await get_group_by_id(session, group_id)
-            text = f"🗂️ <b>ГРУППА: {group.name if group else 'Неизвестная'}</b> 🗂️\n\n📊 Пользователей в группе: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
+            user = await get_user_by_tg_id(session, callback.from_user.id)
+            if user:
+                group_id = int(filter_type.split(":")[1])
+                group = await get_group_by_id(session, group_id, company_id=user.company_id)
+                text = f"🗂️ <b>ГРУППА: {group.name if group else 'Неизвестная'}</b> 🗂️\n\n📊 Пользователей в группе: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
+            else:
+                text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
         elif filter_type.startswith("object:"):
-            object_id = int(filter_type.split(":")[1])
-            obj = await get_object_by_id(session, object_id)
-            text = f"📍 <b>ОБЪЕКТ: {obj.name if obj else 'Неизвестный'}</b> 📍\n\n📊 Пользователей на объекте: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
+            user = await get_user_by_tg_id(session, callback.from_user.id)
+            if user:
+                object_id = int(filter_type.split(":")[1])
+                obj = await get_object_by_id(session, object_id, company_id=user.company_id)
+                text = f"📍 <b>ОБЪЕКТ: {obj.name if obj else 'Неизвестный'}</b> 📍\n\n📊 Пользователей на объекте: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
+            else:
+                text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
         else:
             text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
         
@@ -566,13 +602,21 @@ async def callback_users_pagination(callback: CallbackQuery, state: FSMContext, 
             search_query = data.get('search_query', '')
             text = f"🔍 <b>Результаты поиска: '{search_query}'</b>\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
         elif filter_type.startswith("group"):
-            group_id = int(filter_type.split(":")[1]) if ":" in filter_type else 0
-            group = await get_group_by_id(session, group_id) if group_id else None
-            text = f"🗂️ <b>ГРУППА: {group.name if group else 'Неизвестная'}</b> 🗂️\n\n📊 Пользователей в группе: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
+            user = await get_user_by_tg_id(session, callback.from_user.id)
+            if user:
+                group_id = int(filter_type.split(":")[1]) if ":" in filter_type else 0
+                group = await get_group_by_id(session, group_id, company_id=user.company_id) if group_id else None
+                text = f"🗂️ <b>ГРУППА: {group.name if group else 'Неизвестная'}</b> 🗂️\n\n📊 Пользователей в группе: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
+            else:
+                text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
         elif filter_type.startswith("object"):
-            object_id = int(filter_type.split(":")[1]) if ":" in filter_type else 0
-            obj = await get_object_by_id(session, object_id) if object_id else None
-            text = f"📍 <b>ОБЪЕКТ: {obj.name if obj else 'Неизвестный'}</b> 📍\n\n📊 Пользователей на объекте: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
+            user = await get_user_by_tg_id(session, callback.from_user.id)
+            if user:
+                object_id = int(filter_type.split(":")[1]) if ":" in filter_type else 0
+                obj = await get_object_by_id(session, object_id, company_id=user.company_id) if object_id else None
+                text = f"📍 <b>ОБЪЕКТ: {obj.name if obj else 'Неизвестный'}</b> 📍\n\n📊 Пользователей на объекте: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
+            else:
+                text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
         else:
             text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
         
@@ -599,7 +643,8 @@ async def callback_group_filter_pagination(callback: CallbackQuery, state: FSMCo
         groups = data.get('available_groups', [])
         
         if not groups:
-            groups = await get_all_groups(session)
+            company_id = await ensure_company_id(session, state, callback.from_user.id)
+            groups = await get_all_groups(session, company_id)
         
         keyboard = get_group_filter_keyboard(groups, page, 5)
         
@@ -624,7 +669,8 @@ async def callback_object_filter_pagination(callback: CallbackQuery, state: FSMC
         objects = data.get('available_objects', [])
         
         if not objects:
-            objects = await get_all_objects(session)
+            company_id = await ensure_company_id(session, state, callback.from_user.id)
+            objects = await get_all_objects(session, company_id)
         
         keyboard = get_object_filter_keyboard(objects, page, 5)
         
@@ -649,8 +695,12 @@ async def process_user_number(message: Message, session: AsyncSession, state: FS
         await message.answer("❌ Пожалуйста, введи корректный номер пользователя")
         return
         
+    # Получаем company_id для изоляции
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    
     # Получаем пользователя для редактирования
-    target_user = await get_user_with_details(session, user_id)
+    target_user = await get_user_with_details(session, user_id, company_id=company_id)
     
     if not target_user or not target_user.is_activated:
         await message.answer("❌ Пользователь не найден или не активирован")
@@ -709,7 +759,9 @@ async def process_edit_full_name(callback: CallbackQuery, session: AsyncSession,
         await callback.answer("❌ Ошибка: не выбран пользователь")
         return
         
-    target_user = await get_user_with_details(session, editing_user_id)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
     if not target_user:
         await callback.answer("❌ Пользователь не найден")
         return
@@ -742,7 +794,9 @@ async def process_new_full_name(message: Message, session: AsyncSession, state: 
     data = await state.get_data()
     editing_user_id = data.get('editing_user_id')
     
-    target_user = await get_user_with_details(session, editing_user_id)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
     if not target_user:
         await message.answer("❌ Пользователь не найден")
         await state.clear()
@@ -775,7 +829,9 @@ async def process_edit_phone(callback: CallbackQuery, session: AsyncSession, sta
         await callback.answer("❌ Ошибка: не выбран пользователь")
         return
         
-    target_user = await get_user_with_details(session, editing_user_id)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
     if not target_user:
         await callback.answer("❌ Пользователь не найден")
         return
@@ -810,7 +866,9 @@ async def process_new_phone(message: Message, session: AsyncSession, state: FSMC
     data = await state.get_data()
     editing_user_id = data.get('editing_user_id')
     
-    target_user = await get_user_with_details(session, editing_user_id)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
     if not target_user:
         await message.answer("❌ Пользователь не найден")
         await state.clear()
@@ -843,7 +901,9 @@ async def process_edit_role(callback: CallbackQuery, session: AsyncSession, stat
         await callback.answer("❌ Ошибка: не выбран пользователь")
         return
         
-    target_user = await get_user_with_details(session, editing_user_id)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
     if not target_user:
         await callback.answer("❌ Пользователь не найден")
         return
@@ -876,7 +936,9 @@ async def process_new_role(callback: CallbackQuery, session: AsyncSession, state
     editing_user_id = data.get('editing_user_id')
     old_role = data.get('old_value')
     
-    target_user = await get_user_with_details(session, editing_user_id)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
     if not target_user:
         await callback.answer("❌ Пользователь не найден")
         await state.clear()
@@ -888,8 +950,12 @@ async def process_new_role(callback: CallbackQuery, session: AsyncSession, state
     # Получаем текущую роль
     current_role = target_user.roles[0].name if target_user.roles else "Нет роли"
     
+    # Получаем company_id для изоляции
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    
     # Формируем предупреждения о последствиях смены роли
-    warnings = await get_role_change_warnings(session, target_user.id, current_role, new_role)
+    warnings = await get_role_change_warnings(session, target_user.id, current_role, new_role, company_id=company_id)
     
     confirmation_text = f"""🚩🚩🚩<b>ИЗМЕНЕНИЕ РОЛИ</b>🚩🚩🚩
 
@@ -928,7 +994,9 @@ async def process_edit_group(callback: CallbackQuery, session: AsyncSession, sta
         await callback.answer("❌ Ошибка: не выбран пользователь")
         return
         
-    target_user = await get_user_with_details(session, editing_user_id)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
     if not target_user:
         await callback.answer("❌ Пользователь не найден")
         return
@@ -939,8 +1007,10 @@ async def process_edit_group(callback: CallbackQuery, session: AsyncSession, sta
 
 🧑 ФИО: {target_user.full_name}"""
     
+    # Получение company_id из контекста (добавлен CompanyMiddleware)
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
     # Получаем все группы
-    groups = await get_all_groups(session)
+    groups = await get_all_groups(session, company_id)
     
     if not groups:
         await callback.message.edit_text("❌ В системе нет доступных групп")
@@ -963,15 +1033,15 @@ async def process_new_group(callback: CallbackQuery, session: AsyncSession, stat
         
         data = await state.get_data()
         editing_user_id = data.get('editing_user_id')
-        
-        target_user = await get_user_with_details(session, editing_user_id)
+        company_id = data.get('company_id')
+        target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
         if not target_user:
             await callback.answer("❌ Пользователь не найден")
             await state.clear()
             return
             
         # Получаем название группы
-        group = await get_group_by_id(session, group_id)
+        group = await get_group_by_id(session, group_id, company_id=target_user.company_id)
         if not group:
             await callback.answer("❌ Группа не найдена")
             return
@@ -996,7 +1066,8 @@ async def process_new_group(callback: CallbackQuery, session: AsyncSession, stat
     elif callback.data.startswith("groups_page:"):
         # Обработка пагинации
         page = int(callback.data.split(":")[1])
-        groups = await get_all_groups(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        groups = await get_all_groups(session, company_id)
         keyboard = get_group_selection_keyboard(groups, page)
         await callback.message.edit_reply_markup(reply_markup=keyboard)
         await callback.answer()
@@ -1016,7 +1087,9 @@ async def process_edit_internship_object(callback: CallbackQuery, session: Async
         await callback.answer("❌ Ошибка: не выбран пользователь")
         return
         
-    target_user = await get_user_with_details(session, editing_user_id)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
     if not target_user:
         await callback.answer("❌ Пользователь не найден")
         return
@@ -1027,8 +1100,10 @@ async def process_edit_internship_object(callback: CallbackQuery, session: Async
 
 🧑 ФИО: {target_user.full_name}"""
     
+    # Получение company_id из контекста (добавлен CompanyMiddleware)
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
     # Получаем все объекты
-    objects = await get_all_objects(session)
+    objects = await get_all_objects(session, company_id)
     
     if not objects:
         await callback.message.edit_text("❌ В системе нет доступных объектов стажировки")
@@ -1051,15 +1126,15 @@ async def process_new_internship_object(callback: CallbackQuery, session: AsyncS
         
         data = await state.get_data()
         editing_user_id = data.get('editing_user_id')
-        
-        target_user = await get_user_with_details(session, editing_user_id)
+        company_id = data.get('company_id')
+        target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
         if not target_user:
             await callback.answer("❌ Пользователь не найден")
             await state.clear()
             return
             
         # Получаем название объекта
-        obj = await get_object_by_id(session, object_id)
+        obj = await get_object_by_id(session, object_id, company_id=target_user.company_id)
         if not obj:
             await callback.answer("❌ Объект не найден или неактивен")
             return
@@ -1088,7 +1163,8 @@ async def process_new_internship_object(callback: CallbackQuery, session: AsyncS
     elif callback.data.startswith("internship_object_page:"):
         # Обработка пагинации
         page = int(callback.data.split(":")[1])
-        objects = await get_all_objects(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        objects = await get_all_objects(session, company_id)
         keyboard = get_object_selection_keyboard(objects, page, 5, "internship")
         await callback.message.edit_reply_markup(reply_markup=keyboard)
         await callback.answer()
@@ -1108,7 +1184,9 @@ async def process_edit_work_object(callback: CallbackQuery, session: AsyncSessio
         await callback.answer("❌ Ошибка: не выбран пользователь")
         return
         
-    target_user = await get_user_with_details(session, editing_user_id)
+    data = await state.get_data()
+    company_id = data.get('company_id')
+    target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
     if not target_user:
         await callback.answer("❌ Пользователь не найден")
         return
@@ -1119,8 +1197,10 @@ async def process_edit_work_object(callback: CallbackQuery, session: AsyncSessio
 
 🧑 ФИО: {target_user.full_name}"""
     
+    # Получение company_id из контекста (добавлен CompanyMiddleware)
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
     # Получаем все объекты
-    objects = await get_all_objects(session)
+    objects = await get_all_objects(session, company_id)
     
     if not objects:
         await callback.message.edit_text("❌ В системе нет доступных объектов работы")
@@ -1143,15 +1223,15 @@ async def process_new_work_object(callback: CallbackQuery, session: AsyncSession
         
         data = await state.get_data()
         editing_user_id = data.get('editing_user_id')
-        
-        target_user = await get_user_with_details(session, editing_user_id)
+        company_id = data.get('company_id')
+        target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
         if not target_user:
             await callback.answer("❌ Пользователь не найден")
             await state.clear()
             return
             
         # Получаем название объекта
-        obj = await get_object_by_id(session, object_id)
+        obj = await get_object_by_id(session, object_id, company_id=target_user.company_id)
         if not obj:
             await callback.answer("❌ Объект не найден или неактивен")
             return
@@ -1182,7 +1262,8 @@ async def process_new_work_object(callback: CallbackQuery, session: AsyncSession
     elif callback.data.startswith("work_object_page:"):
         # Обработка пагинации
         page = int(callback.data.split(":")[1])
-        objects = await get_all_objects(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        objects = await get_all_objects(session, company_id)
         keyboard = get_object_selection_keyboard(objects, page, 5, "work")
         await callback.message.edit_reply_markup(reply_markup=keyboard)
         await callback.answer()
@@ -1212,8 +1293,11 @@ async def process_confirm_change(callback: CallbackQuery, session: AsyncSession,
     error_message = "Неизвестная ошибка"
     bot = callback.bot
     
+    # Получаем company_id для изоляции
+    company_id = data.get('company_id')
+    
     if edit_type == "full_name":
-        success = await update_user_full_name(session, editing_user_id, new_value, recruiter.id, bot)
+        success = await update_user_full_name(session, editing_user_id, new_value, recruiter.id, bot, company_id=company_id)
         error_message = "❌ Ошибка при изменении ФИО"
     elif edit_type == "phone":
         # Дополнительная проверка для телефона
@@ -1222,24 +1306,24 @@ async def process_confirm_change(callback: CallbackQuery, session: AsyncSession,
             error_message = f"❌ Телефон {new_value} уже используется другим пользователем"
             success = False
         else:
-            success = await update_user_phone_number(session, editing_user_id, new_value, recruiter.id, bot)
+            success = await update_user_phone_number(session, editing_user_id, new_value, recruiter.id, bot, company_id=company_id)
             error_message = "❌ Ошибка при изменении телефона"
     elif edit_type == "role":
-        success = await update_user_role(session, editing_user_id, new_value, recruiter.id, bot)
+        success = await update_user_role(session, editing_user_id, new_value, recruiter.id, bot, company_id=company_id)
         error_message = "❌ Ошибка при изменении роли"
     elif edit_type == "group":
-        success = await update_user_group(session, editing_user_id, new_value, recruiter.id, bot)
+        success = await update_user_group(session, editing_user_id, new_value, recruiter.id, bot, company_id=company_id)
         error_message = "❌ Ошибка при изменении группы"
     elif edit_type == "internship_object":
-        success = await update_user_internship_object(session, editing_user_id, new_value, recruiter.id, bot)
+        success = await update_user_internship_object(session, editing_user_id, new_value, recruiter.id, bot, company_id=company_id)
         error_message = "❌ Ошибка при изменении объекта стажировки"
     elif edit_type == "work_object":
-        success = await update_user_work_object(session, editing_user_id, new_value, recruiter.id, bot)
+        success = await update_user_work_object(session, editing_user_id, new_value, recruiter.id, bot, company_id=company_id)
         error_message = "❌ Ошибка при изменении объекта работы"
         
     if success:
         # Получаем обновленного пользователя и показываем редактор снова
-        target_user = await get_user_with_details(session, editing_user_id)
+        target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
         if target_user:
             # Формируем полное сообщение как требует ТЗ
             role_name = target_user.roles[0].name if target_user.roles else "Нет роли"
@@ -1387,12 +1471,23 @@ async def callback_confirm_delete_user(callback: CallbackQuery, state: FSMContex
         
         user_name = user.full_name
         
+        # Получаем текущего пользователя для проверки company_id
+        current_user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not current_user:
+            await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+            return
+        
+        # Проверяем, что удаляемый пользователь принадлежит той же компании
+        if user.company_id != current_user.company_id:
+            await callback.answer("❌ Нельзя удалить пользователя из другой компании.", show_alert=True)
+            return
+        
         # Сохраняем filter_type перед удалением и очисткой состояния
         data = await state.get_data()
         filter_type = data.get('filter_type', 'all')
         
-        # Выполняем удаление
-        success = await delete_user(session, user_id)
+        # Выполняем удаление с проверкой company_id
+        success = await delete_user(session, user_id, company_id=current_user.company_id)
         
         if success:
             await callback.message.edit_text(
@@ -1503,7 +1598,9 @@ async def callback_back_to_view_user(callback: CallbackQuery, state: FSMContext,
         filter_type = data.get('filter_type', 'all')
         
         # Используем общую функцию для отображения информации
-        success = await show_user_info_detail(callback, user_id, session, filter_type)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        success = await show_user_info_detail(callback, user_id, session, filter_type, company_id=company_id)
         if success:
             await callback.answer()
         
@@ -1522,7 +1619,9 @@ async def callback_back_to_view_after_error(callback: CallbackQuery, state: FSMC
         filter_type = data.get('filter_type', 'all')
         
         # Используем общую функцию для отображения информации
-        success = await show_user_info_detail(callback, user_id, session, filter_type)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        success = await show_user_info_detail(callback, user_id, session, filter_type, company_id=company_id)
         if success:
             await callback.answer()
         
@@ -1543,7 +1642,9 @@ async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext, sessi
             return
         
         # Получаем информацию о пользователе
-        target_user = await get_user_with_details(session, editing_user_id)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
         if not target_user:
             await callback.answer("❌ Пользователь не найден")
             return

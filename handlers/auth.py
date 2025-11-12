@@ -1,12 +1,13 @@
 import os
 import time
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import get_user_by_tg_id, get_user_roles
+from database.db import get_user_by_tg_id, get_user_roles, get_company_by_id
 from keyboards.keyboards import get_keyboard_by_role, get_welcome_keyboard
 from states.states import AuthStates, RegistrationStates
 from utils.logger import log_user_action, log_user_error
@@ -14,19 +15,59 @@ from utils.bot_commands import set_bot_commands
 
 router = Router()
 
+@router.callback_query(F.data == "login_again")
+async def callback_login_again(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot):
+    """Кнопка быстрого входа заново после истечения сессии"""
+    await cmd_login(callback.message, state, session, bot)
+    await callback.answer()
+
 @router.message(Command("login"))
 async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, bot):
     try:
         user = await get_user_by_tg_id(session, message.from_user.id)
         
         if not user:
-            await message.answer("Ты не зарегистрирован в системе. Используй команду /register для регистрации.")
+            # Для незарегистрированных пользователей показываем выбор: создать или присоединиться к компании
+            from keyboards.keyboards import get_company_selection_keyboard
+            await message.answer(
+                "Привет! Добро пожаловать в чат-бот.\n\n"
+                "🏢 Выбери действие:",
+                reply_markup=get_company_selection_keyboard()
+            )
             log_user_action(message.from_user.id, message.from_user.username, "failed login attempt - not registered")
             return
         
         if not user.is_active:
             await message.answer("Твой аккаунт деактивирован. Обратись к администратору.")
             log_user_error(message.from_user.id, message.from_user.username, "login failed - account deactivated")
+            return
+        
+        # Проверка наличия компании
+        if not user.company_id:
+            await message.answer(
+                "❌ Ты не привязан ни к одной компании.\n\n"
+                "Обратись к администратору."
+            )
+            log_user_error(message.from_user.id, message.from_user.username, "login failed - no company")
+            return
+        
+        # Проверка подписки компании (используем явный запрос вместо lazy loading)
+        company = await get_company_by_id(session, user.company_id)
+        if company and not company.subscribe:
+            await message.answer(
+                "❌ Подписка компании истекла (заморожена).\n\n"
+                "Обратись к администратору компании для продления подписки."
+            )
+            log_user_error(message.from_user.id, message.from_user.username, "login failed - company subscription expired")
+            return
+        
+        # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
+        if company and company.finish_date and company.finish_date < datetime.now():
+            await message.answer(
+                "❌ Подписка компании истекла (заморожена).\n\n"
+                "Обратись к администратору компании для продления подписки."
+            )
+            log_user_error(message.from_user.id, message.from_user.username, "login failed - company finish_date expired")
             return
         
         roles = await get_user_roles(session, user.id)
@@ -49,14 +90,15 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
             user_id=user.id,
             role=primary_role,
             is_authenticated=True,
-            auth_time=message.date.timestamp()
+            auth_time=message.date.timestamp(),
+            company_id=user.company_id
         )
 
         log_user_action(
             message.from_user.id,
             message.from_user.username,
             "successful login",
-            {"role": primary_role, "user_id": user.id}
+            {"role": primary_role, "user_id": user.id, "company_id": user.company_id}
         )
 
         # не очищаем состояние после успешного логина
@@ -71,9 +113,14 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
         is_authenticated = data.get("is_authenticated", False)
         auth_time = data.get("auth_time", 0)
         
-        if is_authenticated and auth_time and (time.time() - auth_time) > 28800:  # 8 часов (рабочий день)
+        if is_authenticated and auth_time and (time.time() - auth_time) > 86400:  # 24 часа
             await state.clear()
-            await message.answer("Сессия истекла. Пожалуйста, войдите заново командой /login.")
+            await message.answer(
+                "👀 Ты давно не заходил\n\nДля безопасности твоя сессия завершена. Пожалуйста, обновись",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="Войти заново", callback_data="login_again")]
+                ])
+            )
             return False
         
         if is_authenticated:
@@ -82,16 +129,70 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
                 await state.clear()
                 await message.answer("Твой аккаунт деактивирован. Обратись к администратору.")
                 return False
+            
+            # Проверка наличия компании и подписки
+            if not user.company_id:
+                await state.clear()
+                await message.answer(
+                    "❌ Ты не привязан ни к одной компании.\n\n"
+                    "Обратись к администратору."
+                )
+                return False
+            
+            # Проверка подписки компании (используем явный запрос вместо lazy loading)
+            company = await get_company_by_id(session, user.company_id)
+            if company and not company.subscribe:
+                await state.clear()
+                await message.answer(
+                    "❌ Подписка компании истекла (заморожена).\n\n"
+                    "Обратись к администратору компании для продления подписки."
+                )
+                return False
+            
+            # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
+            if company and company.finish_date and company.finish_date < datetime.now():
+                await state.clear()
+                await message.answer(
+                    "❌ Подписка компании истекла (заморожена).\n\n"
+                    "Обратись к администратору компании для продления подписки."
+                )
+                return False
+            
             return True
         
         user = await get_user_by_tg_id(session, message.from_user.id)
         
         if not user:
-            await message.answer("Ты не зарегистрирован в системе. Используй команду /register для регистрации.")
+            await message.answer("Ты не зарегистрирован в системе. Используй команду /start для регистрации.")
             return False
         
         if not user.is_active:
             await message.answer("Твой аккаунт деактивирован. Обратись к администратору.")
+            return False
+        
+        # Проверка наличия компании
+        if not user.company_id:
+            await message.answer(
+                "❌ Ты не привязан ни к одной компании.\n\n"
+                "Обратись к администратору."
+            )
+            return False
+        
+        # Проверка подписки компании (используем явный запрос вместо lazy loading)
+        company = await get_company_by_id(session, user.company_id)
+        if company and not company.subscribe:
+            await message.answer(
+                "❌ Подписка компании истекла (заморожена).\n\n"
+                "Обратись к администратору компании для продления подписки."
+            )
+            return False
+        
+        # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
+        if company and company.finish_date and company.finish_date < datetime.now():
+            await message.answer(
+                "❌ Подписка компании истекла (заморожена).\n\n"
+                "Обратись к администратору компании для продления подписки."
+            )
             return False
         
         auto_auth_allowed = os.getenv("ALLOW_AUTO_AUTH", "true").lower() == "true"
@@ -111,14 +212,15 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
             user_id=user.id,
             role=primary_role,
             is_authenticated=True,
-            auth_time=message.date.timestamp()
+            auth_time=message.date.timestamp(),
+            company_id=user.company_id  # КРИТИЧНО: сохраняем company_id для изоляции!
         )
         
         log_user_action(
             message.from_user.id, 
             message.from_user.username, 
             "auto authentication", 
-            {"role": primary_role, "user_id": user.id}
+            {"role": primary_role, "user_id": user.id, "company_id": user.company_id}
         )
         
         return True
@@ -151,16 +253,48 @@ async def cmd_logout(message: Message, state: FSMContext, bot):
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext, session: AsyncSession, bot):
     try:
+        # Сбрасываем возможные «зависшие» состояния перед обработкой команды
+        await state.clear()
         user = await get_user_by_tg_id(session, message.from_user.id)
         
         if not user:
+            # Новый пользователь - показываем выбор: создать или присоединиться к компании
             await set_bot_commands(bot)
+            from keyboards.keyboards import get_company_selection_keyboard
             await message.answer(
                 "Привет! Добро пожаловать в чат-бот.\n\n"
-                "Ты ещё не зарегистрирован. Давай подключим тебе доступ.",
-                reply_markup=get_welcome_keyboard()
+                "🏢 Выбери действие:",
+                reply_markup=get_company_selection_keyboard()
             )
             log_user_action(message.from_user.id, message.from_user.username, "started bot - not registered")
+            return
+        
+        # Проверка наличия компании
+        if not user.company_id:
+            await message.answer(
+                "❌ Ты не привязан ни к одной компании.\n\n"
+                "Обратись к администратору или создай новую компанию."
+            )
+            log_user_error(message.from_user.id, message.from_user.username, "login failed - no company")
+            return
+        
+        # Проверка подписки компании (используем явный запрос вместо lazy loading)
+        company = await get_company_by_id(session, user.company_id)
+        if company and not company.subscribe:
+            await message.answer(
+                "❌ Подписка компании истекла (заморожена).\n\n"
+                "Обратись к администратору компании для продления подписки."
+            )
+            log_user_error(message.from_user.id, message.from_user.username, "login failed - company subscription expired")
+            return
+        
+        # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
+        if company and company.finish_date and company.finish_date < datetime.now():
+            await message.answer(
+                "❌ Подписка компании истекла (заморожена).\n\n"
+                "Обратись к администратору компании для продления подписки."
+            )
+            log_user_error(message.from_user.id, message.from_user.username, "login failed - company finish_date expired")
             return
         
         log_user_action(message.from_user.id, message.from_user.username, "started bot - already registered")
@@ -185,14 +319,15 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession, 
             user_id=user.id,
             role=primary_role,
             is_authenticated=True,
-            auth_time=message.date.timestamp()
+            auth_time=message.date.timestamp(),
+            company_id=user.company_id
         )
         
         log_user_action(
             message.from_user.id, 
             message.from_user.username, 
             "successful login from start", 
-            {"role": primary_role, "user_id": user.id}
+            {"role": primary_role, "user_id": user.id, "company_id": user.company_id}
         )
     except Exception as e:
         log_user_error(message.from_user.id, message.from_user.username, "start command error", e)
@@ -204,10 +339,17 @@ async def callback_register_normal(callback: CallbackQuery, state: FSMContext):
     """Обработчик обычной регистрации"""
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     
+    # Проверяем, присоединяется ли пользователь к компании
+    user_data = await state.get_data()
+    company_id = user_data.get('company_id')
+    
+    # Выбираем правильный callback для кнопки "Назад"
+    back_callback = "back_to_company_join_welcome" if company_id else "back_to_welcome"
+    
     await callback.message.edit_text(
         "Начинаем регистрацию 🚩\nПожалуйста, введи свою фамилию и имя\n\nПример: Иванов Иван",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_welcome")]
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback)]
         ])
     )
     await state.set_state(RegistrationStates.waiting_for_full_name)
@@ -223,12 +365,19 @@ async def callback_register_with_code(callback: CallbackQuery, state: FSMContext
     # Помечаем, что это регистрация с кода (токен сначала)
     await state.update_data(registration_flow="code_first")
     
+    # Проверяем, присоединяется ли пользователь к компании
+    user_data = await state.get_data()
+    company_id = user_data.get('company_id')
+    
+    # Выбираем правильный callback для кнопки "Назад"
+    back_callback = "back_to_company_join_welcome" if company_id else "back_to_welcome"
+    
     await callback.message.edit_text(
         "Если ты сюда попал случайно, просто вернись назад ⬅️\n"
         "Этот шаг нужен только тем, кому рекрутер выдал специальный код\n\n"
         "Если есть код, введи его ниже",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_welcome")]
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback)]
         ])
     )
     await state.set_state(RegistrationStates.waiting_for_admin_token)
@@ -239,6 +388,20 @@ async def callback_register_with_code(callback: CallbackQuery, state: FSMContext
 @router.callback_query(F.data == "back_to_welcome")
 async def callback_back_to_welcome(callback: CallbackQuery, state: FSMContext):
     """Обработчик возврата к стартовому экрану"""
+    # Проверяем, присоединяется ли пользователь к компании
+    user_data = await state.get_data()
+    company_id = user_data.get('company_id')
+    
+    if company_id:
+        # Пользователь присоединяется к компании - используем правильный обработчик
+        # Имитируем callback_data для back_to_company_join_welcome
+        from handlers.company import callback_back_to_company_join_welcome
+        # Создаем временный callback с правильными данными
+        callback.data = "back_to_company_join_welcome"
+        await callback_back_to_company_join_welcome(callback, state)
+        return
+    
+    # Обычный возврат - очищаем состояние
     await state.clear()
     await callback.message.edit_text(
         "Привет! Добро пожаловать в чат-бот.\n\n"

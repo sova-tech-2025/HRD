@@ -17,7 +17,7 @@ from database.db import (
     update_knowledge_folder_name, delete_knowledge_folder,
     create_knowledge_material, get_knowledge_material_by_id, delete_knowledge_material,
     set_folder_access_groups, get_folder_access_info, get_all_groups,
-    check_folder_access, get_accessible_knowledge_folders_for_user
+    check_folder_access, get_accessible_knowledge_folders_for_user, ensure_company_id
 )
 from states.states import KnowledgeBaseStates
 from handlers.auth import check_auth
@@ -59,8 +59,18 @@ async def start_material_addition(callback: CallbackQuery, state: FSMContext, se
         bool: True если успешно, False если ошибка
     """
     try:
+        # Получаем company_id для изоляции
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await state.clear()
+            log_user_error(callback.from_user.id, "knowledge_base_company_missing", "company_id not resolved")
+            return False
+        
         # Получаем информацию о папке
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=company_id)
         if not folder:
             await callback.message.edit_text("❌ Папка не найдена")
             await state.clear()
@@ -119,8 +129,15 @@ async def cmd_knowledge_base_universal(message: Message, state: FSMContext, sess
                 await message.answer("❌ У тебя нет прав для управления базой знаний.")
                 return
 
+            # Получаем company_id
+            company_id = await ensure_company_id(session, state, message.from_user.id)
+            if company_id is None:
+                await message.answer("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+                await state.clear()
+                log_user_error(message.from_user.id, "kb_recruiter_company_missing", "company_id not resolved")
+                return
             # Получаем все папки
-            folders = await get_all_knowledge_folders(session)
+            folders = await get_all_knowledge_folders(session, company_id)
             
             if not folders:
                 # ТЗ 9-1 шаг 2: Нет папок
@@ -150,8 +167,15 @@ async def cmd_knowledge_base_universal(message: Message, state: FSMContext, sess
                 await message.answer("❌ У тебя нет прав для просмотра базы знаний.")
                 return
 
+            # Получаем company_id
+            company_id = await ensure_company_id(session, state, message.from_user.id)
+            if company_id is None:
+                await message.answer("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+                await state.clear()
+                log_user_error(message.from_user.id, "kb_employee_company_missing", "company_id not resolved")
+                return
             # Получаем папки, доступные пользователю
-            accessible_folders = await get_accessible_knowledge_folders_for_user(session, user.id)
+            accessible_folders = await get_accessible_knowledge_folders_for_user(session, user.id, company_id)
 
             if not accessible_folders:
                 await message.answer(
@@ -238,9 +262,17 @@ async def process_folder_name(message: Message, state: FSMContext, session: Asyn
             await message.answer("❌ Ошибка получения данных пользователя")
             await state.clear()
             return
+        
+        # Получаем company_id
+        company_id = await ensure_company_id(session, state, message.from_user.id)
+        if company_id is None:
+            await message.answer("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await state.clear()
+            log_user_error(message.from_user.id, "kb_folder_create_company_missing", "company_id not resolved")
+            return
             
         # Создаем папку
-        folder = await create_knowledge_folder(session, folder_name, user.id)
+        folder = await create_knowledge_folder(session, folder_name, user.id, None, company_id)
         if not folder:
             await message.answer("❌ Не удалось создать папку. Возможно, папка с таким названием уже существует.")
             return
@@ -347,6 +379,12 @@ async def process_material_name(message: Message, state: FSMContext, session: As
             
         data = await state.get_data()
         folder_id = data.get("current_folder_id")
+        company_id = await ensure_company_id(session, state, message.from_user.id)
+        if company_id is None:
+            await message.answer("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await state.clear()
+            log_user_error(message.from_user.id, "material_name_company_missing", "company_id not resolved")
+            return
         
         if not folder_id:
             await message.answer("❌ Ошибка: папка не найдена")
@@ -354,7 +392,7 @@ async def process_material_name(message: Message, state: FSMContext, session: As
             return
             
         # Получаем папку
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=company_id)
         if not folder:
             await message.answer("❌ Папка не найдена")
             await state.clear()
@@ -390,6 +428,12 @@ async def process_material_content(message: Message, state: FSMContext, session:
         data = await state.get_data()
         folder_id = data.get("current_folder_id")
         material_name = data.get("material_name")
+        company_id = await ensure_company_id(session, state, message.from_user.id)
+        if company_id is None:
+            await message.answer("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await state.clear()
+            log_user_error(message.from_user.id, "material_content_company_missing", "company_id not resolved")
+            return
 
         if not folder_id or not material_name:
             await message.answer("❌ Ошибка данных состояния")
@@ -397,7 +441,7 @@ async def process_material_content(message: Message, state: FSMContext, session:
             return
 
         # Получаем папку
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=company_id)
         if not folder:
             await message.answer("❌ Папка не найдена")
             await state.clear()
@@ -713,8 +757,26 @@ async def show_photo_upload_option(message_or_callback, state: FSMContext, sessi
         material_type = data.get("material_type")
         material_description = data.get("material_description", "")
 
+        if hasattr(message_or_callback, "from_user") and message_or_callback.from_user:
+            user_id = message_or_callback.from_user.id
+        elif hasattr(message_or_callback, "message") and message_or_callback.message and message_or_callback.message.from_user:
+            user_id = message_or_callback.message.from_user.id
+        else:
+            user_id = None
+
+        company_id = await ensure_company_id(session, state, user_id) if user_id else None
+        if company_id is None:
+            if hasattr(message_or_callback, 'text') or hasattr(message_or_callback, 'photo'):
+                await message_or_callback.answer("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            else:
+                await message_or_callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await state.clear()
+            if user_id:
+                log_user_error(user_id, "material_photo_option_company_missing", "company_id not resolved")
+            return
+
         # Получаем папку
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=company_id)
         if not folder:
             if hasattr(message_or_callback, 'text') or hasattr(message_or_callback, 'photo'):
                 await message_or_callback.answer("❌ Папка не найдена")
@@ -777,8 +839,26 @@ async def show_material_confirmation(message_or_callback, state: FSMContext, ses
         material_photos = data.get("material_photos", [])
         material_number = data.get("material_number", 1)
 
+        if hasattr(message_or_callback, "from_user") and message_or_callback.from_user:
+            user_id = message_or_callback.from_user.id
+        elif hasattr(message_or_callback, "message") and message_or_callback.message and message_or_callback.message.from_user:
+            user_id = message_or_callback.message.from_user.id
+        else:
+            user_id = None
+
+        company_id = await ensure_company_id(session, state, user_id) if user_id else None
+        if company_id is None:
+            if hasattr(message_or_callback, 'text') or hasattr(message_or_callback, 'photo'):
+                await message_or_callback.answer("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            else:
+                await message_or_callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await state.clear()
+            if user_id:
+                log_user_error(user_id, "material_confirmation_company_missing", "company_id not resolved")
+            return
+
         # Получаем папку
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=company_id)
         if not folder:
             if hasattr(message_or_callback, 'text') or hasattr(message_or_callback, 'photo'):
                 await message_or_callback.answer("❌ Папка не найдена")
@@ -880,7 +960,7 @@ async def callback_save_material(callback: CallbackQuery, state: FSMContext, ses
         await session.commit()
         
         # Получаем папку для отображения
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=user.company_id)
         
         # ТЗ 9-1 шаг 16: Материал сохранен - показываем только активные материалы в папке
         materials_display = []
@@ -948,7 +1028,13 @@ async def callback_cancel_material(callback: CallbackQuery, state: FSMContext, s
         await callback.answer()
         
         # Возвращаемся к главному меню
-        folders = await get_all_knowledge_folders(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await state.clear()
+            log_user_error(callback.from_user.id, "cancel_material_company_missing", "company_id not resolved")
+            return
+        folders = await get_all_knowledge_folders(session, company_id)
         
         if not folders:
             await callback.message.edit_text(
@@ -980,16 +1066,24 @@ async def callback_view_folder(callback: CallbackQuery, state: FSMContext, sessi
     try:
         await callback.answer()
         
+        # Получаем company_id для изоляции
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await state.clear()
+            log_user_error(callback.from_user.id, "view_folder_company_missing", "company_id not resolved")
+            return
+        
         folder_id = int(callback.data.split(":")[1])
         
         # Получаем папку с материалами
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=company_id)
         if not folder:
             await callback.message.edit_text("❌ Папка не найдена")
             return
             
         # Получаем информацию о доступе
-        access_info = await get_folder_access_info(session, folder_id)
+        access_info = await get_folder_access_info(session, folder_id, company_id=company_id)
         access_text = access_info.get("description", "все группы") if access_info.get("success") else "все группы"
         
         # ТЗ 9-2 шаг 4
@@ -1388,14 +1482,22 @@ async def callback_back(callback: CallbackQuery, state: FSMContext, session: Asy
 async def callback_view_folder_by_id(callback: CallbackQuery, state: FSMContext, session: AsyncSession, folder_id: int):
     """Вспомогательная функция для просмотра папки по ID"""
     try:
+        # Получаем company_id для изоляции
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await state.clear()
+            log_user_error(callback.from_user.id, "view_folder_by_id_company_missing", "company_id not resolved")
+            return
+        
         # Получаем папку с материалами
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=company_id)
         if not folder:
             await callback.message.edit_text("❌ Папка не найдена")
             return
             
         # Получаем информацию о доступе
-        access_info = await get_folder_access_info(session, folder_id)
+        access_info = await get_folder_access_info(session, folder_id, company_id=company_id)
         access_text = access_info.get("description", "все группы") if access_info.get("success") else "все группы"
         
         await callback.message.edit_text(
@@ -1418,7 +1520,13 @@ async def callback_view_folder_by_id(callback: CallbackQuery, state: FSMContext,
 async def show_main_folders_list(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показ основного списка папок (ТЗ 9-2 шаг 10)"""
     try:
-        folders = await get_all_knowledge_folders(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await state.clear()
+            log_user_error(callback.from_user.id, "show_main_folders_company_missing", "company_id not resolved")
+            return
+        folders = await get_all_knowledge_folders(session, company_id)
         
         if not folders:
             await callback.message.edit_text(
@@ -1466,14 +1574,24 @@ async def callback_folder_access(callback: CallbackQuery, state: FSMContext, ses
         
         folder_id = int(callback.data.split(":")[1])
         
+        # Получаем company_id
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Обнови сессию командой /start."
+            )
+            await state.clear()
+            log_user_error(callback.from_user.id, "folder_access_company_missing", "company_id not resolved")
+            return
+        
         # Получаем папку
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=company_id)
         if not folder:
             await callback.message.edit_text("❌ Папка не найдена")
             return
-            
+
         # Получаем все группы
-        groups = await get_all_groups(session)
+        groups = await get_all_groups(session, company_id)
         if not groups:
             await callback.message.edit_text("❌ В системе нет групп для настройки доступа")
             return
@@ -1482,7 +1600,7 @@ async def callback_folder_access(callback: CallbackQuery, state: FSMContext, ses
         current_group_ids = [group.id for group in folder.accessible_groups] if folder.accessible_groups else []
         
         # Получаем информацию о текущем доступе
-        access_info = await get_folder_access_info(session, folder_id)
+        access_info = await get_folder_access_info(session, folder_id, company_id=company_id)
         access_text = access_info.get("description", "все группы") if access_info.get("success") else "все группы"
         
         # ТЗ 9-3 шаг 5
@@ -1541,9 +1659,10 @@ async def callback_toggle_group_access(callback: CallbackQuery, state: FSMContex
         else:
             selected_group_ids.append(group_id)
             
-        # Получаем папку и группы для обновления интерфейса
-        folder = await get_knowledge_folder_by_id(session, folder_id)
-        groups = await get_all_groups(session)
+        # Получаем company_id, папку и группы для обновления интерфейса
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=company_id)
+        groups = await get_all_groups(session, company_id)
         
         if not folder or not groups:
             await callback.message.edit_text("❌ Ошибка получения данных")
@@ -1611,9 +1730,13 @@ async def callback_save_access(callback: CallbackQuery, state: FSMContext, sessi
         if not user:
             await callback.message.edit_text("❌ Ошибка получения данных пользователя")
             return
+        
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id') or user.company_id
             
         # Сохраняем настройки доступа
-        success = await set_folder_access_groups(session, folder_id, selected_group_ids, user.id)
+        success = await set_folder_access_groups(session, folder_id, selected_group_ids, user.id, company_id=company_id)
         if not success:
             await callback.message.edit_text("❌ Не удалось сохранить настройки доступа")
             return
@@ -1654,8 +1777,8 @@ async def callback_rename_folder(callback: CallbackQuery, state: FSMContext, ses
         
         folder_id = int(callback.data.split(":")[1])
         
-        # Получаем папку
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        # Получаем папку с изоляцией
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=user.company_id)
         if not folder:
             await callback.message.edit_text("❌ Папка не найдена")
             return
@@ -1747,9 +1870,13 @@ async def callback_confirm_rename(callback: CallbackQuery, state: FSMContext, se
         if not user:
             await callback.message.edit_text("❌ Ошибка получения данных пользователя")
             return
+        
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id') or user.company_id
             
         # Переименовываем папку
-        success = await update_knowledge_folder_name(session, folder_id, new_name, user.id)
+        success = await update_knowledge_folder_name(session, folder_id, new_name, user.id, company_id=company_id)
         if not success:
             await callback.message.edit_text("❌ Не удалось переименовать папку. Возможно, папка с таким названием уже существует.")
             return
@@ -1817,14 +1944,14 @@ async def callback_delete_folder(callback: CallbackQuery, state: FSMContext, ses
         
         folder_id = int(callback.data.split(":")[1])
         
-        # Получаем папку
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        # Получаем папку с изоляцией
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=user.company_id)
         if not folder:
             await callback.message.edit_text("❌ Папка не найдена")
             return
             
         # Получаем информацию о доступе
-        access_info = await get_folder_access_info(session, folder_id)
+        access_info = await get_folder_access_info(session, folder_id, company_id=user.company_id)
         access_text = access_info.get("description", "все группы") if access_info.get("success") else "все группы"
         
         # ТЗ 9-5 шаг 5
@@ -1864,23 +1991,23 @@ async def callback_confirm_delete_folder(callback: CallbackQuery, state: FSMCont
         
         folder_id = int(callback.data.split(":")[1])
         
-        # Получаем папку
-        folder = await get_knowledge_folder_by_id(session, folder_id)
-        if not folder:
-            await callback.message.edit_text("❌ Папка не найдена")
-            return
-            
         # Получаем пользователя
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
             await callback.message.edit_text("❌ Ошибка получения данных пользователя")
             return
+        
+        # Получаем папку с изоляцией
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=user.company_id)
+        if not folder:
+            await callback.message.edit_text("❌ Папка не найдена")
+            return
             
         # Сохраняем название для отображения
         folder_name = folder.name
         
-        # Удаляем папку
-        success = await delete_knowledge_folder(session, folder_id, user.id)
+        # Удаляем папку с изоляцией
+        success = await delete_knowledge_folder(session, folder_id, user.id, company_id=user.company_id)
         if not success:
             await callback.message.edit_text("❌ Не удалось удалить папку")
             return
@@ -1951,7 +2078,9 @@ async def callback_employee_knowledge_base(callback: CallbackQuery, state: FSMCo
             return
 
         # Получаем папки, доступные пользователю
-        accessible_folders = await get_accessible_knowledge_folders_for_user(session, user.id)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        accessible_folders = await get_accessible_knowledge_folders_for_user(session, user.id, company_id)
         
         if not accessible_folders:
             await callback.message.edit_text(
@@ -1994,13 +2123,13 @@ async def callback_employee_view_folder(callback: CallbackQuery, state: FSMConte
             return
 
         # Проверяем доступ к папке
-        has_access = await check_folder_access(session, folder_id, user.id)
+        has_access = await check_folder_access(session, folder_id, user.id, company_id=user.company_id)
         if not has_access:
             await callback.message.edit_text("❌ У тебя нет доступа к этой папке.")
             return
 
-        # Получаем папку с материалами
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        # Получаем папку с материалами с изоляцией
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=user.company_id)
         if not folder:
             await callback.message.edit_text("❌ Папка не найдена")
             return
@@ -2052,8 +2181,12 @@ async def callback_employee_view_material(callback: CallbackQuery, state: FSMCon
             await callback.message.edit_text("❌ Материал не найден")
             return
 
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id') or user.company_id
+
         # Проверяем доступ к папке материала
-        has_access = await check_folder_access(session, material.folder_id, user.id)
+        has_access = await check_folder_access(session, material.folder_id, user.id, company_id=company_id)
         if not has_access:
             await callback.message.edit_text("❌ У тебя нет доступа к этому материалу.")
             return
@@ -2199,7 +2332,9 @@ async def callback_employee_back_to_folders(callback: CallbackQuery, state: FSMC
             return
 
         # Получаем папки, доступные пользователю
-        accessible_folders = await get_accessible_knowledge_folders_for_user(session, user.id)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        accessible_folders = await get_accessible_knowledge_folders_for_user(session, user.id, company_id)
         
         if not accessible_folders:
             await callback.message.edit_text(

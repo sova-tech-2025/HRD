@@ -11,7 +11,7 @@ from database.db import (
     get_attestation_by_id, check_attestation_in_use, delete_attestation, 
     get_all_active_tests, create_test, add_question_to_test,
     get_all_groups, check_user_permission, get_user_by_tg_id, get_user_roles,
-    get_trajectories_using_attestation, get_trajectory_usage_info
+    get_trajectories_using_attestation, get_trajectory_usage_info, ensure_company_id
 )
 from handlers.auth import check_auth
 from states.states import LearningPathStates, AttestationStates
@@ -281,7 +281,8 @@ async def process_session_name(message: Message, state: FSMContext, session: Asy
         await state.update_data(trajectory_data=trajectory_data)
         
         # Получаем все доступные тесты
-        tests = await get_all_active_tests(session)
+        company_id = await ensure_company_id(session, state, message.from_user.id)
+        tests = await get_all_active_tests(session, company_id)
         
         # Показываем выбор тестов
         trajectory_progress = generate_trajectory_progress(trajectory_data)
@@ -975,8 +976,21 @@ async def callback_finish_questions(callback: CallbackQuery, state: FSMContext, 
 async def process_test_threshold(message: Message, state: FSMContext, session: AsyncSession):
     """Обработка проходного балла и создание теста"""
     try:
+        # Проверяем, что сообщение содержит текст и это не команда/кнопка
+        if not message.text or message.text.startswith('/'):
+            # Игнорируем команды и пустые сообщения
+            return
+        
         try:
             threshold = float(message.text.strip())
+        except (ValueError, TypeError):
+            # Если это не число (например, текст кнопки), показываем понятное сообщение
+            data = await state.get_data()
+            total_score = data.get('new_test_total_score', 0)
+            await message.answer(f"❌ Пожалуйста, введи число от 0.5 до {total_score:.1f} для проходного балла.")
+            return
+        
+        try:
             data = await state.get_data()
             total_score = data.get('new_test_total_score', 0)
             
@@ -997,7 +1011,14 @@ async def process_test_threshold(message: Message, state: FSMContext, session: A
             'stage_id': None
         }
         
-        test = await create_test(session, test_data)
+        company_id = await ensure_company_id(session, state, message.from_user.id)
+        
+        if company_id is None:
+            await message.answer("❌ Ошибка: не удалось определить компанию. Попробуй еще раз.")
+            log_user_error(message.from_user.id, "test_creation_company_id_error", f"Не удалось получить company_id для пользователя {message.from_user.id} при создании теста")
+            return
+        
+        test = await create_test(session, test_data, company_id)
         if not test:
             await message.answer("❌ Ошибка создания теста")
             return
@@ -1006,7 +1027,7 @@ async def process_test_threshold(message: Message, state: FSMContext, session: A
         questions = data.get('new_test_questions') or []
         for question_data in questions:
             question_data['test_id'] = test.id
-            await add_question_to_test(session, question_data)
+            await add_question_to_test(session, question_data, company_id=company_id)
         
         # Добавляем тест к текущей сессии
         trajectory_data = data.get('trajectory_data', {})
@@ -1038,7 +1059,8 @@ async def process_test_threshold(message: Message, state: FSMContext, session: A
         )
         
         # Получаем обновленный список тестов
-        tests = await get_all_active_tests(session)
+        company_id = await ensure_company_id(session, state, message.from_user.id)
+        tests = await get_all_active_tests(session, company_id)
         current_session_tests = []
         if trajectory_data.get('stages'):
             last_stage = trajectory_data['stages'][-1]
@@ -1081,7 +1103,8 @@ async def callback_select_existing_test(callback: CallbackQuery, state: FSMConte
         test_id = int(callback.data.split(":")[1])
         
         # Получаем информацию о тесте
-        tests = await get_all_active_tests(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        tests = await get_all_active_tests(session, company_id)
         selected_test = next((t for t in tests if t.id == test_id), None)
         
         if not selected_test:
@@ -1277,7 +1300,8 @@ async def callback_confirm_trajectory_save(callback: CallbackQuery, state: FSMCo
         await callback.answer()
         
         # Получаем аттестации
-        attestations = await get_all_attestations(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        attestations = await get_all_attestations(session, company_id)
         
         if not attestations:
             await callback.message.edit_text(
@@ -1322,8 +1346,12 @@ async def callback_select_attestation(callback: CallbackQuery, state: FSMContext
         
         attestation_id = int(callback.data.split(":")[1])
         
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        
         # Получаем аттестацию
-        attestation = await get_attestation_by_id(session, attestation_id)
+        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
         if not attestation:
             await callback.answer("Аттестация не найдена", show_alert=True)
             return
@@ -1331,7 +1359,6 @@ async def callback_select_attestation(callback: CallbackQuery, state: FSMContext
         await state.update_data(selected_attestation_id=attestation_id)
         
         # Получаем прогресс траектории
-        data = await state.get_data()
         trajectory_data = data.get('trajectory_data', {})
         trajectory_progress = generate_trajectory_progress(trajectory_data)
         
@@ -1363,7 +1390,8 @@ async def callback_confirm_attestation_and_proceed(callback: CallbackQuery, stat
         await callback.answer()
         
         # Получаем группы
-        groups = await get_all_groups(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        groups = await get_all_groups(session, company_id)
         if not groups:
             await callback.answer("Нет доступных групп. Создай группу сначала.", show_alert=True)
             return
@@ -1401,11 +1429,12 @@ async def callback_select_group_for_trajectory(callback: CallbackQuery, state: F
         trajectory_data = data.get('trajectory_data', {})
         
         # Получаем название группы и аттестации
-        groups = await get_all_groups(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        groups = await get_all_groups(session, company_id)
         selected_group = next((g for g in groups if g.id == group_id), None)
         group_name = selected_group.name if selected_group else "Неизвестная группа"
         
-        attestations = await get_all_attestations(session)
+        attestations = await get_all_attestations(session, company_id)
         selected_attestation = next((a for a in attestations if a.id == attestation_id), None)
         attestation_name = selected_attestation.name if selected_attestation else "Неизвестная аттестация"
         
@@ -1452,10 +1481,11 @@ async def callback_final_confirm_save(callback: CallbackQuery, state: FSMContext
         trajectory_data = data.get('trajectory_data', {})
         attestation_id = data.get('selected_attestation_id')
         group_id = data.get('selected_group_id')
+        company_id = data.get('company_id')
         
         # Финально сохраняем траекторию
         success = await save_trajectory_with_attestation_and_group(
-            session, trajectory_data, attestation_id, group_id
+            session, trajectory_data, attestation_id, group_id, company_id
         )
         
         if not success:
@@ -1488,7 +1518,8 @@ async def callback_cancel_final_confirmation(callback: CallbackQuery, state: FSM
         await callback.answer()
         
         # Возвращаемся к выбору группы
-        groups = await get_all_groups(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        groups = await get_all_groups(session, company_id)
         if not groups:
             await callback.answer("Нет доступных групп", show_alert=True)
             return
@@ -1586,7 +1617,8 @@ async def callback_cancel_attestation_confirmation(callback: CallbackQuery, stat
         await callback.answer()
         
         # Возвращаемся к выбору аттестации  
-        attestations = await get_all_attestations(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        attestations = await get_all_attestations(session, company_id)
         
         # У нас теперь всегда есть mock аттестации
         
@@ -1622,7 +1654,8 @@ async def callback_edit_trajectory(callback: CallbackQuery, state: FSMContext, s
         await callback.answer()
         
         # Получаем все траектории
-        learning_paths = await get_all_learning_paths(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        learning_paths = await get_all_learning_paths(session, company_id)
         
         if not learning_paths:
             await callback.answer("Нет созданных траекторий для просмотра", show_alert=True)
@@ -1675,7 +1708,8 @@ async def callback_trajectories_page(callback: CallbackQuery, state: FSMContext,
         
         # Если нет в кэше - получаем из БД
         if not learning_paths:
-            learning_paths = await get_all_learning_paths(session)
+            company_id = await ensure_company_id(session, state, callback.from_user.id)
+            learning_paths = await get_all_learning_paths(session, company_id)
             if not learning_paths:
                 await callback.answer("Нет созданных траекторий для просмотра", show_alert=True)
                 return
@@ -1737,7 +1771,8 @@ async def callback_manage_attestations(callback: CallbackQuery, state: FSMContex
         await callback.answer()
         
         # Получаем все аттестации
-        attestations = await get_all_attestations(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        attestations = await get_all_attestations(session, company_id)
         
         text = (
             "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\n"
@@ -1972,11 +2007,14 @@ async def process_attestation_passing_score(message: Message, state: FSMContext,
         create_attestation._pending_questions['current'] = questions
         
         # Создаем аттестацию в БД
+        data = await state.get_data()
+        company_id = data.get('company_id')
         attestation = await create_attestation(
             session=session,
             name=attestation_name,
             passing_score=passing_score,
-            creator_id=user.id
+            creator_id=user.id,
+            company_id=company_id
         )
         
         # Добавляем вопросы
@@ -2004,7 +2042,8 @@ async def process_attestation_passing_score(message: Message, state: FSMContext,
         await message.answer(text, parse_mode="HTML")
         
         # КРИТИЧНО: После создания показываем обновленный список аттестаций
-        updated_attestations = await get_all_attestations(session)
+        company_id = await ensure_company_id(session, state, message.from_user.id)
+        updated_attestations = await get_all_attestations(session, company_id)
         
         menu_text = (
             "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\n"
@@ -2036,8 +2075,12 @@ async def callback_view_attestation(callback: CallbackQuery, state: FSMContext, 
         
         attestation_id = int(callback.data.split(":")[1])
         
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        
         # Получаем аттестацию
-        attestation = await get_attestation_by_id(session, attestation_id)
+        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
         if not attestation:
             await callback.answer("Аттестация не найдена", show_alert=True)
             return
@@ -2046,7 +2089,7 @@ async def callback_view_attestation(callback: CallbackQuery, state: FSMContext, 
         await state.update_data(current_attestation_id=attestation_id, attestation_page=0)
         
         # Используем универсальную функцию рендеринга
-        text, keyboard = await render_attestation_page(session, attestation_id, 0)
+        text, keyboard = await render_attestation_page(session, attestation_id, 0, company_id=company_id)
         
         await callback.message.edit_text(
             text,
@@ -2059,9 +2102,9 @@ async def callback_view_attestation(callback: CallbackQuery, state: FSMContext, 
         log_user_error(callback.from_user.id, "view_attestation_error", str(e))
 
 
-async def render_attestation_page(session: AsyncSession, attestation_id: int, page: int) -> tuple[str, InlineKeyboardMarkup]:
+async def render_attestation_page(session: AsyncSession, attestation_id: int, page: int, company_id: int = None) -> tuple[str, InlineKeyboardMarkup]:
     """Универсальная функция рендеринга страницы аттестации"""
-    attestation = await get_attestation_by_id(session, attestation_id)
+    attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
     if not attestation:
         raise ValueError("Аттестация не найдена")
     
@@ -2086,7 +2129,7 @@ async def render_attestation_page(session: AsyncSession, attestation_id: int, pa
             questions_text += f"📄 <i>Страница {page + 1} из {total_pages}</i>\n\n"
     
     # Информация о траекториях
-    using_trajectories = await get_trajectories_using_attestation(session, attestation_id)
+    using_trajectories = await get_trajectories_using_attestation(session, attestation_id, company_id=company_id)
     if using_trajectories:
         if len(using_trajectories) == 1:
             trajectories_info = f"🗺️ <b>Используется в траектории:</b> {using_trajectories[0]}\n\n"
@@ -2135,11 +2178,12 @@ async def callback_attestation_page_prev(callback: CallbackQuery, state: FSMCont
         attestation_id = int(callback.data.split(":")[1])
         data = await state.get_data()
         current_page = data.get('attestation_page', 0)
+        company_id = data.get('company_id')
         
         new_page = max(0, current_page - 1)
         await state.update_data(attestation_page=new_page)
         
-        text, keyboard = await render_attestation_page(session, attestation_id, new_page)
+        text, keyboard = await render_attestation_page(session, attestation_id, new_page, company_id=company_id)
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         
     except Exception as e:
@@ -2156,8 +2200,9 @@ async def callback_attestation_page_next(callback: CallbackQuery, state: FSMCont
         attestation_id = int(callback.data.split(":")[1])
         data = await state.get_data()
         current_page = data.get('attestation_page', 0)
+        company_id = data.get('company_id')
         
-        attestation = await get_attestation_by_id(session, attestation_id)
+        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
         if not attestation:
             await callback.answer("Аттестация не найдена", show_alert=True)
             return
@@ -2166,7 +2211,7 @@ async def callback_attestation_page_next(callback: CallbackQuery, state: FSMCont
         new_page = min(current_page + 1, total_pages - 1)
         await state.update_data(attestation_page=new_page)
         
-        text, keyboard = await render_attestation_page(session, attestation_id, new_page)
+        text, keyboard = await render_attestation_page(session, attestation_id, new_page, company_id=company_id)
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         
     except Exception as e:
@@ -2181,7 +2226,8 @@ async def callback_back_to_attestations_list(callback: CallbackQuery, state: FSM
         await callback.answer()
         
         # Получаем все аттестации
-        attestations = await get_all_attestations(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        attestations = await get_all_attestations(session, company_id)
         
         text = (
             "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\n"
@@ -2209,18 +2255,22 @@ async def callback_delete_attestation_confirm(callback: CallbackQuery, state: FS
         
         attestation_id = int(callback.data.split(":")[1])
         
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        
         # Получаем информацию об аттестации
-        attestation = await get_attestation_by_id(session, attestation_id)
+        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
         if not attestation:
             await callback.answer("Аттестация не найдена", show_alert=True)
             return
         
         # Проверяем, используется ли аттестация в траекториях
-        is_in_use = await check_attestation_in_use(session, attestation_id)
+        is_in_use = await check_attestation_in_use(session, attestation_id, company_id=company_id)
         
         if is_in_use:
             # Получаем названия траекторий, использующих эту аттестацию
-            trajectory_names = await get_trajectories_using_attestation(session, attestation_id)
+            trajectory_names = await get_trajectories_using_attestation(session, attestation_id, company_id=company_id)
             
             # Формируем список траекторий для отображения
             if len(trajectory_names) == 1:
@@ -2305,8 +2355,12 @@ async def callback_confirm_delete_attestation(callback: CallbackQuery, state: FS
         data = await state.get_data()
         attestation_name = data.get('attestation_name', 'Неизвестная аттестация')
         
+        # Получаем company_id для изоляции
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        company_id = data.get('company_id') or (user.company_id if user else None)
+        
         # Выполняем удаление
-        success = await delete_attestation(session, attestation_id)
+        success = await delete_attestation(session, attestation_id, company_id=company_id)
         
         if success:
             # Удаление успешно
@@ -2321,7 +2375,8 @@ async def callback_confirm_delete_attestation(callback: CallbackQuery, state: FS
             # Показываем обновленный список аттестаций
             await asyncio.sleep(2)  # Небольшая пауза для чтения сообщения
             
-            attestations = await get_all_attestations(session)
+            company_id = await ensure_company_id(session, state, callback.from_user.id)
+            attestations = await get_all_attestations(session, company_id)
             
             menu_text = (
                 "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\n"
@@ -2402,7 +2457,8 @@ async def callback_delete_trajectory(callback: CallbackQuery, state: FSMContext,
         await callback.answer()
         
         # Получаем все траектории
-        trajectories = await get_all_learning_paths(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        trajectories = await get_all_learning_paths(session, company_id)
         
         if not trajectories:
             await callback.message.edit_text(
@@ -2442,8 +2498,12 @@ async def callback_select_trajectory_to_delete(callback: CallbackQuery, state: F
     try:
         await callback.answer()
         
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        
         trajectory_id = int(callback.data.split(":")[1])
-        trajectory = await get_learning_path_by_id(session, trajectory_id)
+        trajectory = await get_learning_path_by_id(session, trajectory_id, company_id=company_id)
         
         if not trajectory:
             await callback.message.edit_text(
@@ -2457,7 +2517,7 @@ async def callback_select_trajectory_to_delete(callback: CallbackQuery, state: F
             return
         
         # Собираем информацию об использовании траектории
-        usage_info = await get_trajectory_usage_info(session, trajectory_id)
+        usage_info = await get_trajectory_usage_info(session, trajectory_id, company_id=company_id)
         
         # Формируем предупреждающее сообщение
         warning_text = f"⚠️ <b>ПРЕДУПРЕЖДЕНИЕ</b> ⚠️\n\n"
@@ -2526,8 +2586,12 @@ async def callback_confirm_trajectory_deletion(callback: CallbackQuery, state: F
     try:
         await callback.answer()
         
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        
         trajectory_id = int(callback.data.split(":")[1])
-        trajectory = await get_learning_path_by_id(session, trajectory_id)
+        trajectory = await get_learning_path_by_id(session, trajectory_id, company_id=company_id)
         
         if not trajectory:
             await callback.message.edit_text(
@@ -2538,7 +2602,7 @@ async def callback_confirm_trajectory_deletion(callback: CallbackQuery, state: F
             return
         
         # Удаляем траекторию
-        success = await delete_learning_path(session, trajectory_id)
+        success = await delete_learning_path(session, trajectory_id, company_id=company_id)
         
         if success:
             await callback.message.edit_text(
@@ -2574,7 +2638,8 @@ async def callback_back_to_trajectory_selection(callback: CallbackQuery, state: 
         await callback.answer()
         
         # Получаем все траектории
-        trajectories = await get_all_learning_paths(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        trajectories = await get_all_learning_paths(session, company_id)
         
         if not trajectories:
             await callback.message.edit_text(
@@ -2640,7 +2705,8 @@ async def callback_cancel_test_creation(callback: CallbackQuery, state: FSMConte
         await callback.answer()
         
         # Получаем все доступные тесты
-        tests = await get_all_active_tests(session)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        tests = await get_all_active_tests(session, company_id)
         
         # Получаем текущие тесты в сессии
         data = await state.get_data()

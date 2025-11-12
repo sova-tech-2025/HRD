@@ -13,7 +13,7 @@ from database.db import (
     get_user_by_tg_id, check_user_permission, get_all_active_tests,
     get_test_by_id, get_all_groups, get_group_by_id, broadcast_test_to_groups,
     get_employees_in_group, get_all_knowledge_folders, get_knowledge_folder_by_id,
-    get_knowledge_material_by_id
+    get_knowledge_material_by_id, ensure_company_id
 )
 from states.states import BroadcastStates
 from keyboards.keyboards import (
@@ -24,7 +24,7 @@ from keyboards.keyboards import (
     get_broadcast_notification_keyboard, get_broadcast_main_menu_keyboard,
     get_broadcast_roles_selection_keyboard
 )
-from utils.logger import log_user_action, log_user_error
+from utils.logger import logger, log_user_action, log_user_error
 
 router = Router()
 
@@ -228,8 +228,18 @@ async def callback_skip_photos(callback: CallbackQuery, state: FSMContext, sessi
     try:
         await callback.answer()
         
+        # Получаем company_id с помощью общего helper
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Попробуй снова или обратись к администратору."
+            )
+            await state.clear()
+            log_user_error(callback.from_user.id, "broadcast_company_missing", "company_id not resolved")
+            return
+
         # Показываем выбор материалов
-        folders = await get_all_knowledge_folders(session)
+        folders = await get_all_knowledge_folders(session, company_id)
         
         if not folders:
             await callback.message.edit_text(
@@ -241,7 +251,7 @@ async def callback_skip_photos(callback: CallbackQuery, state: FSMContext, sessi
                 parse_mode="HTML"
             )
             # Переходим сразу к выбору теста
-            await show_test_selection(callback, state, session)
+            await show_test_selection(callback, state, session, company_id)
             return
         
         await callback.message.edit_text(
@@ -276,8 +286,18 @@ async def callback_finish_photos(callback: CallbackQuery, state: FSMContext, ses
             await callback.answer("Сначала загрузи хотя бы одно изображение!", show_alert=True)
             return
         
+        # Получаем company_id с помощью helper
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Попробуй снова или обратись к администратору."
+            )
+            await state.clear()
+            log_user_error(callback.from_user.id, "broadcast_finish_photos_company_missing", "company_id not resolved")
+            return
+        
         # Показываем выбор материалов
-        folders = await get_all_knowledge_folders(session)
+        folders = await get_all_knowledge_folders(session, company_id)
         
         if not folders:
             await callback.message.edit_text(
@@ -289,7 +309,7 @@ async def callback_finish_photos(callback: CallbackQuery, state: FSMContext, ses
                 parse_mode="HTML"
             )
             # Переходим сразу к выбору теста
-            await show_test_selection(callback, state, session)
+            await show_test_selection(callback, state, session, company_id)
             return
         
         await callback.message.edit_text(
@@ -310,9 +330,17 @@ async def callback_finish_photos(callback: CallbackQuery, state: FSMContext, ses
         log_user_error(callback.from_user.id, "finish_photos_error", str(e))
 
 
-async def show_test_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+async def show_test_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession, company_id: int = None):
     """Вспомогательная функция показа выбора теста"""
-    tests = await get_all_active_tests(session)
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None:
+        await callback.answer("Не удалось определить компанию. Повтори попытку позже.", show_alert=True)
+        await state.clear()
+        log_user_error(callback.from_user.id, "broadcast_show_tests_company_missing", "company_id not resolved")
+        return
+
+    tests = await get_all_active_tests(session, company_id)
     
     if not tests:
         await callback.message.edit_text(
@@ -352,15 +380,22 @@ async def show_roles_selection(callback: CallbackQuery, state: FSMContext, sessi
     await state.set_state(BroadcastStates.selecting_roles)
 
 
-async def show_groups_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+async def show_groups_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession, company_id: int = None):
     """Вспомогательная функция показа выбора групп"""
     data = await state.get_data()
     selected_test_id = data.get("selected_test_id")
     broadcast_material_id = data.get("broadcast_material_id")
     selected_roles = data.get("selected_roles", [])
     
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None:
+        await callback.answer("Не удалось определить компанию. Повтори попытку позже.", show_alert=True)
+        await state.clear()
+        log_user_error(callback.from_user.id, "broadcast_show_groups_company_missing", "company_id not resolved")
+        return
     # Получаем все группы
-    groups = await get_all_groups(session)
+    groups = await get_all_groups(session, company_id)
     
     if not groups:
         await callback.message.edit_text(
@@ -378,7 +413,7 @@ async def show_groups_selection(callback: CallbackQuery, state: FSMContext, sess
     
     # Добавляем информацию о тесте (если есть)
     if selected_test_id:
-        test = await get_test_by_id(session, selected_test_id)
+        test = await get_test_by_id(session, selected_test_id, company_id=company_id)
         if test:
             info_lines.append(f"🟢 <b>Тест:</b> {test.name}\n")
     
@@ -418,8 +453,12 @@ async def callback_show_folder_materials(callback: CallbackQuery, state: FSMCont
     try:
         await callback.answer()
         
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        
         folder_id = int(callback.data.split(":")[1])
-        folder = await get_knowledge_folder_by_id(session, folder_id)
+        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=company_id)
         
         if not folder:
             await callback.answer("Папка не найдена", show_alert=True)
@@ -457,7 +496,11 @@ async def callback_back_to_folders(callback: CallbackQuery, state: FSMContext, s
     try:
         await callback.answer()
         
-        folders = await get_all_knowledge_folders(session)
+        # Получение company_id из контекста (добавлен CompanyMiddleware)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        
+        folders = await get_all_knowledge_folders(session, company_id)
         
         await callback.message.edit_text(
             "✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"
@@ -505,7 +548,9 @@ async def callback_skip_material(callback: CallbackQuery, state: FSMContext, ses
         await callback.answer()
         
         # Переходим к выбору теста
-        await show_test_selection(callback, state, session)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        await show_test_selection(callback, state, session, company_id)
         
         log_user_action(callback.from_user.id, "broadcast_material_skipped", "Материал пропущен")
         
@@ -537,8 +582,10 @@ async def callback_start_broadcast(callback: CallbackQuery, state: FSMContext, s
             )
             return
         
+        # Получение company_id из контекста (добавлен CompanyMiddleware)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
         # Получаем все активные тесты
-        tests = await get_all_active_tests(session)
+        tests = await get_all_active_tests(session, company_id)
         
         if not tests:
             await callback.message.edit_text(
@@ -575,10 +622,14 @@ async def callback_select_broadcast_test(callback: CallbackQuery, state: FSMCont
     try:
         await callback.answer()
         
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        
         test_id = int(callback.data.split(":")[1])
         
-        # Получаем информацию о тесте
-        test = await get_test_by_id(session, test_id)
+        # Получаем информацию о тесте с изоляцией
+        test = await get_test_by_id(session, test_id, company_id=company_id)
         if not test:
             await callback.answer("Тест не найден", show_alert=True)
             return
@@ -730,7 +781,9 @@ async def callback_proceed_to_groups(callback: CallbackQuery, state: FSMContext,
         await callback.answer()
         
         # Переходим к выбору групп
-        await show_groups_selection(callback, state, session)
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        await show_groups_selection(callback, state, session, company_id)
         
         log_user_action(callback.from_user.id, "broadcast_roles_selected", f"Выбраны роли: {', '.join(selected_roles)}")
         
@@ -753,13 +806,14 @@ async def callback_toggle_broadcast_group(callback: CallbackQuery, state: FSMCon
         selected_groups = data.get("selected_groups", [])
         broadcast_docs = data.get("broadcast_docs", [])
         broadcast_material_id = data.get("broadcast_material_id")
+        company_id = data.get('company_id')
         
         # Получаем информацию о тесте (опционально) и группе
         test = None
         if selected_test_id:
-            test = await get_test_by_id(session, selected_test_id)
+            test = await get_test_by_id(session, selected_test_id, company_id=company_id)
         
-        group = await get_group_by_id(session, group_id)
+        group = await get_group_by_id(session, group_id, company_id=company_id)
         
         if not group:
             await callback.answer("Группа не найдена", show_alert=True)
@@ -776,15 +830,17 @@ async def callback_toggle_broadcast_group(callback: CallbackQuery, state: FSMCon
         # Получаем названия выбранных групп
         selected_group_names = []
         for gid in selected_groups:
-            g = await get_group_by_id(session, gid)
+            g = await get_group_by_id(session, gid, company_id=company_id)
             if g:
                 selected_group_names.append(g.name)
         
         # Формируем сообщение согласно ТЗ
         groups_text = "; ".join(selected_group_names) if selected_group_names else ""
         
+        # Получение company_id из контекста (добавлен CompanyMiddleware)
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
         # Получаем все группы для отображения
-        all_groups = await get_all_groups(session)
+        all_groups = await get_all_groups(session, company_id)
         
         # Формируем информацию о рассылке
         info_lines = ["✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"]
@@ -838,6 +894,7 @@ async def callback_send_broadcast(callback: CallbackQuery, state: FSMContext, se
         selected_groups = data.get("selected_groups", [])
         selected_roles = data.get("selected_roles", [])
         broadcast_docs = data.get("broadcast_docs", [])
+        company_id = data.get('company_id')
         
         # Проверяем обязательные поля
         if not broadcast_script or not selected_groups:
@@ -868,6 +925,10 @@ async def callback_send_broadcast(callback: CallbackQuery, state: FSMContext, se
             }
             target_role_names = [role_mapping[r] for r in selected_roles]
         
+        # Получаем company_id для изоляции
+        data = await state.get_data()
+        company_id = data.get('company_id')
+        
         # Выполняем массовую рассылку с новыми параметрами
         result = await broadcast_test_to_groups(
             session=session,
@@ -876,6 +937,7 @@ async def callback_send_broadcast(callback: CallbackQuery, state: FSMContext, se
             sent_by_id=user.id,
             bot=bot,
             broadcast_script=broadcast_script,
+            company_id=company_id,
             broadcast_photos=broadcast_photos,
             broadcast_material_id=broadcast_material_id,
             broadcast_docs=broadcast_docs,
@@ -897,7 +959,7 @@ async def callback_send_broadcast(callback: CallbackQuery, state: FSMContext, se
         success_parts = ["✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"]
         
         if selected_test_id:
-            test = await get_test_by_id(session, selected_test_id)
+            test = await get_test_by_id(session, selected_test_id, company_id=company_id)
             if test:
                 success_parts.append(f"🟢 <b>Тест:</b> {test.name}\n")
         

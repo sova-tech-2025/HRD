@@ -41,8 +41,11 @@ async def callback_become_employee(callback: CallbackQuery, state: FSMContext, s
             await callback.message.edit_text("❌ Только стажеры могут стать сотрудниками.")
             return
             
-        # Меняем роль стажера на сотрудника
-        success = await change_trainee_to_employee(session, user.id, None)  # attestation_result_id не нужен в данном контексте
+        # Получаем company_id для изоляции
+        company_id = user.company_id
+            
+        # Меняем роль стажера на сотрудника с изоляцией по компании
+        success = await change_trainee_to_employee(session, user.id, None, company_id=company_id)  # attestation_result_id не нужен в данном контексте
         
         if not success:
             await callback.message.edit_text(

@@ -13,7 +13,7 @@ from database.db import (
     get_trainee_learning_path, get_trainee_stage_progress,
     get_stage_session_progress, get_learning_path_stages,
     complete_stage_for_trainee, complete_session_for_trainee,
-    get_user_test_result, get_user_by_tg_id, check_user_permission,
+    get_user_test_result, get_user_by_tg_id, get_user_by_id, check_user_permission,
     get_trainee_attestation_status
 )
 from handlers.auth import check_auth
@@ -107,7 +107,8 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
             return
 
         # Получаем траекторию стажера
-        trainee_path = await get_trainee_learning_path(session, user.id)
+        company_id = user.company_id
+        trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
 
         if not trainee_path:
             await message.answer(
@@ -119,7 +120,7 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
             return
 
         # Получаем этапы траектории
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
 
         # Формируем информацию о траектории согласно ТЗ
         trajectory_info = await format_trajectory_info(user, trainee_path)
@@ -142,7 +143,7 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
                     if hasattr(sp.session, 'tests') and sp.session.tests:
                         session_tests_passed = True
                         for test in sp.session.tests:
-                            test_result = await get_user_test_result(session, user.id, test.id)
+                            test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                             if not (test_result and test_result.is_passed):
                                 session_tests_passed = False
                                 break
@@ -168,7 +169,7 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
                     if stage_progress.is_opened:
                         all_tests_passed = True
                         for test in session_progress.session.tests:
-                            test_result = await get_user_test_result(session, user.id, test.id)
+                            test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                             if not (test_result and test_result.is_passed):
                                 all_tests_passed = False
                                 break
@@ -186,7 +187,7 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
                 # Показываем тесты в сессии
                 for test in session_progress.session.tests:
                     # Определяем статус теста
-                    test_result = await get_user_test_result(session, user.id, test.id)
+                    test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                     # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
                     if test_result and test_result.is_passed and stage_progress.is_opened:
                         test_status_icon = "✅"  # Тест пройден (только если этап открыт)
@@ -256,7 +257,8 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
             return
 
         # Получаем траекторию стажера
-        trainee_path = await get_trainee_learning_path(session, user.id)
+        company_id = user.company_id
+        trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
 
         if not trainee_path:
             await callback.message.edit_text(
@@ -268,7 +270,7 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
             return
 
         # Получаем этапы траектории
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
 
         # Формируем информацию о траектории согласно ТЗ
         trajectory_info = await format_trajectory_info(user, trainee_path)
@@ -290,7 +292,7 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
                     if hasattr(sp.session, 'tests') and sp.session.tests:
                         session_tests_passed = True
                         for test in sp.session.tests:
-                            test_result = await get_user_test_result(session, user.id, test.id)
+                            test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                             if not (test_result and test_result.is_passed):
                                 session_tests_passed = False
                                 break
@@ -318,7 +320,7 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
                     if stage_progress.is_opened:
                         all_tests_passed = True
                         for test in session_progress.session.tests:
-                            test_result = await get_user_test_result(session, user.id, test.id)
+                            test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                             if not (test_result and test_result.is_passed):
                                 all_tests_passed = False
                                 break
@@ -336,7 +338,7 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
                 # Показываем тесты в сессии
                 for test in session_progress.session.tests:
                     # Определяем статус теста
-                    test_result = await get_user_test_result(session, user.id, test.id)
+                    test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                     # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
                     if test_result and test_result.is_passed and stage_progress.is_opened:
                         test_status_icon = "✅"  # Тест пройден (только если этап открыт)
@@ -408,13 +410,14 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
             return
 
         # Получаем траекторию стажера
-        trainee_path = await get_trainee_learning_path(session, user.id)
+        company_id = user.company_id
+        trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
             await callback.message.edit_text("Траектория не найдена")
             return
 
         # Получаем прогресс по этапу
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
         stage_progress = next((sp for sp in stages_progress if sp.stage_id == stage_id), None)
 
         if not stage_progress or not stage_progress.is_opened:
@@ -444,7 +447,7 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
                     if hasattr(session_prog.session, 'tests') and session_prog.session.tests:
                         session_tests_passed = True
                         for test in session_prog.session.tests:
-                            test_result = await get_user_test_result(session, user.id, test.id)
+                            test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                             if not (test_result and test_result.is_passed):
                                 session_tests_passed = False
                                 break
@@ -466,7 +469,7 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
                 if hasattr(session_progress.session, 'tests') and session_progress.session.tests:
                     all_tests_passed = True
                     for test in session_progress.session.tests:
-                        test_result = await get_user_test_result(session, user.id, test.id)
+                        test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                         if not (test_result and test_result.is_passed):
                             all_tests_passed = False
                             break
@@ -485,7 +488,7 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
                 # Показываем тесты в сессии
                 for test in session_progress.session.tests:
                     # Определяем статус теста
-                    test_result = await get_user_test_result(session, user.id, test.id)
+                    test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                     # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
                     if test_result and test_result.is_passed and sp.is_opened:
                         test_icon = "✅"  # Тест пройден (только если этап открыт)
@@ -560,14 +563,15 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
             return
 
         # Получаем траекторию стажера
-        trainee_path = await get_trainee_learning_path(session, user.id)
+        company_id = user.company_id
+        trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
             await callback.message.edit_text("Траектория не найдена")
             return
 
         # Получаем сессию с тестами
         from database.db import get_session_with_tests
-        selected_session = await get_session_with_tests(session, session_id)
+        selected_session = await get_session_with_tests(session, session_id, company_id=company_id)
 
         if not selected_session:
             await callback.message.edit_text("Сессия не найдена")
@@ -598,7 +602,7 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
                     if hasattr(session_prog.session, 'tests') and session_prog.session.tests:
                         session_tests_passed = True
                         for test in session_prog.session.tests:
-                            test_result = await get_user_test_result(session, user.id, test.id)
+                            test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                             if not (test_result and test_result.is_passed):
                                 session_tests_passed = False
                                 break
@@ -624,7 +628,7 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
                         if sp.is_opened:
                             all_tests_passed = True
                             for test in session_progress.session.tests:
-                                test_result = await get_user_test_result(session, user.id, test.id)
+                                test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                                 if not (test_result and test_result.is_passed):
                                     all_tests_passed = False
                                     break
@@ -644,7 +648,7 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
                     if hasattr(session_progress.session, 'tests') and session_progress.session.tests:
                         for test in session_progress.session.tests:
                             # Определяем статус теста
-                            test_result = await get_user_test_result(session, user.id, test.id)
+                            test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                             if test_result and test_result.is_passed:
                                 test_icon = "✅"  # Тест пройден
                             elif sp.is_opened:
@@ -727,13 +731,18 @@ async def callback_take_test(callback: CallbackQuery, state: FSMContext, session
         
         # Очищаем сохраненные message_id
         await state.update_data(material_message_id=None, material_text_message_id=None)
+        
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+            return
             
         session_id = int(parts[1])
         test_id = int(parts[2])
 
         # Получаем тест
         from database.db import get_test_by_id
-        test = await get_test_by_id(session, test_id)
+        test = await get_test_by_id(session, test_id, company_id=user.company_id)
 
         if not test:
             await callback.message.edit_text("Тест не найден")
@@ -792,14 +801,15 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
             return
 
         # Получаем траекторию стажера
-        trainee_path = await get_trainee_learning_path(session, user.id)
+        company_id = user.company_id
+        trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
             await callback.message.edit_text("Траектория не найдена")
             return
 
         # Получаем сессию с тестами
         from database.db import get_session_with_tests
-        selected_session = await get_session_with_tests(session, session_id)
+        selected_session = await get_session_with_tests(session, session_id, company_id=company_id)
 
         if not selected_session:
             await callback.message.edit_text("Сессия не найдена")
@@ -830,7 +840,7 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
                     if hasattr(session_prog.session, 'tests') and session_prog.session.tests:
                         session_tests_passed = True
                         for test in session_prog.session.tests:
-                            test_result = await get_user_test_result(session, user.id, test.id)
+                            test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                             if not (test_result and test_result.is_passed):
                                 session_tests_passed = False
                                 break
@@ -852,7 +862,7 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
                 if hasattr(session_progress.session, 'tests') and session_progress.session.tests:
                     all_tests_passed = True
                     for test in session_progress.session.tests:
-                        test_result = await get_user_test_result(session, user.id, test.id)
+                        test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                         if not (test_result and test_result.is_passed):
                             all_tests_passed = False
                             break
@@ -871,7 +881,7 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
                 # Показываем тесты в сессии
                 for test in session_progress.session.tests:
                     # Определяем статус теста
-                    test_result = await get_user_test_result(session, user.id, test.id)
+                    test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                     # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
                     if test_result and test_result.is_passed and sp.is_opened:
                         test_icon = "✅"  # Тест пройден (только если этап открыт)
@@ -929,6 +939,11 @@ async def callback_show_materials(callback: CallbackQuery, state: FSMContext, se
     """Обработчик показа материалов для теста"""
     try:
         await callback.answer()
+        
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+            return
 
         # Парсим callback_data: show_materials:{session_id}:{test_id}
         parts = callback.data.split(":")
@@ -937,7 +952,7 @@ async def callback_show_materials(callback: CallbackQuery, state: FSMContext, se
 
         # Получаем тест
         from database.db import get_test_by_id
-        test = await get_test_by_id(session, test_id)
+        test = await get_test_by_id(session, test_id, company_id=user.company_id)
 
         if not test:
             await callback.message.edit_text("Тест не найден")
@@ -1062,13 +1077,14 @@ async def callback_back_to_stage(callback: CallbackQuery, state: FSMContext, ses
             return
 
         # Получаем траекторию стажера
-        trainee_path = await get_trainee_learning_path(session, user.id)
+        company_id = user.company_id
+        trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
             await callback.message.edit_text("Траектория не найдена")
             return
 
         # Получаем первый открытый этап
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
         opened_stage = next((sp for sp in stages_progress if sp.is_opened and not sp.is_completed), None)
 
         if opened_stage:
@@ -1089,8 +1105,12 @@ async def format_attestation_status(session, user_id, trainee_path):
     """Форматирование статуса аттестации с правильной индикацией"""
     try:
         if trainee_path and trainee_path.learning_path.attestation:
+            # Получаем company_id для изоляции
+            user = await get_user_by_id(session, user_id)
+            company_id = user.company_id if user else None
+            
             attestation_status = await get_trainee_attestation_status(
-                session, user_id, trainee_path.learning_path.attestation.id
+                session, user_id, trainee_path.learning_path.attestation.id, company_id=company_id
             )
             return f"🏁<b>Аттестация:</b> {trainee_path.learning_path.attestation.name} {attestation_status}\n\n"
         else:
@@ -1104,7 +1124,11 @@ async def format_attestation_status_simple(session, user_id, attestation):
     """Форматирование статуса аттестации (упрощенная версия)"""
     try:
         if attestation:
-            attestation_status = await get_trainee_attestation_status(session, user_id, attestation.id)
+            # Получаем company_id для изоляции
+            user = await get_user_by_id(session, user_id)
+            company_id = user.company_id if user else None
+            
+            attestation_status = await get_trainee_attestation_status(session, user_id, attestation.id, company_id=company_id)
             return f"🏁<b>Аттестация:</b> {attestation.name} {attestation_status}\n\n"
         else:
             return f"🏁<b>Аттестация:</b> Не указана ⛔️\n\n"

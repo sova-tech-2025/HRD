@@ -16,7 +16,7 @@ from database.db import (
     get_trainee_learning_path, get_trainee_stage_progress, get_stage_session_progress,
     complete_session_for_trainee, complete_stage_for_trainee, get_user_by_id,
     get_trainee_attestation_status, get_user_roles, get_employee_tests_from_recruiter,
-    get_user_broadcast_tests, get_user_mentor
+    get_user_broadcast_tests, get_user_mentor, ensure_company_id
 )
 from handlers.mentorship import get_days_word
 from handlers.trainee_trajectory import format_trajectory_info
@@ -61,7 +61,7 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
         return
     
     # Получаем ТОЛЬКО тесты траектории (от наставника), исключая тесты рассылки от рекрутера
-    available_tests = await get_trainee_available_tests(session, user.id)
+    available_tests = await get_trainee_available_tests(session, user.id, company_id=user.company_id)
     
     if not available_tests:
         await message.answer(
@@ -83,8 +83,11 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
         
         materials_info = " | 📚 Есть материалы" if test.material_link else ""
         
+        # Получаем company_id для изоляции
+        company_id = user.company_id
+        
         # Получаем результат последнего прохождения для отображения статуса
-        test_result = await get_user_test_result(session, user.id, test.id)
+        test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
         if test_result and test_result.is_passed:
             status_info = f" | ✅ Пройден ({test_result.score:.1f}/{test_result.max_possible_score:.1f})"
         else:
@@ -139,10 +142,13 @@ async def format_my_tests_display(
     is_recruiter = "Рекрутер" in role_names
     is_manager = "Руководитель" in role_names
     
+    # Получаем company_id для изоляции
+    company_id = user.company_id
+    
     # Формируем список тестов
     tests_list = []
     for i, test in enumerate(available_tests, 1):
-        test_result = await get_user_test_result(session, user.id, test.id)
+        test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
         if test_result and test_result.is_passed:
             status = f"Пройден ({test_result.score:.1f}/{test_result.max_possible_score:.1f} б.) 🏆"
         else:
@@ -207,7 +213,7 @@ async def cmd_trainee_broadcast_tests(message: Message, state: FSMContext, sessi
             return
         
         # Получаем тесты ВМЕСТЕ: от рекрутера через рассылку + индивидуальные от наставника (исключая тесты траектории)
-        available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False)
+        available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False, company_id=user.company_id)
         
         if not available_tests:
             no_tests_message = (
@@ -268,7 +274,10 @@ async def show_user_test_scores(message: Message, session: AsyncSession) -> None
     else:
         user_role = "пользователь"
     
-    test_results = await get_user_test_results(session, user.id)
+    # Получаем company_id для изоляции
+    company_id = user.company_id
+    
+    test_results = await get_user_test_results(session, user.id, company_id=company_id)
     
     if not test_results:
         await message.answer(
@@ -285,7 +294,7 @@ async def show_user_test_scores(message: Message, session: AsyncSession) -> None
     total_tests_taken = len(test_results)
     
     for result in test_results:
-        test = await get_test_by_id(session, result.test_id)
+        test = await get_test_by_id(session, result.test_id, company_id=user.company_id)
         status = "пройден" if result.is_passed else "не пройден"
         percentage = (result.score / result.max_possible_score * 100) if result.max_possible_score > 0 else 0
         
@@ -380,9 +389,14 @@ async def cmd_view_scores(message: Message, state: FSMContext, session: AsyncSes
 @router.callback_query(TestTakingStates.waiting_for_test_selection, F.data.startswith("test:"))
 async def process_test_selection_for_taking(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик выбора теста для прохождения"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.message.answer("❌ Тест не найден.")
         await callback.answer()
@@ -390,7 +404,7 @@ async def process_test_selection_for_taking(callback: CallbackQuery, state: FSMC
     
     # Проверяем доступ к тесту
     user = await get_user_by_tg_id(session, callback.from_user.id)
-    has_access = await check_test_access(session, user.id, test_id)
+    has_access = await check_test_access(session, user.id, test_id, company_id=user.company_id)
     
     if not has_access:
         await callback.message.edit_text(
@@ -401,11 +415,14 @@ async def process_test_selection_for_taking(callback: CallbackQuery, state: FSMC
         await callback.answer()
         return
     
+    # Получаем company_id для изоляции
+    company_id = user.company_id
+    
     # Проверяем количество попыток
-    attempts_count = await get_user_test_attempts_count(session, user.id, test_id)
+    attempts_count = await get_user_test_attempts_count(session, user.id, test_id, company_id=company_id)
     
     # Проверяем, есть ли уже результат
-    existing_result = await get_user_test_result(session, user.id, test_id)
+    existing_result = await get_user_test_result(session, user.id, test_id, company_id=company_id)
     
     test_info = f"""📌 <b>{test.name}</b>
 
@@ -441,11 +458,16 @@ async def start_test(callback: CallbackQuery, state: FSMContext, session: AsyncS
 
 async def process_start_test(callback: CallbackQuery, state: FSMContext, session: AsyncSession, test_id: int = None):
     """Обработчик начала прохождения теста"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+        return
+    
     if test_id is None:
         test_id = int(callback.data.split(':')[1])
     user_id = callback.from_user.id
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.message.edit_text("❌ Тест не найден.")
         await state.clear()
@@ -458,10 +480,13 @@ async def process_start_test(callback: CallbackQuery, state: FSMContext, session
         await state.clear()
         return
     
+    # Получаем company_id для изоляции
+    company_id = user.company_id
+    
     # Проверяем, может ли пользователь пройти тест (с учетом ограничений попыток)
-    can_take, error_message = await can_user_take_test(session, user.id, test_id)
+    can_take, error_message = await can_user_take_test(session, user.id, test_id, company_id=company_id)
     if not can_take:
-        attempts_count = await get_user_test_attempts_count(session, user.id, test_id)
+        attempts_count = await get_user_test_attempts_count(session, user.id, test_id, company_id=company_id)
         attempts_info = ""
         if test.max_attempts > 0:
             attempts_info = f"\n🔢 <b>Попытки:</b> {attempts_count}/{test.max_attempts}"
@@ -483,7 +508,7 @@ async def process_start_test(callback: CallbackQuery, state: FSMContext, session
         await callback.answer()
         return
     
-    questions = await get_test_questions(session, test_id)
+    questions = await get_test_questions(session, test_id, company_id=user.company_id)
     if not questions:
         await callback.message.edit_text("❌ В этом тесте нет вопросов. Обратись к наставнику.")
         await state.clear()
@@ -789,11 +814,7 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
                 "correct_answer": correct_answer_display
             })
     
-    test = await get_test_by_id(session, test_id)
-    score = max(0, score) # Не уходим в минус
-    is_passed = score >= test.threshold_score
-    
-    # Получаем пользователя и используем его внутренний ID
+    # Получаем пользователя и используем его внутренний ID (ПЕРЕД использованием user.company_id)
     user_tg_id = data.get('user_id')  # Получаем Telegram ID из состояния
     if not user_tg_id:
         # Fallback для старых сессий
@@ -818,6 +839,10 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
         await state.clear()
         return
     
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
+    score = max(0, score) # Не уходим в минус
+    is_passed = score >= test.threshold_score
+    
     # Сохраняем результат
     result_data = {
         'user_id': user.id,  # Используем внутренний ID пользователя из БД
@@ -830,7 +855,7 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
         'answers_details': data.get('answers_details', []),
         'wrong_answers': wrong_answers_data
     }
-    result = await save_test_result(session, result_data)
+    result = await save_test_result(session, result_data, company_id=user.company_id)
 
     if not result:
         await message.answer(
@@ -861,18 +886,18 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
     test_keyboard = keyboard.copy()
 
     if is_passed:
+        company_id = user.company_id
         # Проверяем, является ли тест частью траектории
         is_trajectory_test = await is_test_from_trajectory(session, user.id, test_id)
         if not is_trajectory_test:
             logger.info(f"Тест {test_id} - рассылка, НЕ показываем прогресс траектории")
-            # Для тестов рассылки НЕ показываем прогресс траектории
             trainee_path = None
         else:
             # Получаем траекторию стажера только для тестов траектории
-            trainee_path = await get_trainee_learning_path(session, result_data['user_id'])
+            trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         
         if trainee_path:
-            stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+            stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
 
             progress_info = f"\n\n🏆<b>Твой прогресс</b>\n"
             progress_info += f"📚<b>Название траектории:</b> {trainee_path.learning_path.name}\n\n"
@@ -889,7 +914,7 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
                     if hasattr(sp.session, 'tests') and sp.session.tests:
                         session_tests_passed = True
                         for test_item in sp.session.tests:
-                            test_result = await get_user_test_result(session, user.id, test_item.id)
+                            test_result = await get_user_test_result(session, user.id, test_item.id, company_id=company_id)
                             if not (test_result and test_result.is_passed):
                                 session_tests_passed = False
                                 break
@@ -910,8 +935,10 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
                     # Определяем статус сессии: 🟢 если все тесты пройдены, 🟡 если этап открыт, ⏺️ если этап закрыт
                     if hasattr(session_progress.session, 'tests') and session_progress.session.tests:
                         all_tests_passed = True
-                        for test_item in session_progress.session.tests:
-                            test_result = await get_user_test_result(session, user.id, test_item.id)
+                        for trajectory_test in session_progress.session.tests:
+                            test_result = await get_user_test_result(
+                                session, user.id, trajectory_test.id, company_id=company_id
+                            )
                             if not (test_result and test_result.is_passed):
                                 all_tests_passed = False
                                 break
@@ -930,7 +957,7 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
                     # Показываем тесты
                     for test_item in session_progress.session.tests:
                         # Определяем статус теста
-                        test_result = await get_user_test_result(session, user.id, test_item.id)
+                        test_result = await get_user_test_result(session, user.id, test_item.id, company_id=company_id)
                         if test_result and test_result.is_passed:
                             test_icon = "✅"  # Тест пройден
                         elif stage_progress.is_opened:
@@ -951,7 +978,7 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
             # Добавляем аттестацию с правильным статусом
             attestation = trainee_path.learning_path.attestation
             if attestation:
-                attestation_status = await get_trainee_attestation_status(session, user.id, attestation.id)
+                attestation_status = await get_trainee_attestation_status(session, user.id, attestation.id, company_id=company_id)
                 progress_info += f"🏁<b>Аттестация:</b> {attestation.name} {attestation_status}\n\n"
             else:
                 progress_info += f"🏁<b>Аттестация:</b> Не указана ⛔️\n\n"
@@ -1021,9 +1048,14 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
 @router.callback_query(F.data.startswith("view_materials:"))
 async def process_view_materials(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик просмотра материалов к тесту"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test or not test.material_link:
         await callback.message.edit_text(
             "📚 <b>Материалы для изучения</b>\n\n"
@@ -1120,7 +1152,7 @@ async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, 
     
     if is_from_trajectory:
         # ТЕСТЫ ТРАЕКТОРИИ
-        available_tests = await get_trainee_available_tests(session, user.id)
+        available_tests = await get_trainee_available_tests(session, user.id, company_id=user.company_id)
         
         if not available_tests:
             await callback.message.edit_text(
@@ -1164,7 +1196,7 @@ async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, 
         await state.update_data(test_context='taking')
     else:
         # МОИ ТЕСТЫ (индивидуальные) - для стажеров, сотрудников и наставников
-        available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False)
+        available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False, company_id=user.company_id)
         
         if not available_tests:
             no_tests_message = (
@@ -1199,9 +1231,14 @@ async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, 
 @router.callback_query(F.data.startswith("cancel_test:"))
 async def process_cancel_test(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик отмены/прерывания теста"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
-    test = await get_test_by_id(session, test_id)
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     test_name = test.name if test else "Неизвестный тест"
     
     await callback.message.edit_text(
@@ -1279,20 +1316,21 @@ async def process_take_test_from_notification(callback: CallbackQuery, state: FS
         await callback.answer("Неверный формат данных", show_alert=True)
         return
     
-    test = await get_test_by_id(session, test_id)
+    # Получаем пользователя ПЕРЕД использованием user.company_id
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.message.edit_text("❌ Пользователь не найден.")
+        await callback.answer()
+        return
+    
+    test = await get_test_by_id(session, test_id, company_id=user.company_id)
     if not test:
         await callback.message.edit_text("❌ Тест не найден.")
         await callback.answer()
         return
     
     # Проверяем доступ к тесту
-    user = await get_user_by_tg_id(session, callback.from_user.id)
-    if not user:
-        await callback.message.edit_text("❌ Пользователь не найден.")
-        await callback.answer()
-        return
-        
-    has_access = await check_test_access(session, user.id, test_id)
+    has_access = await check_test_access(session, user.id, test_id, company_id=user.company_id)
     
     if not has_access:
         await callback.message.edit_text(
@@ -1303,11 +1341,14 @@ async def process_take_test_from_notification(callback: CallbackQuery, state: FS
         await callback.answer()
         return
     
+    # Получаем company_id для изоляции
+    company_id = user.company_id
+    
     # Проверяем количество попыток
-    attempts_count = await get_user_test_attempts_count(session, user.id, test_id)
+    attempts_count = await get_user_test_attempts_count(session, user.id, test_id, company_id=company_id)
     
     # Проверяем, есть ли уже результат
-    existing_result = await get_user_test_result(session, user.id, test_id)
+    existing_result = await get_user_test_result(session, user.id, test_id, company_id=company_id)
     
     test_info = f"""📌 <b>{test.name}</b>
 
@@ -1351,7 +1392,18 @@ async def process_trajectory_tests_shortcut(callback: CallbackQuery, state: FSMC
         await callback.answer()
         return
     
-    available_tests = await get_trainee_available_tests(session, user.id)
+    # Получаем company_id для изоляции
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None and user.company_id:
+        company_id = user.company_id
+    if company_id is None:
+        await callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+        await callback.answer()
+        await state.clear()
+        log_user_error(callback.from_user.id, "trajectory_tests_company_missing", "company_id not resolved")
+        return
+    
+    available_tests = await get_trainee_available_tests(session, user.id, company_id=company_id)
     
     if not available_tests:
         await callback.message.edit_text(
@@ -1408,7 +1460,7 @@ async def process_my_broadcast_tests_shortcut(callback: CallbackQuery, state: FS
         return
     
     # Получаем тесты от рекрутера через рассылку + индивидуальные от наставника (исключая тесты траектории)
-    available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False)
+    available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False, company_id=user.company_id)
     
     if not available_tests:
         await callback.message.edit_text(
@@ -1532,8 +1584,12 @@ async def check_and_notify_stage_completion(session: AsyncSession, user_id: int,
         
         from database.models import LearningSession, LearningStage, session_tests, TestResult
 
+        # Получаем company_id для изоляции
+        user = await get_user_by_id(session, user_id)
+        company_id = user.company_id if user else None
+
         # Получаем траекторию стажера
-        trainee_path = await get_trainee_learning_path(session, user_id)
+        trainee_path = await get_trainee_learning_path(session, user_id, company_id=company_id)
         if not trainee_path:
             logger.warning(f"Стажер {user_id} не имеет назначенной траектории")
             return ""  # Стажер не имеет назначенной траектории
@@ -1564,19 +1620,22 @@ async def check_and_notify_stage_completion(session: AsyncSession, user_id: int,
 
         # Проверяем, все ли тесты в сессии пройдены стажером
         completed_tests_count = 0
+        # Получаем пользователя для company_id
+        trainee_user = await get_user_by_id(session, user_id)
+        company_id = trainee_user.company_id if trainee_user else None
         for session_test_id in session_test_ids:
-            test_result = await get_user_test_result(session, user_id, session_test_id)
+            test_result = await get_user_test_result(session, user_id, session_test_id, company_id=company_id)
             if test_result and test_result.is_passed:
                 completed_tests_count += 1
 
         # Если все тесты в сессии пройдены, отмечаем сессию как завершенную
         if completed_tests_count == len(session_test_ids):
-            session_completed = await complete_session_for_trainee(session, user_id, test_session.id)
+            session_completed = await complete_session_for_trainee(session, user_id, test_session.id, company_id=company_id)
             if session_completed:
                 logger.info(f"Сессия {test_session.id} отмечена как завершенная для стажера {user_id}")
 
                 # Проверяем, все ли сессии в этапе завершены
-                stage_progress = await get_trainee_stage_progress(session, trainee_path.id)
+                stage_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
                 current_stage_progress = next(
                     (sp for sp in stage_progress if sp.stage_id == test_session.stage_id),
                     None
@@ -1592,7 +1651,7 @@ async def check_and_notify_stage_completion(session: AsyncSession, user_id: int,
                         if hasattr(sp.session, 'tests') and sp.session.tests:
                             session_tests_passed = True
                             for test_item in sp.session.tests:
-                                test_result = await get_user_test_result(session, user_id, test_item.id)
+                                test_result = await get_user_test_result(session, user_id, test_item.id, company_id=company_id)
                                 if not (test_result and test_result.is_passed):
                                     session_tests_passed = False
                                     break
@@ -1602,12 +1661,18 @@ async def check_and_notify_stage_completion(session: AsyncSession, user_id: int,
 
                     if all_sessions_completed:
                         # Отмечаем этап как завершенный
-                        stage_completed = await complete_stage_for_trainee(session, user_id, current_stage_progress.stage_id)
+                        # Получаем пользователя для company_id
+                        trainee_user = await get_user_by_id(session, user_id)
+                        company_id = trainee_user.company_id if trainee_user else None
+                        stage_completed = await complete_stage_for_trainee(session, user_id, current_stage_progress.stage_id, company_id=company_id)
                         if stage_completed:
                             logger.info(f"Этап {current_stage_progress.stage_id} отмечен как завершенный для стажера {user_id}")
 
                             # Отправляем уведомление наставнику
-                            await send_stage_completion_notification(session, user_id, current_stage_progress.stage_id, bot)
+                            # Получаем company_id стажера для изоляции
+                            trainee_user = await get_user_by_id(session, user_id)
+                            company_id = trainee_user.company_id if trainee_user else None
+                            await send_stage_completion_notification(session, user_id, current_stage_progress.stage_id, bot, company_id)
                             
                             # Возвращаем информацию о завершении этапа
                             stage_name = current_stage_progress.stage.name if hasattr(current_stage_progress, 'stage') else f"Этап {current_stage_progress.stage_id}"
@@ -1620,9 +1685,9 @@ async def check_and_notify_stage_completion(session: AsyncSession, user_id: int,
         return ""
 
 
-async def send_stage_completion_notification(session: AsyncSession, trainee_id: int, stage_id: int, bot=None) -> None:
+async def send_stage_completion_notification(session: AsyncSession, trainee_id: int, stage_id: int, bot=None, company_id: int = None) -> None:
     """
-    Отправляет уведомление наставнику о завершении этапа стажером
+    Отправляет уведомление наставнику о завершении этапа стажером (с изоляцией по компании)
     """
     try:
         from database.models import User, LearningStage, Mentorship
@@ -1631,6 +1696,15 @@ async def send_stage_completion_notification(session: AsyncSession, trainee_id: 
         trainee = await get_user_by_id(session, trainee_id)
         if not trainee:
             return
+        
+        # Изоляция по компании - проверяем принадлежность стажера
+        if company_id is not None and trainee.company_id != company_id:
+            logger.error(f"Стажер {trainee_id} не принадлежит компании {company_id}")
+            return
+        
+        # Получаем company_id для изоляции, если не передан
+        if company_id is None:
+            company_id = trainee.company_id
 
         # Получаем этап
         stage_result = await session.execute(
@@ -1640,19 +1714,28 @@ async def send_stage_completion_notification(session: AsyncSession, trainee_id: 
         if not stage:
             return
 
-        # Получаем наставника стажера
-        mentorship_result = await session.execute(
-            select(Mentorship).where(
-                Mentorship.trainee_id == trainee_id,
-                Mentorship.is_active == True
-            )
+        # Получаем наставника стажера с проверкой изоляции по компании
+        mentorship_query = select(Mentorship).where(
+            Mentorship.trainee_id == trainee_id,
+            Mentorship.is_active == True
         )
+        
+        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
+        if company_id is not None:
+            mentorship_query = mentorship_query.where(Mentorship.company_id == company_id)
+        
+        mentorship_result = await session.execute(mentorship_query)
         mentorship = mentorship_result.scalar_one_or_none()
         if not mentorship:
             return
 
         mentor = await get_user_by_id(session, mentorship.mentor_id)
         if not mentor:
+            return
+        
+        # Изоляция по компании - проверяем принадлежность наставника
+        if company_id is not None and mentor.company_id != company_id:
+            logger.error(f"Наставник {mentor.id} не принадлежит компании {company_id}")
             return
 
         # Формируем уведомление согласно ТЗ
@@ -1707,8 +1790,11 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
             await callback.message.edit_text("Пользователь не найден")
             return
 
+        # Получаем company_id для изоляции
+        company_id = user.company_id
+        
         # Получаем траекторию стажера
-        trainee_path = await get_trainee_learning_path(session, user.id)
+        trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
 
         if not trainee_path:
             await callback.message.edit_text(
@@ -1721,7 +1807,7 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
             return
 
         # Получаем этапы траектории
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
 
         # Формируем информацию о траектории
         trajectory_info = await format_trajectory_info(user, trainee_path)
@@ -1741,7 +1827,7 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
 
                 # Показываем тесты в сессии
                 for test in session_progress.session.tests:
-                    test_result = await get_user_test_result(session, user.id, test.id)
+                    test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
                     if test_result and test_result.is_passed:
                         test_status_icon = "✅"
                     else:
@@ -1754,7 +1840,7 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
         # Добавляем информацию об аттестации с правильным статусом
         if trainee_path.learning_path.attestation:
             attestation_status = await get_trainee_attestation_status(
-                session, user.id, trainee_path.learning_path.attestation.id
+                session, user.id, trainee_path.learning_path.attestation.id, company_id=company_id
             )
             stages_info += f"🏁<b>Аттестация:</b> {trainee_path.learning_path.attestation.name} {attestation_status}\n\n"
         else:
