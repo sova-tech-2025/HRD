@@ -4130,7 +4130,7 @@ async def update_user_phone_number(session: AsyncSession, user_id: int, new_phon
 
 
 async def update_user_role(session: AsyncSession, user_id: int, new_role_name: str, 
-                          recruiter_id: int, company_id: int = None, bot=None) -> bool:
+                          recruiter_id: int, bot=None, company_id: int = None) -> bool:
     """Безопасное обновление роли пользователя с очисткой связанных данных (с изоляцией по компании)"""
     try:
         from database.models import Mentorship, TraineeLearningPath, TraineeTestAccess, TraineeAttestation
