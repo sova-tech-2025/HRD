@@ -9478,10 +9478,13 @@ async def create_company(session: AsyncSession, company_data: dict, creator_user
         trial_days = company_data.get('trial_period_days', 14)
         now = datetime.now()
         
+        # Нормализуем код приглашения в верхний регистр для консистентности
+        invite_code = company_data['invite_code'].strip().upper()
+        
         company = Company(
             name=company_data['name'],
             description=company_data.get('description', ''),
-            invite_code=company_data['invite_code'],
+            invite_code=invite_code,
             subscribe=True,
             trial=True,
             start_date=now,
@@ -9517,12 +9520,22 @@ async def get_company_by_id(session: AsyncSession, company_id: int) -> Optional[
 
 
 async def get_company_by_invite_code(session: AsyncSession, invite_code: str) -> Optional[Company]:
-    """Получить компанию по коду приглашения"""
+    """Получить компанию по коду приглашения (поиск нечувствителен к регистру)"""
     try:
+        # Нормализуем код в верхний регистр для поиска
+        invite_code_normalized = invite_code.strip().upper()
+        
+        # Поиск с использованием func.upper() для нечувствительности к регистру
+        # Это защищает от случаев, когда код был сохранен в другом регистре
         result = await session.execute(
-            select(Company).where(Company.invite_code == invite_code)
+            select(Company).where(func.upper(Company.invite_code) == invite_code_normalized)
         )
-        return result.scalar_one_or_none()
+        company = result.scalar_one_or_none()
+        
+        if not company:
+            logger.warning(f"Компания с кодом приглашения '{invite_code}' (нормализовано: '{invite_code_normalized}') не найдена")
+        
+        return company
     except Exception as e:
         logger.error(f"Ошибка получения компании по invite_code '{invite_code}': {e}")
         return None
@@ -9894,15 +9907,83 @@ async def update_company_description(session: AsyncSession, company_id: int, new
         return False
 
 
-async def check_invite_code_unique(session: AsyncSession, invite_code: str) -> bool:
-    """Проверяет уникальность invite_code"""
+async def check_invite_code_unique(session: AsyncSession, invite_code: str, exclude_company_id: int = None) -> bool:
+    """Проверяет уникальность invite_code (проверка нечувствительна к регистру)
+    
+    Args:
+        session: Сессия БД
+        invite_code: Код для проверки (будет нормализован в верхний регистр)
+        exclude_company_id: ID компании, которую исключаем из проверки (для обновления)
+    
+    Returns:
+        bool: True если код уникален, False если уже используется
+    """
     try:
-        result = await session.execute(
-            select(Company).where(Company.invite_code == invite_code)
-        )
+        # Нормализуем код в верхний регистр для консистентности
+        invite_code_normalized = invite_code.strip().upper()
+        
+        # Поиск с использованием func.upper() для нечувствительности к регистру
+        # Это защищает от случаев, когда код был сохранен в другом регистре
+        query = select(Company).where(func.upper(Company.invite_code) == invite_code_normalized)
+        if exclude_company_id is not None:
+            query = query.where(Company.id != exclude_company_id)
+        result = await session.execute(query)
         return result.scalar_one_or_none() is None
     except Exception as e:
         logger.error(f"Ошибка проверки уникальности invite_code: {e}")
+        return False
+
+
+async def update_company_invite_code(session: AsyncSession, company_id: int, new_invite_code: str, company_id_check: int = None) -> bool:
+    """Обновляет код приглашения компании с проверкой изоляции по компаниям
+    
+    Args:
+        session: Сессия БД
+        company_id: ID компании для обновления
+        new_invite_code: Новый код приглашения (будет преобразован в верхний регистр)
+        company_id_check: Опциональная проверка изоляции (если None, используется company_id)
+    
+    Returns:
+        bool: True если обновление успешно, False в случае ошибки
+    """
+    try:
+        # Нормализация кода (верхний регистр)
+        new_invite_code = new_invite_code.strip().upper()
+        
+        # Валидация формата
+        import re
+        if not re.match(r'^[A-Z0-9]{6,20}$', new_invite_code):
+            logger.warning(f"Неверный формат кода приглашения: {new_invite_code}")
+            return False
+        
+        # Получаем компанию
+        company = await get_company_by_id(session, company_id)
+        if not company:
+            logger.error(f"Компания {company_id} не найдена")
+            return False
+        
+        # Изоляция по компаниям: проверяем, что company_id соответствует company_id_check
+        if company_id_check is not None and company_id != company_id_check:
+            logger.error(f"Попытка обновления компании {company_id} из другой компании {company_id_check}")
+            return False
+        
+        # Проверка уникальности (исключая текущую компанию)
+        if not await check_invite_code_unique(session, new_invite_code, exclude_company_id=company_id):
+            logger.warning(f"Код приглашения {new_invite_code} уже используется другой компанией")
+            return False
+        
+        # Обновление
+        await session.execute(
+            update(Company).where(Company.id == company_id).values(invite_code=new_invite_code)
+        )
+        await session.commit()
+        
+        logger.info(f"Код приглашения компании {company_id} обновлен на {new_invite_code}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Ошибка обновления кода приглашения компании {company_id}: {e}")
+        await session.rollback()
         return False
 
 
@@ -9957,11 +10038,13 @@ async def create_default_company(session: AsyncSession) -> Optional[Company]:
         
         # Создаем компанию по умолчанию
         now = datetime.now()
+        # Нормализуем код приглашения в верхний регистр для консистентности
+        default_invite_code = "keksbakery".strip().upper()  # KEKSBAKERY
         default_company = Company(
             id=1,
             name='Сеть пекарен "КЕКС"',
             description="Сеть пекарен",
-            invite_code="keksbakery",
+            invite_code=default_invite_code,
             subscribe=True,
             trial=False,
             start_date=now,

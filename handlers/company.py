@@ -144,7 +144,7 @@ async def process_invite_code_creation(message: Message, state: FSMContext, sess
         return
     
     # Проверка уникальности
-    if not await check_invite_code_unique(session, invite_code):
+    if not await check_invite_code_unique(session, invite_code, exclude_company_id=None):
         await message.answer(
             "❌ Этот код приглашения уже используется другой компанией.\n"
             "Пожалуйста, придумай другой код."
