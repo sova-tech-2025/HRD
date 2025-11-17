@@ -1,4 +1,4 @@
-"""
+﻿"""
 Обработчики для назначения наставников стажерам рекрутерами.
 Включает выбор стажера, выбор наставника и подтверждение назначения.
 """
@@ -298,7 +298,7 @@ async def callback_confirm_mentor_assignment(callback: CallbackQuery, state: FSM
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="👨‍🏫 Назначить наставника", callback_data="assign_mentor"),
-                    InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+                    InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
                 ]
             ])
 

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Обработчики меню руководителя.
 Включает управление аттестациями и стажерами.
 """
@@ -95,7 +95,7 @@ async def cmd_my_attestations(message: Message, state: FSMContext, session: Asyn
             ])
 
         keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
         ])
 
         await message.answer(
@@ -240,7 +240,7 @@ async def callback_back_to_my_attestations(callback: CallbackQuery, session: Asy
             ])
 
         keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
         ])
 
         await callback.message.edit_text(
@@ -336,7 +336,7 @@ async def cmd_my_trainees(message: Message, state: FSMContext, session: AsyncSes
             ])
 
         keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
         ])
 
         await message.answer(

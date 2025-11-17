@@ -1,4 +1,4 @@
-"""
+﻿"""
 Обработчики для управления аттестациями руководителями (Task 7).
 Включает просмотр назначенных аттестаций, изменение даты/времени, проведение аттестации.
 """
@@ -909,7 +909,7 @@ async def callback_back_to_attestations(callback: CallbackQuery, state: FSMConte
                 "Аттестации назначают наставники через кнопку 'Аттестация' в разделе 'Мои стажёры'.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                    [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
                 ])
             )
             return
@@ -955,7 +955,7 @@ async def callback_back_to_attestations(callback: CallbackQuery, state: FSMConte
             ])
         
         keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
         ])
         
         await callback.message.edit_text(

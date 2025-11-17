@@ -1379,7 +1379,7 @@ async def process_confirm_change(callback: CallbackQuery, session: AsyncSession,
         # Добавляем кнопку возврата к редактору при ошибке
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="↩️ Назад к редактору", callback_data=f"edit_user:{editing_user_id}")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ])
         
         await callback.message.edit_text(error_message, reply_markup=keyboard, parse_mode="HTML")
@@ -1498,7 +1498,7 @@ async def callback_confirm_delete_user(callback: CallbackQuery, state: FSMContex
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="⬅️ Назад к фильтрам", callback_data="back_to_filters")],
-                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                    [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
                 ])
             )
             # Очищаем состояние, но сохраняем информацию для возврата
@@ -1513,7 +1513,7 @@ async def callback_confirm_delete_user(callback: CallbackQuery, state: FSMContex
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="⬅️ Назад к просмотру", callback_data=f"back_to_view_after_error:{user_id}")],
-                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                    [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
                 ])
             )
             # Устанавливаем состояние для корректной работы кнопки "Назад"

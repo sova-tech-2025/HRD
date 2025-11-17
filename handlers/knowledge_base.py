@@ -104,7 +104,7 @@ async def start_material_addition(callback: CallbackQuery, state: FSMContext, se
         return False
 
 
-@router.message(F.text.in_(["База знаний", "База знаний 📁"]))
+@router.message(F.text.in_(["База знаний", "База знаний 📂", "База знаний 📁", "База знаний 📁️"]))
 async def cmd_knowledge_base_universal(message: Message, state: FSMContext, session: AsyncSession):
     """Универсальный обработчик кнопки 'База знаний' для рекрутера, сотрудника и стажера (ТЗ 9-1 шаг 1)"""
     try:
@@ -639,7 +639,7 @@ async def process_material_photos(message: Message, state: FSMContext, session: 
 
         keyboard_buttons = [
             [InlineKeyboardButton(text="✅Продолжить", callback_data="kb_finish_photos")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ]
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
@@ -697,7 +697,7 @@ async def process_material_image_docs(message: Message, state: FSMContext, sessi
         
         keyboard_buttons = [
             [InlineKeyboardButton(text="✅Продолжить", callback_data="kb_finish_photos")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ]
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         
@@ -717,7 +717,7 @@ async def process_material_wrong_content(message: Message, state: FSMContext, se
         "Отправь фотографию или изображение-документ.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅Продолжить", callback_data="kb_finish_photos")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ])
     )
 
@@ -802,7 +802,7 @@ async def show_photo_upload_option(message_or_callback, state: FSMContext, sessi
 
         keyboard_buttons = [
             [InlineKeyboardButton(text="⏩Пропустить", callback_data="kb_skip_photos")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ]
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 

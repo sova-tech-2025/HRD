@@ -22,7 +22,7 @@ from handlers.mentorship import get_days_word
 from handlers.trainee_trajectory import format_trajectory_info
 from database.models import InternshipStage, TestResult
 from sqlalchemy import select
-from keyboards.keyboards import get_simple_test_selection_keyboard, get_test_start_keyboard, get_test_selection_for_taking_keyboard, get_mentor_contact_keyboard
+from keyboards.keyboards import get_simple_test_selection_keyboard, get_test_start_keyboard, get_test_selection_for_taking_keyboard, get_mentor_contact_keyboard, get_test_results_keyboard
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import TestTakingStates
 from utils.logger import log_user_action, log_user_error, logger
@@ -60,8 +60,16 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
         await message.answer("У тебя нет прав для прохождения тестов.")
         return
     
+    # Получаем company_id с fallback на ensure_company_id для безопасности
+    company_id = user.company_id
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, message.from_user.id)
+    if company_id is None:
+        await message.answer("❌ Не удалось определить компанию. Обратись к администратору.")
+        return
+    
     # Получаем ТОЛЬКО тесты траектории (от наставника), исключая тесты рассылки от рекрутера
-    available_tests = await get_trainee_available_tests(session, user.id, company_id=user.company_id)
+    available_tests = await get_trainee_available_tests(session, user.id, company_id=company_id)
     
     if not available_tests:
         await message.answer(
@@ -72,8 +80,15 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
         )
         return
     
+    # Пагинация: показываем по 5 тестов на страницу
+    page = 0
+    per_page = 5
+    start_index = page * per_page
+    end_index = start_index + per_page
+    page_tests = available_tests[start_index:end_index]
+    
     tests_list = []
-    for i, test in enumerate(available_tests, 1):
+    for i, test in enumerate(page_tests, 1):
         stage_info = ""
         if test.stage_id:
             stage = await session.execute(select(InternshipStage).where(InternshipStage.id == test.stage_id))
@@ -93,22 +108,31 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
         else:
             status_info = " | 📋 Доступен"
         
+        # Номер с учетом глобального индекса
+        global_index = start_index + i
         tests_list.append(
-            f"<b>{i}. {test.name}</b>\n"
+            f"<b>{global_index}. {test.name}</b>\n"
             f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}{status_info}\n"
             f"   📝 {test.description or 'Описание не указано'}"
         )
     
     tests_display = "\n\n".join(tests_list)
     
+    # Информация о странице
+    total_pages = (len(available_tests) + per_page - 1) // per_page
+    page_info = f"\n\n📄 Страница {page+1}/{total_pages}" if total_pages > 1 else ""
+    
     await message.answer(
         f"🗺️ <b>Тесты траектории</b>\n\n"
-        f"У тебя есть доступ к <b>{len(available_tests)}</b> тестам:\n\n"
+        f"У тебя есть доступ к <b>{len(available_tests)}</b> тестам:{page_info}\n\n"
         f"{tests_display}\n\n"
         "💡 <b>Рекомендация:</b> Пройденные тесты можно пересдать для улучшения результата!",
         parse_mode="HTML",
-        reply_markup=get_test_selection_for_taking_keyboard(available_tests)
+        reply_markup=get_test_selection_for_taking_keyboard(available_tests, page, per_page, "trajectory_tests_page")
     )
+    
+    # Сохраняем список тестов в state для пагинации
+    await state.update_data(trajectory_tests=available_tests, trajectory_page=page)
     
     # КРИТИЧЕСКИ ВАЖНО: Устанавливаем контекст "taking" для стажера
     await state.update_data(test_context='taking')
@@ -120,15 +144,19 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
 async def format_my_tests_display(
     session: AsyncSession,
     user,
-    available_tests: list
+    available_tests: list,
+    page: int = 0,
+    per_page: int = 5
 ) -> tuple[str, InlineKeyboardMarkup]:
     """
-    Универсальная функция для форматирования списка "Мои тесты"
+    Универсальная функция для форматирования списка "Мои тесты" с пагинацией
     
     Args:
         session: Сессия БД
         user: Объект пользователя
         available_tests: Список доступных тестов
+        page: Номер страницы (начиная с 0)
+        per_page: Количество тестов на страницу
     
     Returns:
         tuple: (текст сообщения, клавиатура)
@@ -142,51 +170,71 @@ async def format_my_tests_display(
     is_recruiter = "Рекрутер" in role_names
     is_manager = "Руководитель" in role_names
     
-    # Получаем company_id для изоляции
+    # Получаем company_id для изоляции с проверкой на None
     company_id = user.company_id
+    if company_id is None:
+        # Если company_id не установлен, это критическая ошибка для изоляции
+        logger.error(f"У пользователя {user.id} не установлен company_id")
+        # Возвращаем пустой список для безопасности
+        return "❌ Ошибка: не удалось определить компанию. Обратись к администратору.", InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]])
     
-    # Формируем список тестов
+    # Пагинация: показываем только тесты текущей страницы
+    start_index = page * per_page
+    end_index = start_index + per_page
+    page_tests = available_tests[start_index:end_index]
+    
+    # Импортируем TraineeTestAccess для получения даты назначения
+    from database.models import TraineeTestAccess
+    from sqlalchemy import select
+    
+    # Формируем список тестов согласно макету 4.2
     tests_list = []
-    for i, test in enumerate(available_tests, 1):
-        test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
-        if test_result and test_result.is_passed:
-            status = f"Пройден ({test_result.score:.1f}/{test_result.max_possible_score:.1f} б.) 🏆"
-        else:
-            status = "Доступен для прохождения ✅"
-        
-        tests_list.append(
-            f"<b>{i}. {test.name}</b>\n"
-            f"   Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
-            f"   Статус: {status}\n"
-            f"   Описание: {test.description or 'Описание не указано'}"
+    for i, test in enumerate(page_tests, 1):
+        # Получаем дату назначения теста из TraineeTestAccess
+        access_query = select(TraineeTestAccess).where(
+            TraineeTestAccess.trainee_id == user.id,
+            TraineeTestAccess.test_id == test.id,
+            TraineeTestAccess.is_active == True
         )
+        if company_id is not None:
+            access_query = access_query.where(TraineeTestAccess.company_id == company_id)
+        access_result = await session.execute(access_query)
+        access = access_result.scalar_one_or_none()
+        assigned_date_str = ""
+        if access and access.granted_date:
+            assigned_date_str = f"Назначен: {access.granted_date.strftime('%d.%m.%Y')}\n"
+        
+        # Получаем результат последнего прохождения
+        test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
+        
+        # Формируем строку теста согласно макету (номер с учетом глобального индекса)
+        global_index = start_index + i
+        test_line = f"#<b>{global_index}</b> <b>{test.name}</b>\n"
+        if assigned_date_str:
+            test_line += assigned_date_str + "\n"  # Добавляем дополнительный перенос строки после даты
+        test_line += f"🎯 Порог прохождения: {test.threshold_score:.1f}/{test.max_score:.1f}\n"
+        
+        # Если тест был пройден, но не получен балл порога - показываем последнюю попытку
+        if test_result and not test_result.is_passed:
+            test_line += f"❌ Последняя попытка: {test_result.score:.1f}/{test_result.max_possible_score:.1f}\n"
+        
+        tests_list.append(test_line)
     
-    tests_display = "\n\n".join(tests_list)
+    tests_display = "\n━━━━━━━━━━━━\n\n".join(tests_list)
     
-    # Определяем заголовок роли
-    if is_trainee:
-        role_title = "👤 <b>Стажер:</b>"
-    elif is_mentor:
-        role_title = "👨‍🏫 <b>Наставник:</b>"
-    elif is_employee:
-        role_title = "👨‍💼 <b>Сотрудник:</b>"
-    elif is_recruiter:
-        role_title = "👔 <b>Рекрутер:</b>"
-    elif is_manager:
-        role_title = "🔧 <b>Руководитель:</b>"
-    else:
-        role_title = "👤 <b>Пользователь:</b>"
+    # Информация о странице
+    total_pages = (len(available_tests) + per_page - 1) // per_page
+    page_info = f"\n\n📄 Страница {page+1}/{total_pages}" if total_pages > 1 else ""
     
-    # Формируем итоговое сообщение
+    # Формируем итоговое сообщение согласно макету 4.1-4.2 (без заголовка "Мои ТЕСТЫ" - он в caption фото)
     message_text = (
-        f"📋 <b>Мои тесты</b>\n\n"
-        f"{role_title} {user.full_name}\n"
-        f"📊 <b>Всего тестов:</b> {len(available_tests)}\n\n"
+        f"<b>Тесты, доступные для прохождения</b>\n"
+        f"Всего: {len(available_tests)}{page_info}\n\n"
         f"{tests_display}\n\n"
         "Выбери тест для прохождения:"
     )
     
-    keyboard = get_test_selection_for_taking_keyboard(available_tests)
+    keyboard = get_test_selection_for_taking_keyboard(available_tests, page, per_page)
     
     return message_text, keyboard
 
@@ -212,8 +260,16 @@ async def cmd_trainee_broadcast_tests(message: Message, state: FSMContext, sessi
             await message.answer("❌ У тебя нет прав для прохождения тестов.")
             return
         
+        # Получаем company_id с fallback на ensure_company_id для безопасности
+        company_id = user.company_id
+        if company_id is None:
+            company_id = await ensure_company_id(session, state, message.from_user.id)
+        if company_id is None:
+            await message.answer("❌ Не удалось определить компанию. Обратись к администратору.")
+            return
+        
         # Получаем тесты ВМЕСТЕ: от рекрутера через рассылку + индивидуальные от наставника (исключая тесты траектории)
-        available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False, company_id=user.company_id)
+        available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False, company_id=company_id)
         
         if not available_tests:
             no_tests_message = (
@@ -224,19 +280,55 @@ async def cmd_trainee_broadcast_tests(message: Message, state: FSMContext, sessi
                 no_tests_message, 
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                    [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
                 ])
             )
             return
         
-        # Используем универсальную функцию для форматирования
-        message_text, keyboard = await format_my_tests_display(session, user, available_tests)
+        # Используем универсальную функцию для форматирования с пагинацией
+        page = 0
+        message_text, keyboard = await format_my_tests_display(session, user, available_tests, page=page)
         
-        await message.answer(
-            message_text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
+        # Сохраняем список тестов в state для пагинации
+        await state.update_data(available_tests=available_tests, current_page=page)
+        
+        # Согласно макету 4.1: отправляем баннер SOVA для "Мои тесты", если настроен
+        from config import MY_TESTS_IMAGE_FILE_ID, MY_TESTS_IMAGE_URL, MY_TESTS_IMAGE_PATH
+        from aiogram.types import FSInputFile
+        
+        photo_source = None
+        if MY_TESTS_IMAGE_FILE_ID:
+            photo_source = MY_TESTS_IMAGE_FILE_ID
+        elif MY_TESTS_IMAGE_URL:
+            photo_source = MY_TESTS_IMAGE_URL
+        elif MY_TESTS_IMAGE_PATH:
+            try:
+                photo_source = FSInputFile(MY_TESTS_IMAGE_PATH)
+            except Exception as file_error:
+                logger.warning(f"Не удалось загрузить изображение для 'Мои тесты': {file_error}")
+        
+        if photo_source:
+            try:
+                # Caption содержит только текст списка (без "Мои ТЕСТЫ" - оно на баннере)
+                await message.answer_photo(
+                    photo=photo_source,
+                    caption=message_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+            except Exception as photo_error:
+                logger.warning(f"Не удалось отправить изображение для 'Мои тесты': {photo_error}")
+                await message.answer(
+                    message_text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+        else:
+            await message.answer(
+                message_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
         
         # КРИТИЧЕСКИ ВАЖНО: Устанавливаем контекст "taking" для наставника и сотрудника
         await state.update_data(test_context='taking')
@@ -249,8 +341,8 @@ async def cmd_trainee_broadcast_tests(message: Message, state: FSMContext, sessi
         await message.answer("Произошла ошибка при получении списка тестов")
         log_user_error(message.from_user.id, "my_tests_error", str(e))
 
-async def show_user_test_scores(message: Message, session: AsyncSession) -> None:
-    """Универсальная функция для показа результатов тестирования пользователя"""
+async def show_user_test_scores(message: Message, session: AsyncSession, page: int = 0) -> None:
+    """Универсальная функция для показа результатов тестирования пользователя с пагинацией"""
     user = await get_user_by_tg_id(session, message.from_user.id)
     if not user:
         await message.answer("Ты не зарегистрирован в системе.")
@@ -276,6 +368,10 @@ async def show_user_test_scores(message: Message, session: AsyncSession) -> None
     
     # Получаем company_id для изоляции
     company_id = user.company_id
+    if company_id is None:
+        # Логируем ошибку, но не прерываем выполнение (показываем пустые результаты)
+        logger.error(f"У пользователя {user.id} не установлен company_id при просмотре результатов")
+        company_id = None  # Передаем None, функция должна обработать это корректно
     
     test_results = await get_user_test_results(session, user.id, company_id=company_id)
     
@@ -288,13 +384,28 @@ async def show_user_test_scores(message: Message, session: AsyncSession) -> None
         )
         return
     
-    results_list = []
+    # Подсчитываем статистику по всем результатам
     total_score = 0
     passed_count = 0
     total_tests_taken = len(test_results)
     
     for result in test_results:
-        test = await get_test_by_id(session, result.test_id, company_id=user.company_id)
+        total_score += result.score
+        if result.is_passed:
+            passed_count += 1
+    
+    success_rate = (passed_count / total_tests_taken * 100) if total_tests_taken > 0 else 0
+    
+    # Пагинация: показываем по 5 результатов на страницу
+    per_page = 5
+    start_index = page * per_page
+    end_index = start_index + per_page
+    page_results = test_results[start_index:end_index]
+    
+    # Формируем список результатов для текущей страницы
+    results_list = []
+    for result in page_results:
+        test = await get_test_by_id(session, result.test_id, company_id=company_id)
         status = "пройден" if result.is_passed else "не пройден"
         percentage = (result.score / result.max_possible_score * 100) if result.max_possible_score > 0 else 0
         
@@ -305,25 +416,16 @@ async def show_user_test_scores(message: Message, session: AsyncSession) -> None
             f"• Дата: {result.created_date.strftime('%d.%m.%Y %H:%M')}\n"
             f"• Время: {(result.end_time - result.start_time).total_seconds():.0f} сек"
         )
-        
-        total_score += result.score
-        if result.is_passed:
-            passed_count += 1
     
     results_text = "\n\n".join(results_list)
     
-    # Статистика прогресса
-    success_rate = (passed_count / total_tests_taken * 100) if total_tests_taken > 0 else 0
-    
-    # Формируем клавиатуру в зависимости от роли
-    keyboard = []
+    # Получаем наставника для стажера (если есть)
+    mentor = None
+    mentor_tg_id = None
     if user_role == "стажер":
-        # Для стажера добавляем кнопку связи с наставником
         mentor = await get_user_mentor(session, user.id)
         if mentor:
-            keyboard.append([InlineKeyboardButton(text="✍️ Написать наставнику", url=f"tg://user?id={mentor.tg_id}")])
-    
-    keyboard.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+            mentor_tg_id = mentor.tg_id
     
     # Формируем контекстную информацию о пользователе
     days_in_status = (datetime.now() - user.role_assigned_date).days
@@ -349,13 +451,16 @@ async def show_user_test_scores(message: Message, session: AsyncSession) -> None
         )
     
     # Формируем сообщение в зависимости от роли
+    total_pages = (len(test_results) + per_page - 1) // per_page
+    page_info = f" (Страница {page+1}/{total_pages})" if total_pages > 1 else ""
+    
     if user_role == "стажер":
         message_text = (
             f"{context_info}"
             f"📊 <b>Общая статистика</b>\n"
             f"• Пройдено тестов: {passed_count}/{total_tests_taken}\n"
             f"• Процент успеха: {success_rate:.1f}%\n\n"
-            f"🧾 <b>Детальные результаты</b>\n{results_text}\n\n"
+            f"🧾 <b>Детальные результаты{page_info}</b>\n{results_text}\n\n"
             f"💡 <b>Совет:</b>\nОбратись к наставнику для получения доступа к новым тестам!"
         )
     else:
@@ -364,17 +469,169 @@ async def show_user_test_scores(message: Message, session: AsyncSession) -> None
             f"📊 <b>Общая статистика</b>\n"
             f"• Пройдено тестов: {passed_count}/{total_tests_taken}\n"
             f"• Процент успеха: {success_rate:.1f}%\n\n"
-            f"🧾 <b>Детальные результаты</b>\n{results_text}\n\n"
+            f"🧾 <b>Детальные результаты{page_info}</b>\n{results_text}\n\n"
             f"💡 <b>Совет:</b>\nПродолжайте развиваться и помогайте своим стажерам!"
         )
+    
+    # Формируем клавиатуру с пагинацией
+    keyboard = get_test_results_keyboard(test_results, page, per_page, user_role, mentor_tg_id)
     
     await message.answer(
         message_text,
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+        reply_markup=keyboard
     )
     
-    log_user_action(message.from_user.id, message.from_user.username, f"viewed test results as {user_role}")
+    log_user_action(message.from_user.id, message.from_user.username, f"viewed test results as {user_role}, page {page+1}")
+
+
+@router.callback_query(F.data.startswith("test_scores_page:"))
+async def callback_test_scores_pagination(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик пагинации результатов тестов"""
+    try:
+        await callback.answer()
+        page = int(callback.data.split(":")[1])
+        
+        # Используем message из callback для обновления
+        # Создаем временный объект Message для совместимости с show_user_test_scores
+        class TempMessage:
+            def __init__(self, original_message):
+                self.from_user = original_message.from_user
+                self.answer = original_message.answer
+                self.edit_text = original_message.edit_text
+        
+        temp_msg = TempMessage(callback.message)
+        
+        # Получаем пользователя для проверки прав
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Пользователь не найден.", show_alert=True)
+            return
+        
+        # Получаем все результаты для формирования сообщения
+        company_id = user.company_id
+        test_results = await get_user_test_results(session, user.id, company_id=company_id)
+        
+        if not test_results:
+            await callback.message.edit_text("Ты пока не проходил тестов.")
+            return
+        
+        # Определяем роль пользователя
+        user_roles = [role.name for role in user.roles]
+        if "Стажер" in user_roles:
+            user_role = "стажер"
+        elif "Наставник" in user_roles:
+            user_role = "наставник"
+        elif "Рекрутер" in user_roles:
+            user_role = "рекрутер"
+        elif "Руководитель" in user_roles:
+            user_role = "руководитель"
+        else:
+            user_role = "пользователь"
+        
+        # Подсчитываем статистику
+        total_score = 0
+        passed_count = 0
+        total_tests_taken = len(test_results)
+        
+        for result in test_results:
+            total_score += result.score
+            if result.is_passed:
+                passed_count += 1
+        
+        success_rate = (passed_count / total_tests_taken * 100) if total_tests_taken > 0 else 0
+        
+        # Пагинация
+        per_page = 5
+        start_index = page * per_page
+        end_index = start_index + per_page
+        page_results = test_results[start_index:end_index]
+        
+        # Формируем список результатов для текущей страницы
+        results_list = []
+        for result in page_results:
+            test = await get_test_by_id(session, result.test_id, company_id=company_id)
+            status = "пройден" if result.is_passed else "не пройден"
+            percentage = (result.score / result.max_possible_score * 100) if result.max_possible_score > 0 else 0
+            
+            results_list.append(
+                f"<b>Тест:</b> {test.name if test else 'Неизвестный тест'}\n"
+                f"• Баллы: {result.score:.1f}/{result.max_possible_score:.1f} ({percentage:.1f}%)\n"
+                f"• Статус: {status}\n"
+                f"• Дата: {result.created_date.strftime('%d.%m.%Y %H:%M')}\n"
+                f"• Время: {(result.end_time - result.start_time).total_seconds():.0f} сек"
+            )
+        
+        results_text = "\n\n".join(results_list)
+        
+        # Получаем наставника для стажера
+        mentor = None
+        mentor_tg_id = None
+        if user_role == "стажер":
+            mentor = await get_user_mentor(session, user.id)
+            if mentor:
+                mentor_tg_id = mentor.tg_id
+        
+        # Формируем контекстную информацию
+        days_in_status = (datetime.now() - user.role_assigned_date).days
+        days_text = get_days_word(days_in_status)
+        
+        if user_role == "стажер":
+            context_info = (
+                f"🦸🏻‍♂️<b>Стажер:</b> {user.full_name}\n\n"
+                f"<b>Телефон:</b> {user.phone_number}\n"
+                f"<b>В статусе стажера:</b> {days_in_status} {days_text}\n"
+                f"<b>Объект стажировки:</b> {user.internship_object.name if user.internship_object else 'Не указан'}\n"
+                f"<b>Объект работы:</b> {user.work_object.name if user.work_object else 'Не указан'}\n\n"
+                f"━━━━━━━━━━━━\n\n"
+            )
+        else:
+            context_info = (
+                f"👨‍🏫<b>Наставник:</b> {user.full_name}\n\n"
+                f"<b>Телефон:</b> {user.phone_number}\n"
+                f"<b>В статусе наставника:</b> {days_in_status} {days_text}\n"
+                f"<b>Объект стажировки:</b> {user.internship_object.name if user.internship_object else 'Не указан'}\n"
+                f"<b>Объект работы:</b> {user.work_object.name if user.work_object else 'Не указан'}\n\n"
+                f"━━━━━━━━━━━━\n\n"
+            )
+        
+        # Формируем сообщение
+        total_pages = (len(test_results) + per_page - 1) // per_page
+        page_info = f" (Страница {page+1}/{total_pages})" if total_pages > 1 else ""
+        
+        if user_role == "стажер":
+            message_text = (
+                f"{context_info}"
+                f"📊 <b>Общая статистика</b>\n"
+                f"• Пройдено тестов: {passed_count}/{total_tests_taken}\n"
+                f"• Процент успеха: {success_rate:.1f}%\n\n"
+                f"🧾 <b>Детальные результаты{page_info}</b>\n{results_text}\n\n"
+                f"💡 <b>Совет:</b>\nОбратись к наставнику для получения доступа к новым тестам!"
+            )
+        else:
+            message_text = (
+                f"{context_info}"
+                f"📊 <b>Общая статистика</b>\n"
+                f"• Пройдено тестов: {passed_count}/{total_tests_taken}\n"
+                f"• Процент успеха: {success_rate:.1f}%\n\n"
+                f"🧾 <b>Детальные результаты{page_info}</b>\n{results_text}\n\n"
+                f"💡 <b>Совет:</b>\nПродолжайте развиваться и помогайте своим стажерам!"
+            )
+        
+        # Формируем клавиатуру
+        keyboard = get_test_results_keyboard(test_results, page, per_page, user_role, mentor_tg_id)
+        
+        await callback.message.edit_text(
+            message_text,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+        
+        log_user_action(callback.from_user.id, "test_scores_pagination", f"Page: {page+1}")
+        
+    except Exception as e:
+        await callback.answer("Произошла ошибка при переключении страницы", show_alert=True)
+        log_user_error(callback.from_user.id, "test_scores_pagination_error", str(e))
 
 
 @router.message(F.text.in_(["Посмотреть баллы", "📊 Посмотреть баллы", "Посмотреть баллы 📊"]))
@@ -386,6 +643,226 @@ async def cmd_view_scores(message: Message, state: FSMContext, session: AsyncSes
     
     await show_user_test_scores(message, session)
 
+@router.callback_query(F.data.startswith("my_tests_page:"))
+async def callback_my_tests_pagination(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик пагинации для "Мои тесты" """
+    try:
+        await callback.answer()
+        page = int(callback.data.split(":")[1])
+        
+        # Получаем пользователя
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Пользователь не найден.", show_alert=True)
+            return
+        
+        # Получаем список тестов из state или заново
+        state_data = await state.get_data()
+        available_tests = state_data.get('available_tests')
+        
+        # Если тестов нет в state, получаем заново
+        if not available_tests:
+            company_id = user.company_id
+            if company_id is None:
+                company_id = await ensure_company_id(session, state, callback.from_user.id)
+            if company_id is None:
+                await callback.answer("❌ Не удалось определить компанию.", show_alert=True)
+                return
+            
+            available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False, company_id=company_id)
+            if not available_tests:
+                await callback.message.edit_text(
+                    "❌ Пока новых тестов нет\n"
+                    "Когда появятся, тебе придёт уведомление",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
+                    ])
+                )
+                return
+            # Сохраняем загруженные тесты в state
+            await state.update_data(available_tests=available_tests)
+        
+        # Формируем сообщение с пагинацией
+        message_text, keyboard = await format_my_tests_display(session, user, available_tests, page=page)
+        
+        # Сохраняем текущую страницу в state
+        await state.update_data(current_page=page)
+        
+        # Проверяем, есть ли баннер
+        from config import MY_TESTS_IMAGE_FILE_ID, MY_TESTS_IMAGE_URL, MY_TESTS_IMAGE_PATH
+        from aiogram.types import FSInputFile
+        
+        photo_source = None
+        if MY_TESTS_IMAGE_FILE_ID:
+            photo_source = MY_TESTS_IMAGE_FILE_ID
+        elif MY_TESTS_IMAGE_URL:
+            photo_source = MY_TESTS_IMAGE_URL
+        elif MY_TESTS_IMAGE_PATH:
+            try:
+                photo_source = FSInputFile(MY_TESTS_IMAGE_PATH)
+            except Exception:
+                pass
+        
+        # Обновляем сообщение
+        if callback.message.photo:
+            # Если текущее сообщение - фото, редактируем caption
+            try:
+                await callback.message.edit_caption(
+                    caption=message_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+            except Exception:
+                # Если не удалось отредактировать caption, отправляем новое сообщение
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
+                if photo_source:
+                    await callback.bot.send_photo(
+                        chat_id=callback.message.chat.id,
+                        photo=photo_source,
+                        caption=message_text,
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
+                else:
+                    await callback.message.answer(
+                        message_text,
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
+        else:
+            # Если текстовое сообщение, редактируем текст
+            try:
+                await callback.message.edit_text(
+                    message_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+            except Exception:
+                # Если не удалось отредактировать, отправляем новое
+                await callback.message.answer(
+                    message_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+    
+    except Exception as e:
+        logger.error(f"Ошибка пагинации 'Мои тесты': {e}")
+        await callback.answer("❌ Произошла ошибка при переключении страницы.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("trajectory_tests_page:"))
+async def callback_trajectory_tests_pagination(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик пагинации для "Тесты траектории" """
+    try:
+        await callback.answer()
+        page = int(callback.data.split(":")[1])
+        
+        # Получаем пользователя
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Пользователь не найден.", show_alert=True)
+            return
+        
+        # Получаем список тестов из state или заново
+        state_data = await state.get_data()
+        available_tests = state_data.get('trajectory_tests')
+        
+        # Если тестов нет в state, получаем заново
+        if not available_tests:
+            company_id = user.company_id
+            if company_id is None:
+                company_id = await ensure_company_id(session, state, callback.from_user.id)
+            if company_id is None:
+                await callback.answer("❌ Не удалось определить компанию.", show_alert=True)
+                return
+            
+            available_tests = await get_trainee_available_tests(session, user.id, company_id=company_id)
+            if not available_tests:
+                await callback.message.edit_text(
+                    "🗺️ <b>Тесты траектории</b>\n\n"
+                    "У тебя пока нет доступных тестов для прохождения.\n"
+                    "Обратись к наставнику для получения доступа к тестам.",
+                    parse_mode="HTML"
+                )
+                return
+            # Сохраняем загруженные тесты в state
+            await state.update_data(trajectory_tests=available_tests)
+        
+        # Пагинация: показываем по 5 тестов на страницу
+        per_page = 5
+        start_index = page * per_page
+        end_index = start_index + per_page
+        page_tests = available_tests[start_index:end_index]
+        
+        tests_list = []
+        for i, test in enumerate(page_tests, 1):
+            stage_info = ""
+            if test.stage_id:
+                stage = await session.execute(select(InternshipStage).where(InternshipStage.id == test.stage_id))
+                stage_obj = stage.scalar_one_or_none()
+                if stage_obj:
+                    stage_info = f" | Этап: {stage_obj.name}"
+            
+            materials_info = " | 📚 Есть материалы" if test.material_link else ""
+            
+            # Получаем результат последнего прохождения для отображения статуса
+            company_id = user.company_id
+            test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
+            if test_result and test_result.is_passed:
+                status_info = f" | ✅ Пройден ({test_result.score:.1f}/{test_result.max_possible_score:.1f})"
+            else:
+                status_info = " | 📋 Доступен"
+            
+            # Номер с учетом глобального индекса
+            global_index = start_index + i
+            tests_list.append(
+                f"<b>{global_index}. {test.name}</b>\n"
+                f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}{status_info}\n"
+                f"   📝 {test.description or 'Описание не указано'}"
+            )
+        
+        tests_display = "\n\n".join(tests_list)
+        
+        # Информация о странице
+        total_pages = (len(available_tests) + per_page - 1) // per_page
+        page_info = f"\n\n📄 Страница {page+1}/{total_pages}" if total_pages > 1 else ""
+        
+        message_text = (
+            f"🗺️ <b>Тесты траектории</b>\n\n"
+            f"У тебя есть доступ к <b>{len(available_tests)}</b> тестам:{page_info}\n\n"
+            f"{tests_display}\n\n"
+            "💡 <b>Рекомендация:</b> Пройденные тесты можно пересдать для улучшения результата!"
+        )
+        
+        keyboard = get_test_selection_for_taking_keyboard(available_tests, page, per_page, "trajectory_tests_page")
+        
+        # Сохраняем текущую страницу в state
+        await state.update_data(trajectory_page=page)
+        
+        # Обновляем сообщение
+        try:
+            await callback.message.edit_text(
+                message_text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+        except Exception:
+            # Если не удалось отредактировать, отправляем новое
+            await callback.message.answer(
+                message_text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+    
+    except Exception as e:
+        logger.error(f"Ошибка пагинации 'Тесты траектории': {e}")
+        await callback.answer("❌ Произошла ошибка при переключении страницы.", show_alert=True)
+
+
 @router.callback_query(TestTakingStates.waiting_for_test_selection, F.data.startswith("test:"))
 async def process_test_selection_for_taking(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик выбора теста для прохождения"""
@@ -394,17 +871,25 @@ async def process_test_selection_for_taking(callback: CallbackQuery, state: FSMC
         await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
         return
     
+    # Получаем company_id с fallback на ensure_company_id для безопасности
+    company_id = user.company_id
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None:
+        await callback.message.edit_text("❌ Не удалось определить компанию. Обратись к администратору.")
+        await callback.answer()
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
-    test = await get_test_by_id(session, test_id, company_id=user.company_id)
+    test = await get_test_by_id(session, test_id, company_id=company_id)
     if not test:
         await callback.message.answer("❌ Тест не найден.")
         await callback.answer()
         return
     
     # Проверяем доступ к тесту
-    user = await get_user_by_tg_id(session, callback.from_user.id)
-    has_access = await check_test_access(session, user.id, test_id, company_id=user.company_id)
+    has_access = await check_test_access(session, user.id, test_id, company_id=company_id)
     
     if not has_access:
         await callback.message.edit_text(
@@ -415,33 +900,108 @@ async def process_test_selection_for_taking(callback: CallbackQuery, state: FSMC
         await callback.answer()
         return
     
-    # Получаем company_id для изоляции
-    company_id = user.company_id
-    
     # Проверяем количество попыток
     attempts_count = await get_user_test_attempts_count(session, user.id, test_id, company_id=company_id)
     
     # Проверяем, есть ли уже результат
     existing_result = await get_user_test_result(session, user.id, test_id, company_id=company_id)
     
-    test_info = f"""📌 <b>{test.name}</b>
-
-<b>Порог:</b> {test.threshold_score:.1f}/{test.max_score:.1f} б.
-
-{test.description or 'Описание отсутствует'}
-
-Если есть сомнения по теме, сначала прочти прикреплённые обучающие материалы, а потом переходи к тесту"""
+    # Формируем текст карточки теста согласно макету 4.5
+    # Название теста - всегда
+    test_info = f"<b>{test.name}</b>"
     
-    await callback.message.edit_text(
-        test_info,
-        parse_mode="HTML",
-        reply_markup=get_test_start_keyboard(test_id, bool(existing_result))
-    )
+    # Описание - только если есть (макет 4.5: вариант 2 - без описания)
+    if test.description and test.description.strip():
+        test_info += f"\n\n{test.description}"
+    
+    # Совет - только если есть материал (макет 4.5: вариант 4 - без материала)
+    has_material = bool(test.material_link or test.material_file_path)
+    if has_material:
+        test_info += "\n\n💡 <b>Совет:</b>\nЕсли есть сомнения по теме, сначала прочти прикреплённые обучающие материалы, а потом переходи к тесту"
+    
+    # Согласно макету 4.5: отправляем фото с текстом в одном сообщении, если есть
+    has_photo = test.material_file_path and test.material_type == "photo"
+    
+    # Показываем индикатор загрузки для быстрого отклика
+    await callback.answer()
+    
+    if has_photo:
+        try:
+            # Сначала отправляем новое сообщение с фото теста, затем удаляем старое
+            sent_message = await callback.bot.send_photo(
+                chat_id=callback.message.chat.id,
+                photo=test.material_file_path,
+                caption=test_info,
+                parse_mode="HTML",
+                reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+            )
+            # Удаляем старое сообщение после отправки нового (не ждем завершения)
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+        except Exception as photo_error:
+            logger.warning(f"Не удалось отправить фото к тесту {test_id}: {photo_error}")
+            # Fallback: отправляем только текст
+            try:
+                if callback.message.photo:
+                    # Если исходное сообщение - фото, удаляем и отправляем новое
+                    try:
+                        await callback.message.delete()
+                    except Exception:
+                        pass
+                    await callback.message.answer(
+                        test_info,
+                        parse_mode="HTML",
+                        reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+                    )
+                else:
+                    # Если текстовое, редактируем
+                    await callback.message.edit_text(
+                        test_info,
+                        parse_mode="HTML",
+                        reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+                    )
+            except Exception:
+                # Если не удалось отредактировать, отправляем новое сообщение
+                await callback.message.answer(
+                    test_info,
+                    parse_mode="HTML",
+                    reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+                )
+    else:
+        # Если фото теста нет, проверяем тип исходного сообщения
+        if callback.message.photo:
+            # Если исходное сообщение - фото (баннер "Мои тесты"), удаляем и отправляем новое текстовое
+            # Сначала отправляем новое, затем удаляем старое для быстрого отклика
+            sent_message = await callback.message.answer(
+                test_info,
+                parse_mode="HTML",
+                reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+            )
+            # Удаляем старое сообщение после отправки нового
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+        else:
+            # Если текстовое сообщение, редактируем текст (быстро, без удаления)
+            try:
+                await callback.message.edit_text(
+                    test_info,
+                    parse_mode="HTML",
+                    reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+                )
+            except Exception:
+                # Если не удалось отредактировать, отправляем новое сообщение
+                await callback.message.answer(
+                    test_info,
+                    parse_mode="HTML",
+                    reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+                )
     
     await state.update_data(selected_test_id=test_id)
     await state.set_state(TestTakingStates.waiting_for_test_start)
-    
-    await callback.answer()
     
     log_user_action(
         callback.from_user.id, 
@@ -463,25 +1023,23 @@ async def process_start_test(callback: CallbackQuery, state: FSMContext, session
         await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
         return
     
+    # Получаем company_id с fallback на ensure_company_id для безопасности
+    company_id = user.company_id
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None:
+        await callback.message.edit_text("❌ Не удалось определить компанию. Обратись к администратору.")
+        await state.clear()
+        return
+    
     if test_id is None:
         test_id = int(callback.data.split(':')[1])
-    user_id = callback.from_user.id
     
-    test = await get_test_by_id(session, test_id, company_id=user.company_id)
+    test = await get_test_by_id(session, test_id, company_id=company_id)
     if not test:
         await callback.message.edit_text("❌ Тест не найден.")
         await state.clear()
         return
-    
-    # Получаем пользователя и проверяем количество попыток
-    user = await get_user_by_tg_id(session, callback.from_user.id)
-    if not user:
-        await callback.message.edit_text("❌ Пользователь не найден.")
-        await state.clear()
-        return
-    
-    # Получаем company_id для изоляции
-    company_id = user.company_id
     
     # Проверяем, может ли пользователь пройти тест (с учетом ограничений попыток)
     can_take, error_message = await can_user_take_test(session, user.id, test_id, company_id=company_id)
@@ -508,7 +1066,7 @@ async def process_start_test(callback: CallbackQuery, state: FSMContext, session
         await callback.answer()
         return
     
-    questions = await get_test_questions(session, test_id, company_id=user.company_id)
+    questions = await get_test_questions(session, test_id, company_id=company_id)
     if not questions:
         await callback.message.edit_text("❌ В этом тесте нет вопросов. Обратись к наставнику.")
         await state.clear()
@@ -839,7 +1397,20 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
         await state.clear()
         return
     
-    test = await get_test_by_id(session, test_id, company_id=user.company_id)
+    # Получаем company_id с fallback на ensure_company_id для безопасности
+    company_id = user.company_id
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, user_tg_id)
+    if company_id is None:
+        await message.answer(
+            "❌ <b>Ошибка сохранения результата</b>\n\n"
+            "Не удалось определить компанию. Обратись к администратору.",
+            parse_mode="HTML"
+        )
+        await state.clear()
+        return
+    
+    test = await get_test_by_id(session, test_id, company_id=company_id)
     score = max(0, score) # Не уходим в минус
     is_passed = score >= test.threshold_score
     
@@ -855,7 +1426,7 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
         'answers_details': data.get('answers_details', []),
         'wrong_answers': wrong_answers_data
     }
-    result = await save_test_result(session, result_data, company_id=user.company_id)
+    result = await save_test_result(session, result_data, company_id=company_id)
 
     if not result:
         await message.answer(
@@ -870,13 +1441,14 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
     stage_completion_message = ""
     if is_passed:
         # Проверяем, является ли тест частью траектории (любого этапа)
-        is_trajectory_test = await is_test_from_trajectory(session, user.id, test_id)
+        is_trajectory_test = await is_test_from_trajectory(session, user.id, test_id, company_id=company_id)
         if is_trajectory_test:
             logger.info(f"Тест {test_id} - это тест ТРАЕКТОРИИ, проверяем завершение этапа")
             stage_completion_message = await check_and_notify_stage_completion(session, user.id, test_id, bot)
         else:
             logger.info(f"Тест {test_id} - это тест РАССЫЛКИ, пропускаем проверку траектории")
 
+    # Формируем текст результата согласно макету 4.9-4.11
     status_text = "✅ <b>Тест успешно пройден!</b>" if is_passed else "❌ <b>Тест не пройден</b>"
     
     keyboard = []
@@ -885,15 +1457,30 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
     progress_info = ""
     test_keyboard = keyboard.copy()
 
-    if is_passed:
-        company_id = user.company_id
+    # Для непройденных тестов добавляем кнопки согласно макету 4.9-4.10
+    if not is_passed:
+        test_keyboard.append([InlineKeyboardButton(text="Пройти еще раз 🔄", callback_data=f"test:{test_id}")])
+        test_keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
+    elif is_passed:
+        # company_id уже получен выше с проверкой на None
+        # Проверяем роль пользователя для дополнительной безопасности
+        user_roles = await get_user_roles(session, user.id)
+        role_names = [role.name for role in user_roles]
+        is_trainee = "Стажер" in role_names
+        
         # Проверяем, является ли тест частью траектории
-        is_trajectory_test = await is_test_from_trajectory(session, user.id, test_id)
-        if not is_trajectory_test:
-            logger.info(f"Тест {test_id} - рассылка, НЕ показываем прогресс траектории")
+        is_trajectory_test = await is_test_from_trajectory(session, user.id, test_id, company_id=company_id)
+        if not is_trajectory_test or not is_trainee:
+            # Если тест не из траектории ИЛИ пользователь не стажер - не показываем прогресс траектории
+            if not is_trajectory_test:
+                logger.info(f"Тест {test_id} - рассылка, НЕ показываем прогресс траектории")
+            elif not is_trainee:
+                logger.info(f"Пользователь {user.id} не является стажером, НЕ показываем прогресс траектории")
             trainee_path = None
+            # Для пройденных тестов из рассылки добавляем кнопку главного меню согласно макету 4.11
+            test_keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
         else:
-            # Получаем траекторию стажера только для тестов траектории
+            # Получаем траекторию стажера только для тестов траектории И только для стажеров
             trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         
         if trainee_path:
@@ -1017,14 +1604,18 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
             # Добавляем кнопки траектории и главного меню
             test_keyboard.extend([
                 [InlineKeyboardButton(text="🗺️ Траектория", callback_data="trajectory")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
 
+    # Формируем текст результата согласно макету 4.9-4.11
+    result_text = (
+        f"{status_text}\n"
+        f"Твой результат: <b>{score:.1f}</b> из <b>{test.max_score:.1f}</b> баллов. Проходной балл: {test.threshold_score:.1f}"
+    )
+    
     try:
         await message.edit_text(
-            f"{status_text}\n"
-            f"Твой результат: <b>{score:.1f}</b> из <b>{test.max_score:.1f}</b> б.\n"
-            f"Проходной балл: {test.threshold_score:.1f}"
+            f"{result_text}"
             f"{progress_info}"
             f"{stage_completion_message}",
             parse_mode="HTML",
@@ -1034,9 +1625,7 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
         # Если не можем отредактировать сообщение (например, это текстовый ответ пользователя),
         # отправляем новое сообщение
         await message.answer(
-            f"{status_text}\n"
-            f"Твой результат: <b>{score:.1f}</b> из <b>{test.max_score:.1f}</b> б.\n"
-            f"Проходной балл: {test.threshold_score:.1f}"
+            f"{result_text}"
             f"{progress_info}"
             f"{stage_completion_message}",
             parse_mode="HTML",
@@ -1053,9 +1642,18 @@ async def process_view_materials(callback: CallbackQuery, state: FSMContext, ses
         await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
         return
     
+    # Получаем company_id с fallback на ensure_company_id для безопасности
+    company_id = user.company_id
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None:
+        await callback.message.edit_text("❌ Не удалось определить компанию. Обратись к администратору.")
+        await callback.answer()
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
-    test = await get_test_by_id(session, test_id, company_id=user.company_id)
+    test = await get_test_by_id(session, test_id, company_id=company_id)
     if not test or not test.material_link:
         await callback.message.edit_text(
             "📚 <b>Материалы для изучения</b>\n\n"
@@ -1140,6 +1738,19 @@ async def process_view_materials(callback: CallbackQuery, state: FSMContext, ses
 async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Умный возврат к списку тестов (определяет откуда пришёл тест)"""
     user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+        await callback.answer()
+        return
+    
+    # Получаем company_id с fallback на ensure_company_id для безопасности
+    company_id = user.company_id
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None:
+        await callback.message.edit_text("❌ Не удалось определить компанию. Обратись к администратору.")
+        await callback.answer()
+        return
     
     # Получаем данные состояния, чтобы узнать test_id
     state_data = await state.get_data()
@@ -1148,11 +1759,11 @@ async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, 
     # Определяем, из какого списка был тест
     is_from_trajectory = False
     if test_id:
-        is_from_trajectory = await is_test_from_trajectory(session, user.id, test_id)
+        is_from_trajectory = await is_test_from_trajectory(session, user.id, test_id, company_id=company_id)
     
     if is_from_trajectory:
         # ТЕСТЫ ТРАЕКТОРИИ
-        available_tests = await get_trainee_available_tests(session, user.id, company_id=user.company_id)
+        available_tests = await get_trainee_available_tests(session, user.id, company_id=company_id)
         
         if not available_tests:
             await callback.message.edit_text(
@@ -1164,8 +1775,15 @@ async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, 
             await callback.answer()
             return
         
+        # Пагинация: показываем по 5 тестов на страницу
+        page = 0
+        per_page = 5
+        start_index = page * per_page
+        end_index = start_index + per_page
+        page_tests = available_tests[start_index:end_index]
+        
         tests_list = []
-        for i, test in enumerate(available_tests, 1):
+        for i, test in enumerate(page_tests, 1):
             stage_info = ""
             if test.stage_id:
                 stage = await session.execute(select(InternshipStage).where(InternshipStage.id == test.stage_id))
@@ -1175,28 +1793,45 @@ async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, 
             
             materials_info = " | 📚 Есть материалы" if test.material_link else ""
             
+            # Получаем результат последнего прохождения для отображения статуса
+            company_id = user.company_id
+            test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
+            if test_result and test_result.is_passed:
+                status_info = f" | ✅ Пройден ({test_result.score:.1f}/{test_result.max_possible_score:.1f})"
+            else:
+                status_info = " | 📋 Доступен"
+            
+            # Номер с учетом глобального индекса
+            global_index = start_index + i
             tests_list.append(
-                f"<b>{i}. {test.name}</b>\n"
-                f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}\n"
+                f"<b>{global_index}. {test.name}</b>\n"
+                f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}{status_info}\n"
                 f"   📝 {test.description or 'Описание не указано'}"
             )
         
         tests_display = "\n\n".join(tests_list)
         
+        # Информация о странице
+        total_pages = (len(available_tests) + per_page - 1) // per_page
+        page_info = f"\n\n📄 Страница {page+1}/{total_pages}" if total_pages > 1 else ""
+        
         await callback.message.edit_text(
             f"🗺️ <b>Тесты траектории</b>\n\n"
-            f"У тебя есть доступ к <b>{len(available_tests)}</b> тестам:\n\n"
+            f"У тебя есть доступ к <b>{len(available_tests)}</b> тестам:{page_info}\n\n"
             f"{tests_display}\n\n"
             "💡 <b>Рекомендация:</b> Изучи материалы перед прохождением теста!",
             parse_mode="HTML",
-            reply_markup=get_test_selection_for_taking_keyboard(available_tests)
+            reply_markup=get_test_selection_for_taking_keyboard(available_tests, page, per_page, "trajectory_tests_page")
         )
+        
+        # Сохраняем список тестов в state для пагинации
+        await state.update_data(trajectory_tests=available_tests, trajectory_page=page)
         
         # КРИТИЧЕСКИ ВАЖНО: Устанавливаем контекст "taking" для возврата к траектории
         await state.update_data(test_context='taking')
     else:
         # МОИ ТЕСТЫ (индивидуальные) - для стажеров, сотрудников и наставников
-        available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False, company_id=user.company_id)
+        available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False, company_id=company_id)
         
         if not available_tests:
             no_tests_message = (
@@ -1207,26 +1842,114 @@ async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, 
                 no_tests_message, 
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                    [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
                 ])
             )
             await callback.answer()
             return
         
-        # Используем универсальную функцию для форматирования
-        message_text, keyboard = await format_my_tests_display(session, user, available_tests)
+        # Используем универсальную функцию для форматирования с пагинацией
+        page = 0
+        message_text, keyboard = await format_my_tests_display(session, user, available_tests, page=page)
         
-        await callback.message.edit_text(
-            message_text,
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
+        # Сохраняем список тестов в state для пагинации
+        await state.update_data(available_tests=available_tests, current_page=page)
+        
+        # Согласно макету 4.1: отправляем баннер SOVA для "Мои тесты", если настроен
+        from config import MY_TESTS_IMAGE_FILE_ID, MY_TESTS_IMAGE_URL, MY_TESTS_IMAGE_PATH
+        from aiogram.types import FSInputFile
+        
+        photo_source = None
+        if MY_TESTS_IMAGE_FILE_ID:
+            photo_source = MY_TESTS_IMAGE_FILE_ID
+        elif MY_TESTS_IMAGE_URL:
+            photo_source = MY_TESTS_IMAGE_URL
+        elif MY_TESTS_IMAGE_PATH:
+            try:
+                photo_source = FSInputFile(MY_TESTS_IMAGE_PATH)
+            except Exception as file_error:
+                logger.warning(f"Не удалось загрузить изображение для 'Мои тесты': {file_error}")
+        
+        # Показываем индикатор загрузки для быстрого отклика
+        await callback.answer()
+        
+        if photo_source:
+            try:
+                # Сначала отправляем новое сообщение с баннером, затем удаляем старое
+                sent_message = await callback.bot.send_photo(
+                    chat_id=callback.message.chat.id,
+                    photo=photo_source,
+                    caption=message_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+                # Удаляем старое сообщение после отправки нового
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
+            except Exception as photo_error:
+                logger.warning(f"Не удалось отправить изображение для 'Мои тесты': {photo_error}")
+                # Fallback: отправляем только текст
+                if callback.message.photo:
+                    # Если исходное сообщение - фото, удаляем и отправляем новое
+                    try:
+                        await callback.message.delete()
+                    except Exception:
+                        pass
+                    await callback.message.answer(
+                        message_text,
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
+                else:
+                    # Если текстовое, редактируем
+                    try:
+                        await callback.message.edit_text(
+                            message_text,
+                            parse_mode="HTML",
+                            reply_markup=keyboard
+                        )
+                    except Exception:
+                        # Если не удалось отредактировать, отправляем новое сообщение
+                        await callback.message.answer(
+                            message_text,
+                            parse_mode="HTML",
+                            reply_markup=keyboard
+                        )
+        else:
+            # Если баннер не настроен, используем обычный текст
+            if callback.message.photo:
+                # Если исходное сообщение - фото, удаляем и отправляем новое текстовое
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
+                await callback.message.answer(
+                    message_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+            else:
+                # Если текстовое сообщение, редактируем текст
+                try:
+                    await callback.message.edit_text(
+                        message_text,
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
+                except Exception:
+                    # Если не удалось отредактировать, отправляем новое сообщение
+                    await callback.message.answer(
+                        message_text,
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
         
         # КРИТИЧЕСКИ ВАЖНО: Устанавливаем контекст "taking" для возврата
         await state.update_data(test_context='taking')
     
     await state.set_state(TestTakingStates.waiting_for_test_selection)
-    await callback.answer()
 
 @router.callback_query(F.data.startswith("cancel_test:"))
 async def process_cancel_test(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
@@ -1236,9 +1959,18 @@ async def process_cancel_test(callback: CallbackQuery, state: FSMContext, sessio
         await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
         return
     
+    # Получаем company_id с fallback на ensure_company_id для безопасности
+    company_id = user.company_id
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None:
+        await callback.message.edit_text("❌ Не удалось определить компанию. Обратись к администратору.")
+        await callback.answer()
+        return
+    
     test_id = int(callback.data.split(':')[1])
     
-    test = await get_test_by_id(session, test_id, company_id=user.company_id)
+    test = await get_test_by_id(session, test_id, company_id=company_id)
     test_name = test.name if test else "Неизвестный тест"
     
     await callback.message.edit_text(
@@ -1323,26 +2055,58 @@ async def process_take_test_from_notification(callback: CallbackQuery, state: FS
         await callback.answer()
         return
     
-    test = await get_test_by_id(session, test_id, company_id=user.company_id)
+    # Получаем company_id с fallback на ensure_company_id для безопасности
+    company_id = user.company_id
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None:
+        error_text = "❌ Не удалось определить компанию. Обратись к администратору."
+        if callback.message.photo:
+            try:
+                await callback.message.edit_caption(caption=error_text)
+            except Exception:
+                await callback.message.answer(error_text)
+        else:
+            try:
+                await callback.message.edit_text(error_text)
+            except Exception:
+                await callback.message.answer(error_text)
+        await callback.answer()
+        return
+    
+    test = await get_test_by_id(session, test_id, company_id=company_id)
     if not test:
-        await callback.message.edit_text("❌ Тест не найден.")
+        error_text = "❌ Тест не найден."
+        if callback.message.photo:
+            try:
+                await callback.message.edit_caption(caption=error_text)
+            except Exception:
+                await callback.message.answer(error_text)
+        else:
+            try:
+                await callback.message.edit_text(error_text)
+            except Exception:
+                await callback.message.answer(error_text)
         await callback.answer()
         return
     
     # Проверяем доступ к тесту
-    has_access = await check_test_access(session, user.id, test_id, company_id=user.company_id)
+    has_access = await check_test_access(session, user.id, test_id, company_id=company_id)
     
     if not has_access:
-        await callback.message.edit_text(
-            "❌ <b>Доступ запрещен</b>\n\n"
-            "У тебя нет доступа к этому тесту. Обратись к наставнику.",
-            parse_mode="HTML"
-        )
+        error_text = "❌ <b>Доступ запрещен</b>\n\nУ тебя нет доступа к этому тесту. Обратись к наставнику."
+        if callback.message.photo:
+            try:
+                await callback.message.edit_caption(caption=error_text, parse_mode="HTML")
+            except Exception:
+                await callback.message.answer(error_text, parse_mode="HTML")
+        else:
+            try:
+                await callback.message.edit_text(error_text, parse_mode="HTML")
+            except Exception:
+                await callback.message.answer(error_text, parse_mode="HTML")
         await callback.answer()
         return
-    
-    # Получаем company_id для изоляции
-    company_id = user.company_id
     
     # Проверяем количество попыток
     attempts_count = await get_user_test_attempts_count(session, user.id, test_id, company_id=company_id)
@@ -1350,24 +2114,102 @@ async def process_take_test_from_notification(callback: CallbackQuery, state: FS
     # Проверяем, есть ли уже результат
     existing_result = await get_user_test_result(session, user.id, test_id, company_id=company_id)
     
-    test_info = f"""📌 <b>{test.name}</b>
-
-<b>Порог:</b> {test.threshold_score:.1f}/{test.max_score:.1f} б.
-
-{test.description or 'Описание отсутствует'}
-
-Если есть сомнения по теме, сначала прочти прикреплённые обучающие материалы, а потом переходи к тесту"""
+    # Формируем текст карточки теста согласно макету 4.5
+    # Название теста - всегда
+    test_info = f"<b>{test.name}</b>"
     
-    await callback.message.edit_text(
-        test_info,
-        parse_mode="HTML",
-        reply_markup=get_test_start_keyboard(test_id, bool(existing_result))
-    )
+    # Описание - только если есть (макет 4.5: вариант 2 - без описания)
+    if test.description and test.description.strip():
+        test_info += f"\n\n{test.description}"
+    
+    # Совет - только если есть материал (макет 4.5: вариант 4 - без материала)
+    has_material = bool(test.material_link or test.material_file_path)
+    if has_material:
+        test_info += "\n\n💡 <b>Совет:</b>\nЕсли есть сомнения по теме, сначала прочти прикреплённые обучающие материалы, а потом переходи к тесту"
+    
+    # Согласно макету 4.5: отправляем фото с текстом в одном сообщении, если есть
+    has_photo = test.material_file_path and test.material_type == "photo"
+    
+    # Показываем индикатор загрузки для быстрого отклика
+    await callback.answer()
+    
+    if has_photo:
+        try:
+            # Сначала отправляем новое сообщение с фото теста, затем удаляем старое
+            sent_message = await callback.bot.send_photo(
+                chat_id=callback.message.chat.id,
+                photo=test.material_file_path,
+                caption=test_info,
+                parse_mode="HTML",
+                reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+            )
+            # Удаляем старое сообщение после отправки нового (не ждем завершения)
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+        except Exception as photo_error:
+            logger.warning(f"Не удалось отправить фото к тесту {test_id}: {photo_error}")
+            # Fallback: отправляем только текст
+            try:
+                if callback.message.photo:
+                    # Если исходное сообщение - фото, удаляем и отправляем новое
+                    try:
+                        await callback.message.delete()
+                    except Exception:
+                        pass
+                    await callback.message.answer(
+                        test_info,
+                        parse_mode="HTML",
+                        reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+                    )
+                else:
+                    # Если текстовое, редактируем
+                    await callback.message.edit_text(
+                        test_info,
+                        parse_mode="HTML",
+                        reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+                    )
+            except Exception:
+                # Если не удалось отредактировать, отправляем новое сообщение
+                await callback.message.answer(
+                    test_info,
+                    parse_mode="HTML",
+                    reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+                )
+    else:
+        # Если фото теста нет, проверяем тип исходного сообщения
+        if callback.message.photo:
+            # Если исходное сообщение - фото (баннер "Мои тесты"), удаляем и отправляем новое текстовое
+            # Сначала отправляем новое, затем удаляем старое для быстрого отклика
+            sent_message = await callback.message.answer(
+                test_info,
+                parse_mode="HTML",
+                reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+            )
+            # Удаляем старое сообщение после отправки нового
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+        else:
+            # Если текстовое сообщение, редактируем текст (быстро, без удаления)
+            try:
+                await callback.message.edit_text(
+                    test_info,
+                    parse_mode="HTML",
+                    reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+                )
+            except Exception:
+                # Если не удалось отредактировать, отправляем новое сообщение
+                await callback.message.answer(
+                    test_info,
+                    parse_mode="HTML",
+                    reply_markup=get_test_start_keyboard(test_id, bool(existing_result), has_material)
+                )
     
     await state.update_data(selected_test_id=test_id)
     await state.set_state(TestTakingStates.waiting_for_test_start)
-    
-    await callback.answer()
     
     log_user_action(
         callback.from_user.id, 
@@ -1415,8 +2257,15 @@ async def process_trajectory_tests_shortcut(callback: CallbackQuery, state: FSMC
         await callback.answer()
         return
     
+    # Пагинация: показываем по 5 тестов на страницу
+    page = 0
+    per_page = 5
+    start_index = page * per_page
+    end_index = start_index + per_page
+    page_tests = available_tests[start_index:end_index]
+    
     tests_list = []
-    for i, test in enumerate(available_tests, 1):
+    for i, test in enumerate(page_tests, 1):
         stage_info = ""
         if test.stage_id:
             stage = await session.execute(select(InternshipStage).where(InternshipStage.id == test.stage_id))
@@ -1426,22 +2275,31 @@ async def process_trajectory_tests_shortcut(callback: CallbackQuery, state: FSMC
         
         materials_info = " | 📚 Есть материалы" if test.material_link else ""
         
+        # Номер с учетом глобального индекса
+        global_index = start_index + i
         tests_list.append(
-            f"<b>{i}. {test.name}</b>\n"
+            f"<b>{global_index}. {test.name}</b>\n"
             f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}\n"
             f"   📝 {test.description or 'Описание не указано'}"
         )
     
     tests_display = "\n\n".join(tests_list)
     
+    # Информация о странице
+    total_pages = (len(available_tests) + per_page - 1) // per_page
+    page_info = f"\n\n📄 Страница {page+1}/{total_pages}" if total_pages > 1 else ""
+    
     await callback.message.edit_text(
         f"🗺️ <b>Тесты траектории</b>\n\n"
-        f"У тебя есть доступ к <b>{len(available_tests)}</b> тестам:\n\n"
+        f"У тебя есть доступ к <b>{len(available_tests)}</b> тестам:{page_info}\n\n"
         f"{tests_display}\n\n"
         "💡 <b>Рекомендация:</b> Изучите материалы перед прохождением теста!",
         parse_mode="HTML",
-        reply_markup=get_test_selection_for_taking_keyboard(available_tests)
+        reply_markup=get_test_selection_for_taking_keyboard(available_tests, page, per_page, "trajectory_tests_page")
     )
+    
+    # Сохраняем список тестов в state для пагинации
+    await state.update_data(trajectory_tests=available_tests, trajectory_page=page)
     
     # КРИТИЧЕСКИ ВАЖНО: Устанавливаем контекст "taking" для стажера
     await state.update_data(test_context='taking')
@@ -1459,8 +2317,17 @@ async def process_my_broadcast_tests_shortcut(callback: CallbackQuery, state: FS
         await callback.answer()
         return
     
+    # Получаем company_id с fallback на ensure_company_id для безопасности
+    company_id = user.company_id
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if company_id is None:
+        await callback.message.edit_text("❌ Не удалось определить компанию. Обратись к администратору.")
+        await callback.answer()
+        return
+    
     # Получаем тесты от рекрутера через рассылку + индивидуальные от наставника (исключая тесты траектории)
-    available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False, company_id=user.company_id)
+    available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False, company_id=company_id)
     
     if not available_tests:
         await callback.message.edit_text(
@@ -1468,34 +2335,129 @@ async def process_my_broadcast_tests_shortcut(callback: CallbackQuery, state: FS
             "Когда появятся, тебе придёт уведомление",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
         return
     
-    # Используем универсальную функцию для форматирования
-    message_text, keyboard = await format_my_tests_display(session, user, available_tests)
+    # Используем универсальную функцию для форматирования с пагинацией
+    page = 0
+    message_text, keyboard = await format_my_tests_display(session, user, available_tests, page=page)
     
-    await callback.message.edit_text(
-        message_text,
-        parse_mode="HTML",
-        reply_markup=keyboard
-    )
+    # Сохраняем список тестов в state для пагинации
+    await state.update_data(available_tests=available_tests, current_page=page)
+    
+    # Согласно макету 4.1: отправляем баннер SOVA для "Мои тесты", если настроен
+    from config import MY_TESTS_IMAGE_FILE_ID, MY_TESTS_IMAGE_URL, MY_TESTS_IMAGE_PATH
+    from aiogram.types import FSInputFile
+    
+    photo_source = None
+    if MY_TESTS_IMAGE_FILE_ID:
+        photo_source = MY_TESTS_IMAGE_FILE_ID
+    elif MY_TESTS_IMAGE_URL:
+        photo_source = MY_TESTS_IMAGE_URL
+    elif MY_TESTS_IMAGE_PATH:
+        try:
+            photo_source = FSInputFile(MY_TESTS_IMAGE_PATH)
+        except Exception as file_error:
+            logger.warning(f"Не удалось загрузить изображение для 'Мои тесты': {file_error}")
+    
+    # Показываем индикатор загрузки для быстрого отклика
+    await callback.answer()
+    
+    if photo_source:
+        try:
+            # Caption содержит только текст списка (без "Мои ТЕСТЫ" - оно на баннере)
+            # Сначала отправляем новое сообщение с баннером, затем удаляем старое
+            sent_message = await callback.bot.send_photo(
+                chat_id=callback.message.chat.id,
+                photo=photo_source,
+                caption=message_text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+            # Удаляем старое сообщение после отправки нового
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+        except Exception as photo_error:
+            logger.warning(f"Не удалось отправить изображение для 'Мои тесты': {photo_error}")
+            # Fallback: отправляем только текст
+            if callback.message.photo:
+                # Если исходное сообщение - фото, удаляем и отправляем новое
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
+                await callback.message.answer(
+                    message_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+            else:
+                # Если текстовое, редактируем
+                try:
+                    await callback.message.edit_text(
+                        message_text,
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
+                except Exception:
+                    # Если не удалось отредактировать, отправляем новое сообщение
+                    await callback.message.answer(
+                        message_text,
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
+    else:
+        # Если баннер не настроен, используем обычный текст
+        if callback.message.photo:
+            # Если исходное сообщение - фото, удаляем и отправляем новое текстовое
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.message.answer(
+                message_text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+        else:
+            # Если текстовое сообщение, редактируем текст
+            try:
+                await callback.message.edit_text(
+                    message_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+            except Exception:
+                # Если не удалось отредактировать, отправляем новое сообщение
+                await callback.message.answer(
+                    message_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
     
     # КРИТИЧЕСКИ ВАЖНО: Устанавливаем контекст и состояние
     await state.update_data(test_context='taking')
     await state.set_state(TestTakingStates.waiting_for_test_selection)
     
-    await callback.answer()
     log_user_action(callback.from_user.id, callback.from_user.username, "opened broadcast tests from notification")
 
 
 # ===== ФУНКЦИИ ДЛЯ ПРОХОЖДЕНИЯ ТРАЕКТОРИЙ =====
 
-async def is_test_from_trajectory(session: AsyncSession, user_id: int, test_id: int) -> bool:
+async def is_test_from_trajectory(session: AsyncSession, user_id: int, test_id: int, company_id: int = None) -> bool:
     """
-    Проверяет, является ли тест частью траектории или это тест вне траектории
+    Проверяет, является ли тест частью траектории или это тест вне траектории (с изоляцией по компании)
+    
+    Args:
+        session: Сессия БД
+        user_id: ID пользователя
+        test_id: ID теста
+        company_id: ID компании для изоляции
     
     Returns:
         True - тест из траектории (открыт через этапы)
@@ -1503,6 +2465,17 @@ async def is_test_from_trajectory(session: AsyncSession, user_id: int, test_id: 
     """
     try:
         from database.models import Role, user_roles, TraineeTestAccess
+        
+        # Получаем company_id пользователя для изоляции, если не передан
+        if company_id is None:
+            user = await get_user_by_id(session, user_id)
+            if user:
+                company_id = user.company_id
+        
+        # КРИТИЧЕСКАЯ ПРОВЕРКА: Если company_id все еще None, логируем и возвращаем False для безопасности
+        if company_id is None:
+            logger.warning(f"Не удалось определить company_id для пользователя {user_id} в is_test_from_trajectory. Возвращаем False для безопасности.")
+            return False
         
         # Получаем роль рекрутера
         recruiter_role_result = await session.execute(
@@ -1514,15 +2487,19 @@ async def is_test_from_trajectory(session: AsyncSession, user_id: int, test_id: 
             return False
         
         # Получаем запись доступа к тесту
-        access_result = await session.execute(
-            select(TraineeTestAccess).outerjoin(
-                user_roles, TraineeTestAccess.granted_by_id == user_roles.c.user_id
-            ).where(
-                TraineeTestAccess.trainee_id == user_id,
-                TraineeTestAccess.test_id == test_id,
-                TraineeTestAccess.is_active == True
-            )
+        access_query = select(TraineeTestAccess).outerjoin(
+            user_roles, TraineeTestAccess.granted_by_id == user_roles.c.user_id
+        ).where(
+            TraineeTestAccess.trainee_id == user_id,
+            TraineeTestAccess.test_id == test_id,
+            TraineeTestAccess.is_active == True
         )
+        
+        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
+        if company_id is not None:
+            access_query = access_query.where(TraineeTestAccess.company_id == company_id)
+        
+        access_result = await session.execute(access_query)
         access = access_result.scalar_one_or_none()
         
         if not access:
@@ -1530,16 +2507,26 @@ async def is_test_from_trajectory(session: AsyncSession, user_id: int, test_id: 
             return False
         
         # НОВАЯ ЛОГИКА: Проверяем, входит ли тест в траекторию (через этапы/сессии)
-        from database.models import LearningSession, TraineeSessionProgress, TraineeStageProgress, TraineeLearningPath, session_tests
+        from database.models import LearningSession, TraineeSessionProgress, TraineeStageProgress, TraineeLearningPath, session_tests, User, LearningPath
         
         # Получаем траекторию стажера
-        trainee_path_result = await session.execute(
-            select(TraineeLearningPath)
-            .where(
-                TraineeLearningPath.trainee_id == user_id,
-                TraineeLearningPath.is_active == True
-            )
+        trainee_path_query = select(TraineeLearningPath).join(
+            User, TraineeLearningPath.trainee_id == User.id
+        ).join(
+            LearningPath, TraineeLearningPath.learning_path_id == LearningPath.id
+        ).where(
+            TraineeLearningPath.trainee_id == user_id,
+            TraineeLearningPath.is_active == True
         )
+        
+        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
+        if company_id is not None:
+            trainee_path_query = trainee_path_query.where(
+                User.company_id == company_id,
+                LearningPath.company_id == company_id
+            )
+        
+        trainee_path_result = await session.execute(trainee_path_query)
         trainee_path = trainee_path_result.scalar_one_or_none()
         
         if not trainee_path:
@@ -1582,7 +2569,7 @@ async def check_and_notify_stage_completion(session: AsyncSession, user_id: int,
             # Это не стажер - пропускаем проверку траектории
             return ""
         
-        from database.models import LearningSession, LearningStage, session_tests, TestResult
+        from database.models import LearningSession, LearningStage, LearningPath, session_tests, TestResult
 
         # Получаем company_id для изоляции
         user = await get_user_by_id(session, user_id)
@@ -1595,15 +2582,22 @@ async def check_and_notify_stage_completion(session: AsyncSession, user_id: int,
             return ""  # Стажер не имеет назначенной траектории
 
         # Находим сессию, содержащую данный тест
-        session_result = await session.execute(
+        session_query = (
             select(LearningSession)
             .join(session_tests)
             .join(LearningStage, LearningSession.stage_id == LearningStage.id)
+            .join(LearningPath, LearningStage.learning_path_id == LearningPath.id)
             .where(
                 session_tests.c.test_id == test_id,
                 LearningStage.learning_path_id == trainee_path.learning_path_id
             )
         )
+        
+        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
+        if company_id is not None:
+            session_query = session_query.where(LearningPath.company_id == company_id)
+        
+        session_result = await session.execute(session_query)
         test_session = session_result.scalar_one_or_none()
 
         if not test_session:
@@ -1755,7 +2749,7 @@ async def send_stage_completion_notification(session: AsyncSession, trainee_id: 
                 InlineKeyboardButton(text="👥 Мои стажёры", callback_data="my_trainees")
             ],
             [
-                InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+                InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
             ]
         ])
 
@@ -1790,8 +2784,14 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
             await callback.message.edit_text("Пользователь не найден")
             return
 
-        # Получаем company_id для изоляции
+        # Получаем company_id с fallback на ensure_company_id для безопасности
         company_id = user.company_id
+        if company_id is None:
+            company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text("❌ Не удалось определить компанию. Обратись к администратору.")
+            await callback.answer()
+            return
         
         # Получаем траекторию стажера
         trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)

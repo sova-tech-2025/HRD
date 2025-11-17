@@ -1,4 +1,4 @@
-"""
+﻿"""
 Обработчики для прохождения траекторий стажерами.
 Включает просмотр траектории, выбор этапов, сессий и прохождение тестов.
 """
@@ -223,7 +223,7 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
         # Добавляем кнопку "Главное меню"
         keyboard_buttons.append([
             InlineKeyboardButton(
-                text="🏠 Главное меню",
+                text="≡ Главное меню",
                 callback_data="main_menu"
             )
         ])
@@ -374,7 +374,7 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
         # Добавляем кнопку "Главное меню"
         keyboard_buttons.append([
             InlineKeyboardButton(
-                text="🏠 Главное меню",
+                text="≡ Главное меню",
                 callback_data="main_menu"
             )
         ])
@@ -765,7 +765,7 @@ async def callback_take_test(callback: CallbackQuery, state: FSMContext, session
             ],
             [
                 InlineKeyboardButton(text="⬅️ Назад", callback_data=f"back_to_session:{session_id}"),
-                InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+                InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
             ]
         ])
 
@@ -1175,7 +1175,7 @@ async def callback_contact_mentor(callback: CallbackQuery, state: FSMContext, se
             mentor_info,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         

@@ -2418,6 +2418,12 @@ async def get_user_available_tests(session: AsyncSession, user_id: int, exclude_
         List[Test]: Список доступных тестов
     """
     try:
+        # Получаем company_id пользователя для изоляции, если не передан
+        if company_id is None:
+            user = await get_user_by_id(session, user_id)
+            if user:
+                company_id = user.company_id
+        
         # Получаем все тесты, к которым у пользователя есть доступ
         query = (
             select(Test)
@@ -2441,8 +2447,8 @@ async def get_user_available_tests(session: AsyncSession, user_id: int, exclude_
         if exclude_completed:
             filtered_tests = []
             for test in available_tests:
-                # Проверяем, есть ли успешный результат прохождения
-                test_result = await get_user_test_result(session, user_id, test.id)
+                # Проверяем, есть ли успешный результат прохождения С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
+                test_result = await get_user_test_result(session, user_id, test.id, company_id=company_id)
                 if not (test_result and test_result.is_passed):
                     filtered_tests.append(test)
             return filtered_tests
@@ -2536,7 +2542,7 @@ async def get_user_broadcast_tests(session: AsyncSession, user_id: int, exclude_
         if exclude_completed:
             filtered_tests = []
             for test in available_tests:
-                test_result = await get_user_test_result(session, user_id, test.id)
+                test_result = await get_user_test_result(session, user_id, test.id, company_id=company_id)
                 if not (test_result and test_result.is_passed):
                     filtered_tests.append(test)
             return filtered_tests
@@ -2771,50 +2777,71 @@ async def check_test_access(session: AsyncSession, user_id: int, test_id: int, c
                 return False
             
             # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Если тест из траектории, проверяем открытость этапа
-            from database.models import LearningSession, TraineeSessionProgress, TraineeStageProgress, TraineeLearningPath, session_tests
+            from database.models import LearningSession, TraineeSessionProgress, TraineeStageProgress, TraineeLearningPath, session_tests, User, LearningPath
             
-            # Проверяем, входит ли тест в траекторию
-            trainee_path_result = await session.execute(
+            # Проверяем, входит ли тест в траекторию С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
+            trainee_path_query = (
                 select(TraineeLearningPath)
+                .join(User, TraineeLearningPath.trainee_id == User.id)
+                .join(LearningPath, TraineeLearningPath.learning_path_id == LearningPath.id)
                 .where(
                     TraineeLearningPath.trainee_id == user_id,
                     TraineeLearningPath.is_active == True
                 )
             )
+            
+            # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
+            if company_id is not None:
+                trainee_path_query = trainee_path_query.where(
+                    User.company_id == company_id,
+                    LearningPath.company_id == company_id
+                )
+            
+            trainee_path_result = await session.execute(trainee_path_query)
             trainee_path = trainee_path_result.scalar_one_or_none()
             
             if trainee_path:
-                # Проверяем, входит ли тест в сессии траектории И этап открыт
-                trajectory_test_result = await session.execute(
-                    select(session_tests.c.test_id).join(
-                        LearningSession, LearningSession.id == session_tests.c.session_id
-                    ).join(
-                        TraineeSessionProgress, TraineeSessionProgress.session_id == LearningSession.id
-                    ).join(
-                        TraineeStageProgress, TraineeSessionProgress.stage_progress_id == TraineeStageProgress.id
-                    ).where(
+                # Проверяем, входит ли тест в сессии траектории И этап открыт С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
+                trajectory_test_query = (
+                    select(session_tests.c.test_id)
+                    .join(LearningSession, LearningSession.id == session_tests.c.session_id)
+                    .join(TraineeSessionProgress, TraineeSessionProgress.session_id == LearningSession.id)
+                    .join(TraineeStageProgress, TraineeSessionProgress.stage_progress_id == TraineeStageProgress.id)
+                    .join(LearningPath, TraineeStageProgress.trainee_path_id == trainee_path.id)
+                    .where(
                         TraineeStageProgress.trainee_path_id == trainee_path.id,
                         TraineeStageProgress.is_opened == True,  # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: только открытые этапы
                         session_tests.c.test_id == test_id
                     )
                 )
+                
+                # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
+                if company_id is not None:
+                    trajectory_test_query = trajectory_test_query.where(LearningPath.company_id == company_id)
+                
+                trajectory_test_result = await session.execute(trajectory_test_query)
                 trajectory_test = trajectory_test_result.first()
                 
                 # Если тест из траектории, но этап закрыт - проверяем источник доступа
                 if trajectory_test is None:
-                    # Проверяем, входит ли тест в траекторию вообще (для диагностики)
-                    all_trajectory_test_result = await session.execute(
-                        select(session_tests.c.test_id).join(
-                            LearningSession, LearningSession.id == session_tests.c.session_id
-                        ).join(
-                            TraineeSessionProgress, TraineeSessionProgress.session_id == LearningSession.id
-                        ).join(
-                            TraineeStageProgress, TraineeSessionProgress.stage_progress_id == TraineeStageProgress.id
-                        ).where(
+                    # Проверяем, входит ли тест в траекторию вообще (для диагностики) С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
+                    all_trajectory_test_query = (
+                        select(session_tests.c.test_id)
+                        .join(LearningSession, LearningSession.id == session_tests.c.session_id)
+                        .join(TraineeSessionProgress, TraineeSessionProgress.session_id == LearningSession.id)
+                        .join(TraineeStageProgress, TraineeSessionProgress.stage_progress_id == TraineeStageProgress.id)
+                        .join(LearningPath, TraineeStageProgress.trainee_path_id == trainee_path.id)
+                        .where(
                             TraineeStageProgress.trainee_path_id == trainee_path.id,
                             session_tests.c.test_id == test_id
                         )
                     )
+                    
+                    # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
+                    if company_id is not None:
+                        all_trajectory_test_query = all_trajectory_test_query.where(LearningPath.company_id == company_id)
+                    
+                    all_trajectory_test_result = await session.execute(all_trajectory_test_query)
                     all_trajectory_test = all_trajectory_test_result.first()
                     
                     if all_trajectory_test is not None:
@@ -2832,14 +2859,24 @@ async def check_test_access(session: AsyncSession, user_id: int, test_id: int, c
         
         # Для сотрудников - проверяем доступ через тесты от рекрутера
         elif "Сотрудник" in role_names:
-            # Проверяем, что тест создан рекрутером
-            test = await get_test_by_id(session, test_id)
+            # Проверяем, что тест создан рекрутером С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
+            test = await get_test_by_id(session, test_id, company_id=company_id)
             if not test:
+                return False
+            
+            # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: тест должен принадлежать той же компании
+            if company_id is not None and test.company_id != company_id:
+                logger.warning(f"Попытка доступа сотрудника {user_id} к тесту {test_id} другой компании")
                 return False
                 
             # Получаем создателя теста
             creator = await get_user_by_id(session, test.creator_id)
             if not creator:
+                return False
+            
+            # Проверяем, что создатель из той же компании
+            if company_id is not None and creator.company_id != company_id:
+                logger.warning(f"Создатель теста {test_id} из другой компании")
                 return False
                 
             creator_roles = await get_user_roles(session, creator.id)
@@ -2848,8 +2885,17 @@ async def check_test_access(session: AsyncSession, user_id: int, test_id: int, c
             # Доступ есть, если тест создан рекрутером
             return "Рекрутер" in creator_role_names
         
-        # Для других ролей (наставники, рекрутеры) - полный доступ
+        # Для других ролей (наставники, рекрутеры, руководители) - проверяем изоляцию по компании
         else:
+            # Проверяем, что тест принадлежит той же компании
+            if company_id is not None:
+                test = await get_test_by_id(session, test_id, company_id=company_id)
+                if not test:
+                    return False
+                # Дополнительная проверка изоляции
+                if test.company_id != company_id:
+                    logger.warning(f"Попытка доступа пользователя {user_id} к тесту {test_id} другой компании")
+                    return False
             return True
             
     except Exception as e:
@@ -3183,9 +3229,9 @@ async def send_test_notification(bot, trainee_tg_id: int, test_name: str, mentor
         
         # Создаем клавиатуру с кнопками
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Перейти к тесту", callback_data=f"take_test:{test_id}")],
+            [InlineKeyboardButton(text="Перейти к тесту 🚀", callback_data=f"take_test:{test_id}")],
             [InlineKeyboardButton(text="📋 Мои тесты", callback_data="my_broadcast_tests_shortcut")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ]) if test_id else None
         
         await bot.send_message(
@@ -3247,12 +3293,12 @@ async def send_broadcast_notification(bot, user_tg_id: int, broadcast_script: st
         keyboard = []
         
         if test_id:
-            keyboard.append([InlineKeyboardButton(text="🚀 Перейти к тесту", callback_data=f"take_test:{test_id}")])
+            keyboard.append([InlineKeyboardButton(text="Перейти к тесту 🚀", callback_data=f"take_test:{test_id}")])
         
         if broadcast_material_id:
-            keyboard.append([InlineKeyboardButton(text="📚 Материалы", callback_data=f"broadcast_material:{broadcast_material_id}")])
+            keyboard.append([InlineKeyboardButton(text="Материалы 📚", callback_data=f"broadcast_material:{broadcast_material_id}")])
         
-        keyboard.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+        keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
         
         # 3. Отправляем текст с кнопками
         await bot.send_message(
@@ -3721,29 +3767,27 @@ async def send_notification_about_activation(session: AsyncSession, bot, user_id
             work_object_name = work_object.name
         
         # Формируем уведомление в зависимости от роли
-        if role_name == "Стажер":
-            notification_text = f"""✔️Доступ активирован
-Добро пожаловать в команду!
+        details_lines = [
+            f'Твоя роль: "{role_name}"',
+            f'Твоя группа: "{group_name}"'
+        ]
 
-👑Твоя Роль: {role_name}
-🗂️Твоя Группа: {group_name}
-📍1️⃣Твой Объект стажировки: {internship_object_name}
-📍2️⃣Твой Объект работы: {work_object_name}
+        if role_name == "Стажер" and internship_object_name != "Не назначен":
+            details_lines.append(f'Объект стажировки: "{internship_object_name}"')
 
-Совсем скоро тебе назначат наставника"""
-        else:
-            # Для Сотрудника, Рекрутера, Управляющего
-            notification_text = f"""✔️Доступ активирован
-Добро пожаловать в команду!
+        details_lines.append(f'Объект работы: "{work_object_name}"')
 
-👑Твоя Роль: {role_name}
-🗂️Твоя Группа: {group_name}
-📍2️⃣Твой Объект работы: {work_object_name}"""
+        notification_text = (
+            "✅Доступ активирован\n\n"
+            "Добро пожаловать в команду!\n\n"
+            "━━━━━━━━━━━━\n\n"
+            + "\n".join(details_lines)
+        )
 
         # Создаем клавиатуру с кнопкой "Главное меню"
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ])
 
         await bot.send_message(chat_id=user.tg_id, text=notification_text, parse_mode="HTML", reply_markup=keyboard)
@@ -8267,9 +8311,9 @@ async def broadcast_test_to_groups(session: AsyncSession, test_id: int, group_id
                             insert(TraineeTestAccess).values(new_accesses)
                         )
                         await session.commit()
-                        logger.info(f"Массово создано {len(new_accesses)} новых доступов к тесту {test_id}")
+                        logger.info(f"Массово создано {len(new_accesses)} новых доступов к тесту {test_id} для пользователей: {[acc['trainee_id'] for acc in new_accesses[:5]]}{'...' if len(new_accesses) > 5 else ''}")
                     else:
-                        logger.info(f"Все доступы к тесту {test_id} уже существуют для выбранных пользователей")
+                        logger.info(f"Все доступы к тесту {test_id} уже существуют для выбранных пользователей ({len(final_users)} пользователей)")
                 else:
                     logger.warning(f"Список пользователей для рассылки пуст")
                     
@@ -9915,9 +9959,9 @@ async def create_default_company(session: AsyncSession) -> Optional[Company]:
         now = datetime.now()
         default_company = Company(
             id=1,
-            name="Компания по умолчанию",
-            description="Компания для существующих пользователей до внедрения системы компаний",
-            invite_code="DEFAULT001",
+            name='Сеть пекарен "КЕКС"',
+            description="Сеть пекарен",
+            invite_code="keksbakery",
             subscribe=True,
             trial=False,
             start_date=now,

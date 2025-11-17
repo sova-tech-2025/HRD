@@ -169,20 +169,34 @@ async def cmd_list_tests(message: Message, state: FSMContext, session: AsyncSess
         )
         return
 
+    # Пагинация: показываем по 5 тестов на страницу
+    page = 0
+    per_page = 5
+    start_index = page * per_page
+    end_index = start_index + per_page
+    page_tests = tests[start_index:end_index]
+    
     tests_list = "\n\n".join([
-        f"<b>{i+1}. {test.name}</b>\n"
+        f"<b>{start_index + i+1}. {test.name}</b>\n"
         f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
         f"   📅 Создан: {test.created_date.strftime('%d.%m.%Y')}\n"
         f"   👤 Создатель: {await get_creator_name(session, test.creator_id)}"
-        for i, test in enumerate(tests)
+        for i, test in enumerate(page_tests)
     ])
     
+    total_pages = (len(tests) + per_page - 1) // per_page
+    page_info = f"\n\n📄 Страница {page+1}/{total_pages}" if total_pages > 1 else ""
+    
+    message_text = f"📋 <b>Список доступных тестов</b>\n\n{tests_list}{page_info}\n\nВыбери тест для просмотра и предоставления доступа:"
+    
     await message.answer(
-        f"📋 <b>Список доступных тестов</b>\n\n{tests_list}\n\n"
-        f"Выбери тест для просмотра и предоставления доступа:",
+        message_text,
         parse_mode="HTML",
-        reply_markup=get_simple_test_selection_keyboard(tests)
+        reply_markup=get_simple_test_selection_keyboard(tests, page, per_page, "all")
     )
+    
+    # Сохраняем в state для пагинации
+    await state.update_data(current_tests=tests, current_filter="all", current_page=page)
 
 
 # =================================
@@ -268,20 +282,34 @@ async def callback_list_tests(callback: CallbackQuery, state: FSMContext, sessio
             )
             return
         
+        # Пагинация: показываем по 5 тестов на страницу
+        page = 0
+        per_page = 5
+        start_index = page * per_page
+        end_index = start_index + per_page
+        page_tests = tests[start_index:end_index]
+        
         tests_list = "\n\n".join([
-            f"<b>{i+1}. {test.name}</b>\n"
+            f"<b>{start_index + i+1}. {test.name}</b>\n"
             f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
             f"   📅 Создан: {test.created_date.strftime('%d.%m.%Y')}\n"
             f"   👤 Создатель: {await get_creator_name(session, test.creator_id)}"
-            for i, test in enumerate(tests)
+            for i, test in enumerate(page_tests)
         ])
         
+        total_pages = (len(tests) + per_page - 1) // per_page
+        page_info = f"\n\n📄 Страница {page+1}/{total_pages}" if total_pages > 1 else ""
+        
+        message_text = f"📋 <b>Список доступных тестов</b>\n\n{tests_list}{page_info}\n\nВыбери тест для просмотра и предоставления доступа:"
+        
         await callback.message.edit_text(
-            f"📋 <b>Список доступных тестов</b>\n\n{tests_list}\n\n"
-            f"Выбери тест для просмотра и предоставления доступа:",
+            message_text,
             parse_mode="HTML",
-            reply_markup=get_simple_test_selection_keyboard(tests)
+            reply_markup=get_simple_test_selection_keyboard(tests, page, per_page, "all")
         )
+        
+        # Сохраняем в state для пагинации
+        await state.update_data(current_tests=tests, current_filter="all", current_page=page)
         
         log_user_action(user.tg_id, "list_tests", "Открыт список тестов через инлайн кнопку")
         
@@ -965,18 +993,30 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
         # УНИВЕРСАЛЬНО: Любая роль из "Мои тесты 📋" с доступом к тесту
         existing_result = await get_user_test_result(session, user.id, test_id, company_id=user.company_id)
         
-        test_info_for_user = f"""📌 <b>{test.name}</b>
+        # Согласно макету 4.5: отправляем фото, если есть
+        has_photo = test.material_file_path and test.material_type == "photo"
+        if has_photo:
+            try:
+                await callback.bot.send_photo(
+                    chat_id=callback.message.chat.id,
+                    photo=test.material_file_path
+                )
+            except Exception as photo_error:
+                from utils.logger import logger
+                logger.warning(f"Не удалось отправить фото к тесту {test_id}: {photo_error}")
+        
+        # Формируем текст карточки теста согласно макету 4.5
+        test_info_for_user = f"""<b>{test.name}</b>
 
-<b>Порог:</b> {test.threshold_score:.1f}/{test.max_score:.1f} б.
+{test.description if test.description else ''}
 
-{test.description or 'Описание отсутствует'}
-
+💡 <b>Совет:</b>
 Если есть сомнения по теме, сначала прочти прикреплённые обучающие материалы, а потом переходи к тесту"""
         
         await callback.message.edit_text(
             test_info_for_user,
             parse_mode="HTML",
-            reply_markup=get_test_start_keyboard(test_id, bool(existing_result))
+            reply_markup=get_test_start_keyboard(test_id, bool(existing_result), bool(test.material_link or test.material_file_path))
         )
         
         # Устанавливаем состояние для корректной работы кнопки "Начать тест"
@@ -1994,21 +2034,121 @@ async def process_test_filter(callback: CallbackQuery, state: FSMContext, sessio
             reply_markup=get_test_filter_keyboard()
         )
     else:
+        # Пагинация: показываем по 5 тестов на страницу
+        page = 0
+        per_page = 5
+        start_index = page * per_page
+        end_index = start_index + per_page
+        page_tests = tests[start_index:end_index]
+        
         tests_list = "\n\n".join([
-            f"<b>{i+1}. {test.name}</b>\n"
+            f"<b>{start_index + i+1}. {test.name}</b>\n"
             f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
             f"   📅 Создан: {test.created_date.strftime('%d.%m.%Y')}\n"
             f"   👤 Создатель: {await get_creator_name(session, test.creator_id)}"
-            for i, test in enumerate(tests)
+            for i, test in enumerate(page_tests)
         ])
         
+        total_pages = (len(tests) + per_page - 1) // per_page
+        page_info = f"\n\n📄 Страница {page+1}/{total_pages}" if total_pages > 1 else ""
+        
+        message_text = f"{list_title}\n\n{tests_list}{page_info}\n\nВыбери тест для редактирования и управления:"
+        
         await callback.message.edit_text(
-            f"{list_title}\n\n{tests_list}\n\n"
-            f"Выбери тест для редактирования и управления:",
+            message_text,
             parse_mode="HTML",
-            reply_markup=get_simple_test_selection_keyboard(tests)
+            reply_markup=get_simple_test_selection_keyboard(tests, page, per_page, filter_type)
         )
+        
+        # Сохраняем список тестов в state для пагинации
+        await state.update_data(current_tests=tests, current_filter=filter_type)
+    
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("tests_list_page:"))
+async def callback_tests_list_pagination(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик пагинации списка тестов"""
+    try:
+        await callback.answer()
+        
+        # Парсим данные: tests_list_page:{filter_type}:{page}
+        parts = callback.data.split(":")
+        if len(parts) == 3:
+            filter_type = parts[1]
+            page = int(parts[2])
+        else:
+            filter_type = "all"
+            page = 0
+        
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Пользователь не найден.", show_alert=True)
+            return
+        
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        
+        # Получаем список тестов из state или заново
+        data = await state.get_data()
+        tests = data.get('current_tests')
+        
+        if not tests:
+            # Если нет в state, получаем заново
+            if filter_type == "my":
+                tests = await get_tests_by_creator(session, user.id, company_id=user.company_id)
+                list_title = "📋 <b>Список твоих тестов</b>"
+            else:  # all
+                tests = await get_all_active_tests(session, company_id)
+                list_title = "📋 <b>Список всех тестов в системе</b>"
+        else:
+            # Используем сохраненный список
+            if filter_type == "my":
+                list_title = "📋 <b>Список твоих тестов</b>"
+            else:
+                list_title = "📋 <b>Список всех тестов в системе</b>"
+        
+        if not tests:
+            await callback.message.edit_text(
+                f"{list_title}\n\nВ системе пока нет тестов.",
+                parse_mode="HTML",
+                reply_markup=get_test_filter_keyboard()
+            )
+            return
+        
+        # Пагинация
+        per_page = 5
+        start_index = page * per_page
+        end_index = start_index + per_page
+        page_tests = tests[start_index:end_index]
+        
+        tests_list = "\n\n".join([
+            f"<b>{start_index + i+1}. {test.name}</b>\n"
+            f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
+            f"   📅 Создан: {test.created_date.strftime('%d.%m.%Y')}\n"
+            f"   👤 Создатель: {await get_creator_name(session, test.creator_id)}"
+            for i, test in enumerate(page_tests)
+        ])
+        
+        total_pages = (len(tests) + per_page - 1) // per_page
+        page_info = f"\n\n📄 Страница {page+1}/{total_pages}" if total_pages > 1 else ""
+        
+        message_text = f"{list_title}\n\n{tests_list}{page_info}\n\nВыбери тест для редактирования и управления:"
+        
+        await callback.message.edit_text(
+            message_text,
+            parse_mode="HTML",
+            reply_markup=get_simple_test_selection_keyboard(tests, page, per_page, filter_type)
+        )
+        
+        # Обновляем state
+        await state.update_data(current_tests=tests, current_filter=filter_type, current_page=page)
+        
+        log_user_action(callback.from_user.id, "tests_list_pagination", f"Page: {page+1}, Filter: {filter_type}")
+        
+    except Exception as e:
+        await callback.answer("Произошла ошибка при переключении страницы", show_alert=True)
+        log_user_error(callback.from_user.id, "tests_list_pagination_error", str(e))
+
 
 @router.callback_query(F.data == "back_to_tests")
 async def process_back_to_tests(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
@@ -2035,19 +2175,40 @@ async def process_back_to_tests(callback: CallbackQuery, state: FSMContext, sess
                 parse_mode="HTML"
             )
         else:
+            # Пагинация: показываем по 5 тестов на страницу
+            page = 0
+            per_page = 5
+            start_index = page * per_page
+            end_index = start_index + per_page
+            page_tests = tests[start_index:end_index]
+            
             tests_list = "\n\n".join([
-                f"<b>{i+1}. {test.name}</b>\n"
+                f"<b>{start_index + i+1}. {test.name}</b>\n"
                 f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
                 f"   📅 Создан: {test.created_date.strftime('%d.%m.%Y')}\n"
                 f"   👤 Создатель: {await get_creator_name(session, test.creator_id)}"
-                for i, test in enumerate(tests)
+                for i, test in enumerate(page_tests)
             ])
+            
+            total_pages = (len(tests) + per_page - 1) // per_page
+            page_info = f"\n\n📄 Страница {page+1}/{total_pages}" if total_pages > 1 else ""
+            
+            message_text = f"📋 <b>Список доступных тестов</b>\n\n{tests_list}{page_info}\n\nВыбери тест для просмотра и предоставления доступа:"
+            
             await callback.message.edit_text(
-                f"📋 <b>Список доступных тестов</b>\n\n{tests_list}\n\n"
-                f"Выбери тест для просмотра и предоставления доступа:",
+                message_text,
                 parse_mode="HTML",
-                reply_markup=get_simple_test_selection_keyboard(tests)
+                reply_markup=get_simple_test_selection_keyboard(tests, page, per_page, "all")
             )
+            
+            # Сохраняем в state для пагинации
+            await state.update_data(current_tests=tests, current_filter="all", current_page=page)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "noop")
+async def callback_noop(callback: CallbackQuery):
+    """Обработчик для кнопок-заглушек (например, информация о странице)"""
     await callback.answer()
 
 # Обработка отмены операций

@@ -1,6 +1,9 @@
 import os
 import sys
+from pathlib import Path
+
 from dotenv import load_dotenv
+
 from utils.logger import logger
 
 load_dotenv()
@@ -51,3 +54,32 @@ INVITE_CODE_PREFIX = os.getenv("INVITE_CODE_PREFIX", "")
 
 # Дни предупреждения об окончании подписки
 SUBSCRIPTION_WARNING_DAYS = [int(d) for d in os.getenv("SUBSCRIPTION_WARNING_DAYS", "3,7,14").split(",")] 
+
+# =================================================================
+# МЕДИА РЕСУРСЫ
+# =================================================================
+
+_BASE_DIR = Path(__file__).resolve().parent
+_DEFAULT_MAIN_MENU_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "main_menu" / "main_menu.jpg"
+_DEFAULT_MY_TESTS_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "tests" / "my_tests_banner.jpg"
+
+MAIN_MENU_IMAGE_FILE_ID = os.getenv("MAIN_MENU_IMAGE_FILE_ID")
+MAIN_MENU_IMAGE_URL = os.getenv("MAIN_MENU_IMAGE_URL")
+
+_env_image_path = os.getenv("MAIN_MENU_IMAGE_PATH")
+if _env_image_path:
+    MAIN_MENU_IMAGE_PATH = str(Path(_env_image_path))
+elif _DEFAULT_MAIN_MENU_IMAGE_PATH.exists():
+    MAIN_MENU_IMAGE_PATH = str(_DEFAULT_MAIN_MENU_IMAGE_PATH)
+else:
+    MAIN_MENU_IMAGE_PATH = None
+MY_TESTS_IMAGE_FILE_ID = os.getenv("MY_TESTS_IMAGE_FILE_ID")
+MY_TESTS_IMAGE_URL = os.getenv("MY_TESTS_IMAGE_URL")
+
+_env_my_tests_image_path = os.getenv("MY_TESTS_IMAGE_PATH")
+if _env_my_tests_image_path:
+    MY_TESTS_IMAGE_PATH = str(Path(_env_my_tests_image_path))
+elif _DEFAULT_MY_TESTS_IMAGE_PATH.exists():
+    MY_TESTS_IMAGE_PATH = str(_DEFAULT_MY_TESTS_IMAGE_PATH)
+else:
+    MY_TESTS_IMAGE_PATH = None

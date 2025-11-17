@@ -1,4 +1,4 @@
-"""
+﻿"""
 Обработчики для редактора траекторий обучения.
 Включает редактирование траекторий, этапов, сессий и управление тестами.
 """
@@ -90,7 +90,7 @@ async def render_attestation_page_for_editor(session: AsyncSession, attestation_
     
     keyboard_buttons.extend([
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_trajectory_attestation:{path_id}")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
     ])
     
     return text, InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)

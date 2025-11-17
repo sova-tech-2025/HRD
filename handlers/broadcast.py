@@ -109,10 +109,12 @@ async def process_broadcast_script(message: Message, state: FSMContext, session:
             )
             return
         
-        if len(script_text) > 4000:
+        # Учитываем, что HTML теги и кнопки увеличивают длину сообщения
+        # Telegram лимит: 4096 символов, оставляем запас для форматирования
+        if len(script_text) > 3500:
             await message.answer(
                 "❌ Текст слишком длинный!\n\n"
-                "Максимальная длина: 4000 символов.\n"
+                "Максимальная длина: 3500 символов (с учётом форматирования).\n"
                 f"Твой текст: {len(script_text)} символов.\n\n"
                 "Сократи текст и попробуй ещё раз."
             )

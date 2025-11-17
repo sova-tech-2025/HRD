@@ -1,4 +1,4 @@
-from aiogram import Router, F
+﻿from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -138,7 +138,7 @@ async def cmd_my_mentor(message: Message, state: FSMContext, session: AsyncSessi
         f"<i>Если что-то непонятно по стажировке, сразу напиши наставнику, он подскажет тебе следующий шаг</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ])
     )
     
@@ -201,7 +201,7 @@ async def cmd_mentor_trainees(message: Message, state: FSMContext, session: Asyn
 
     # Добавляем кнопку главного меню
     keyboard.inline_keyboard.append([
-        InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+        InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
     ])
     
     await message.answer(
@@ -348,7 +348,7 @@ async def process_assignment_confirmation(callback: CallbackQuery, state: FSMCon
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🎯 Назначить еще одного наставника", callback_data="assign_another_mentor")],
                 [InlineKeyboardButton(text="👥 Список всех наставников", callback_data="view_all_mentors")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         
@@ -368,7 +368,7 @@ async def process_assignment_confirmation(callback: CallbackQuery, state: FSMCon
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔄 Попробовать еще раз", callback_data="assign_another_mentor")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         
@@ -391,7 +391,7 @@ async def process_cancel_assignment(callback: CallbackQuery, state: FSMContext):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🎯 Назначить наставника", callback_data="assign_another_mentor")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ])
     )
     await state.clear()
@@ -414,7 +414,7 @@ async def process_assign_another_mentor(callback: CallbackQuery, state: FSMConte
             "Новые стажеры появятся здесь после регистрации.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -448,7 +448,7 @@ async def show_mentors_list(callback: CallbackQuery, session: AsyncSession, page
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_mentors_menu")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         return
@@ -532,7 +532,7 @@ async def callback_view_mentor_detail(callback: CallbackQuery, state: FSMContext
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="⬅️ Назад к списку", callback_data="view_all_mentors")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -1178,7 +1178,7 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
         # Добавляем кнопки навигации
         keyboard.inline_keyboard.append([
             InlineKeyboardButton(text="👥 Мои стажеры", callback_data="my_trainees"),
-            InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
         ])
 
         await callback.message.edit_text(
@@ -1407,7 +1407,7 @@ async def process_my_trainees_callback(callback: CallbackQuery, session: AsyncSe
             "Обратись к рекрутеру для назначения стажеров.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -1447,7 +1447,7 @@ async def process_my_trainees_callback(callback: CallbackQuery, session: AsyncSe
 
     # Добавляем кнопку главного меню
     keyboard.inline_keyboard.append([
-        InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+        InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
     ])
     
     await callback.message.edit_text(
@@ -1497,7 +1497,7 @@ async def callback_open_first_stage(callback: CallbackQuery, session: AsyncSessi
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="👥 Мои стажеры", callback_data="my_trainees"),
-                InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+                InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
             ]
         ])
 
@@ -1534,7 +1534,7 @@ async def process_grant_test_access_callback(callback: CallbackQuery, state: FSM
             "Обратись к администратору.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -1550,7 +1550,7 @@ async def process_grant_test_access_callback(callback: CallbackQuery, state: FSM
             "Обратись к рекрутеру для назначения стажеров.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -1566,7 +1566,7 @@ async def process_grant_test_access_callback(callback: CallbackQuery, state: FSM
             "В системе нет активных тестов для назначения.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -1968,7 +1968,7 @@ async def process_assign_mentor_callback(callback: CallbackQuery, state: FSMCont
             "Обратись к администратору.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -1982,7 +1982,7 @@ async def process_assign_mentor_callback(callback: CallbackQuery, state: FSMCont
             "В настоящее время все зарегистрированные стажеры имеют назначенных наставников.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -2023,7 +2023,7 @@ async def process_new_trainees_list_callback(callback: CallbackQuery, session: A
             "Обратись к администратору.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -2040,7 +2040,7 @@ async def process_new_trainees_list_callback(callback: CallbackQuery, session: A
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="👨‍🏫 Назначить наставника", callback_data="assign_mentor")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -2065,7 +2065,7 @@ async def process_new_trainees_list_callback(callback: CallbackQuery, session: A
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👨‍🏫 Назначить наставника", callback_data="assign_mentor")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ])
     )
     await callback.answer()
@@ -2095,7 +2095,7 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
                 "Обратись к рекрутеру для назначения стажеров.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                    [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
                 ])
             )
             return
@@ -2127,7 +2127,7 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
 
         # Добавляем кнопку главного меню
         keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
         ])
 
         await callback.message.edit_text(
@@ -2256,7 +2256,7 @@ async def callback_confirm_trajectory_assignment(callback: CallbackQuery, state:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="👥 Мои стажеры", callback_data="my_trainees"),
-                    InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+                    InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
                 ]
             ])
 
@@ -2600,7 +2600,7 @@ async def callback_open_stage(callback: CallbackQuery, state: FSMContext, sessio
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="👥 Мои стажёры", callback_data="my_trainees"),
-                    InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+                    InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
                 ],
                 [
                     InlineKeyboardButton(text="⬅️ Назад к этапам", callback_data=f"manage_stages:{trainee_id}")
@@ -2816,7 +2816,7 @@ async def callback_confirm_manager_assignment(callback: CallbackQuery, state: FS
                 InlineKeyboardButton(text="👥 Мои стажеры", callback_data="my_trainees")
             ],
             [
-                InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+                InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
             ]
         ])
 
@@ -3226,7 +3226,7 @@ async def callback_confirm_attestation_assignment(callback: CallbackQuery, state
             "📨 Уведомления отправлены стажеру и руководителю.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         

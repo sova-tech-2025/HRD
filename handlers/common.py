@@ -1,9 +1,10 @@
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import MAIN_MENU_IMAGE_FILE_ID, MAIN_MENU_IMAGE_URL, MAIN_MENU_IMAGE_PATH
 from database.db import get_user_by_tg_id, get_user_roles, check_user_permission
 from handlers.auth import check_auth
 from keyboards.keyboards import format_help_message
@@ -47,13 +48,13 @@ async def format_profile_text(user, session: AsyncSession) -> str:
 
 ━━━━━━━━━━━━
 
-🗂️ <b>Статус:</b>
+🗂️ <b>Статус ▾</b>
 <b>Группа:</b> {groups_str}
 <b>Роль:</b> {primary_role}
 
 ━━━━━━━━━━━━
 
-📍 <b>Объект:</b>"""
+📍 <b>Объект ▾</b>"""
 
     # Добавляем информацию об объектах в зависимости от роли
     if primary_role == "Стажер":
@@ -119,7 +120,10 @@ async def cmd_profile(message: Message, state: FSMContext, session: AsyncSession
     
     # Используем универсальную функцию формирования профиля
     profile_text = await format_profile_text(user, session)
-    await message.answer(profile_text, parse_mode="HTML")
+    profile_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
+    ])
+    await message.answer(profile_text, parse_mode="HTML", reply_markup=profile_keyboard)
 
 @router.message(F.text.in_(["Мой профиль", "🦸🏻‍♂️ Мой профиль", "Мой профиль 🦸🏻‍♂️"]))
 async def button_profile(message: Message, state: FSMContext, session: AsyncSession):
@@ -163,14 +167,44 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext, session:
         # Получаем клавиатуру согласно роли
         from keyboards.keyboards import get_keyboard_by_role
         keyboard = get_keyboard_by_role(primary_role.name)
-        
-        # Отправляем новое сообщение с правильной клавиатурой (ReplyKeyboardMarkup нельзя использовать в edit_text)
-        await callback.message.answer(
-            "🏠 <b>Главное меню</b>\n\n"
-            "Используй команды бота или кнопки клавиатуры для навигации по системе.",
-            parse_mode="HTML",
-            reply_markup=keyboard
+
+        main_menu_text = (
+            "≡ Главное меню\n\n"
+            "Используй команды бота или кнопки клавиатуры для навигации по системе."
         )
+
+        # Отправляем изображение главного меню, если оно настроено
+        message_sent = False
+        photo_source = None
+        if MAIN_MENU_IMAGE_FILE_ID:
+            photo_source = MAIN_MENU_IMAGE_FILE_ID
+        elif MAIN_MENU_IMAGE_URL:
+            photo_source = MAIN_MENU_IMAGE_URL
+        elif MAIN_MENU_IMAGE_PATH:
+            try:
+                photo_source = FSInputFile(MAIN_MENU_IMAGE_PATH)
+            except Exception as file_error:
+                logger.warning(f"Не удалось загрузить изображение главного меню из файла: {file_error}")
+
+        if photo_source:
+            try:
+                await callback.message.answer_photo(
+                    photo=photo_source,
+                    caption=main_menu_text,
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+                message_sent = True
+            except Exception as photo_error:
+                logger.warning(f"Не удалось отправить изображение главного меню: {photo_error}")
+
+        if not message_sent:
+            # Отправляем новое сообщение с правильной клавиатурой (ReplyKeyboardMarkup нельзя использовать в edit_text)
+            await callback.message.answer(
+                main_menu_text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
         
         # Удаляем старое inline сообщение
         try:

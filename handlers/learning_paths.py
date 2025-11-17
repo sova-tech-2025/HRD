@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -2163,7 +2163,7 @@ async def render_attestation_page(session: AsyncSession, attestation_id: int, pa
     keyboard_buttons.extend([
         [InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"delete_attestation:{attestation_id}")],
         [InlineKeyboardButton(text="↩️ Назад к аттестациям", callback_data="back_to_attestations_list")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
     ])
     
     return text, InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
