@@ -1,27 +1,34 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 from sqlalchemy import select, and_, update
+import pytz
 
 from database.db import get_companies_with_expired_subscription, get_company_recruiters, async_session
 from database.models import Company
 from utils.logger import logger
+
+# Часовой пояс для scheduler (UTC+3)
+MOSCOW_TZ = pytz.timezone('Europe/Moscow')
 
 # Глобальная переменная для бота
 bot = None
 
 
 async def check_expired_subscriptions():
-    """Проверка и деактивация истекших подписок (ежедневно в 00:00)"""
+    """Проверка и деактивация истекших подписок (ежедневно в 00:00 МСК)"""
     logger.info("=== Starting subscription expiration check ===")
     
     try:
         async with async_session() as session:
+            # Получаем текущее время в часовом поясе Москвы
+            now_moscow = datetime.now(MOSCOW_TZ).replace(tzinfo=None)
+            
             # Получаем компании с истекшими подписками
             result = await session.execute(
                 select(Company).where(
                     and_(
                         Company.subscribe == True,
-                        Company.finish_date <= datetime.now(),
+                        Company.finish_date <= now_moscow,
                         Company.is_active == True
                     )
                 )
@@ -75,12 +82,13 @@ async def check_expired_subscriptions():
 
 
 async def notify_subscription_expiring():
-    """Уведомления о приближающемся окончании подписки (ежедневно в 10:00)"""
+    """Уведомления о приближающемся окончании подписки (ежедневно в 10:00 МСК)"""
     logger.info("=== Starting subscription expiration warnings ===")
     
     try:
         async with async_session() as session:
-            now = datetime.now()
+            # Получаем текущее время в часовом поясе Москвы
+            now = datetime.now(MOSCOW_TZ).replace(tzinfo=None)
             warning_periods = [3, 7, 14]  # дни до окончания
             
             total_notifications = 0
@@ -142,9 +150,9 @@ def start_scheduler(bot_instance):
     global bot
     bot = bot_instance
     
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(timezone=MOSCOW_TZ)
     
-    # Проверка истечения подписок - ежедневно в 00:00
+    # Проверка истечения подписок - ежедневно в 00:00 МСК
     scheduler.add_job(
         check_expired_subscriptions,
         'cron',
@@ -153,9 +161,9 @@ def start_scheduler(bot_instance):
         id='check_expired_subscriptions',
         replace_existing=True
     )
-    logger.info("Scheduled job: check_expired_subscriptions (daily at 00:00)")
+    logger.info("Scheduled job: check_expired_subscriptions (daily at 00:00 МСК)")
     
-    # Уведомления о приближении окончания - ежедневно в 10:00
+    # Уведомления о приближении окончания - ежедневно в 10:00 МСК
     scheduler.add_job(
         notify_subscription_expiring,
         'cron',
@@ -164,7 +172,7 @@ def start_scheduler(bot_instance):
         id='notify_subscription_expiring',
         replace_existing=True
     )
-    logger.info("Scheduled job: notify_subscription_expiring (daily at 10:00)")
+    logger.info("Scheduled job: notify_subscription_expiring (daily at 10:00 МСК)")
     
     scheduler.start()
     logger.info("📅 Scheduler started successfully")

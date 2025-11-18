@@ -89,34 +89,25 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
     
     tests_list = []
     for i, test in enumerate(page_tests, 1):
-        stage_info = ""
-        if test.stage_id:
-            stage = await session.execute(select(InternshipStage).where(InternshipStage.id == test.stage_id))
-            stage_obj = stage.scalar_one_or_none()
-            if stage_obj:
-                stage_info = f" | Этап: {stage_obj.name}"
-        
-        materials_info = " | 📚 Есть материалы" if test.material_link else ""
-        
         # Получаем company_id для изоляции
         company_id = user.company_id
         
-        # Получаем результат последнего прохождения для отображения статуса
+        # Получаем результат последнего прохождения
         test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
-        if test_result and test_result.is_passed:
-            status_info = f" | ✅ Пройден ({test_result.score:.1f}/{test_result.max_possible_score:.1f})"
-        else:
-            status_info = " | 📋 Доступен"
         
         # Номер с учетом глобального индекса
         global_index = start_index + i
-        tests_list.append(
-            f"<b>{global_index}. {test.name}</b>\n"
-            f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}{status_info}\n"
-            f"   📝 {test.description or 'Описание не указано'}"
-        )
+        test_line = f"#<b>{global_index}</b> <b>{test.name}</b>\n"
+        test_line += f"🎯 Порог прохождения: {test.threshold_score:.1f}/{test.max_score:.1f}\n"
+        
+        # Если тест был пройден, но не получен балл порога - показываем последнюю попытку
+        if test_result and not test_result.is_passed:
+            test_line += f"❌ Последняя попытка: {test_result.score:.1f}/{test_result.max_possible_score:.1f}\n"
+        
+        test_line += f"\n{test.description or 'Описание не указано'}"
+        tests_list.append(test_line)
     
-    tests_display = "\n\n".join(tests_list)
+    tests_display = "\n━━━━━━━━━━━━\n\n".join(tests_list)
     
     # Информация о странице
     total_pages = (len(available_tests) + per_page - 1) // per_page
@@ -124,9 +115,10 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
     
     await message.answer(
         f"🗺️ <b>Тесты траектории</b>\n\n"
-        f"У тебя есть доступ к <b>{len(available_tests)}</b> тестам:{page_info}\n\n"
+        f"Сейчас у тебя есть доступ к <b>{len(available_tests)}</b> тестам{page_info}\n"
+        f"━━━━━━━━━━━━\n\n"
         f"{tests_display}\n\n"
-        "💡 <b>Рекомендация:</b> Пройденные тесты можно пересдать для улучшения результата!",
+        "Выбери тест для прохождения:",
         parse_mode="HTML",
         reply_markup=get_test_selection_for_taking_keyboard(available_tests, page, per_page, "trajectory_tests_page")
     )
@@ -800,32 +792,23 @@ async def callback_trajectory_tests_pagination(callback: CallbackQuery, state: F
         
         tests_list = []
         for i, test in enumerate(page_tests, 1):
-            stage_info = ""
-            if test.stage_id:
-                stage = await session.execute(select(InternshipStage).where(InternshipStage.id == test.stage_id))
-                stage_obj = stage.scalar_one_or_none()
-                if stage_obj:
-                    stage_info = f" | Этап: {stage_obj.name}"
-            
-            materials_info = " | 📚 Есть материалы" if test.material_link else ""
-            
-            # Получаем результат последнего прохождения для отображения статуса
+            # Получаем результат последнего прохождения
             company_id = user.company_id
             test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
-            if test_result and test_result.is_passed:
-                status_info = f" | ✅ Пройден ({test_result.score:.1f}/{test_result.max_possible_score:.1f})"
-            else:
-                status_info = " | 📋 Доступен"
             
             # Номер с учетом глобального индекса
             global_index = start_index + i
-            tests_list.append(
-                f"<b>{global_index}. {test.name}</b>\n"
-                f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}{status_info}\n"
-                f"   📝 {test.description or 'Описание не указано'}"
-            )
+            test_line = f"#<b>{global_index}</b> <b>{test.name}</b>\n"
+            test_line += f"🎯 Порог прохождения: {test.threshold_score:.1f}/{test.max_score:.1f}\n"
+            
+            # Если тест был пройден, но не получен балл порога - показываем последнюю попытку
+            if test_result and not test_result.is_passed:
+                test_line += f"❌ Последняя попытка: {test_result.score:.1f}/{test_result.max_possible_score:.1f}\n"
+            
+            test_line += f"{test.description or 'Описание не указано'}"
+            tests_list.append(test_line)
         
-        tests_display = "\n\n".join(tests_list)
+        tests_display = "\n━━━━━━━━━━━━\n\n".join(tests_list)
         
         # Информация о странице
         total_pages = (len(available_tests) + per_page - 1) // per_page
@@ -833,9 +816,10 @@ async def callback_trajectory_tests_pagination(callback: CallbackQuery, state: F
         
         message_text = (
             f"🗺️ <b>Тесты траектории</b>\n\n"
-            f"У тебя есть доступ к <b>{len(available_tests)}</b> тестам:{page_info}\n\n"
+            f"Сейчас у тебя есть доступ к <b>{len(available_tests)}</b> тестам{page_info}\n"
+            f"━━━━━━━━━━━━\n\n"
             f"{tests_display}\n\n"
-            "💡 <b>Рекомендация:</b> Пройденные тесты можно пересдать для улучшения результата!"
+            "Выбери тест для прохождения:"
         )
         
         keyboard = get_test_selection_for_taking_keyboard(available_tests, page, per_page, "trajectory_tests_page")
@@ -1784,32 +1768,23 @@ async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, 
         
         tests_list = []
         for i, test in enumerate(page_tests, 1):
-            stage_info = ""
-            if test.stage_id:
-                stage = await session.execute(select(InternshipStage).where(InternshipStage.id == test.stage_id))
-                stage_obj = stage.scalar_one_or_none()
-                if stage_obj:
-                    stage_info = f" | Этап: {stage_obj.name}"
-            
-            materials_info = " | 📚 Есть материалы" if test.material_link else ""
-            
-            # Получаем результат последнего прохождения для отображения статуса
+            # Получаем результат последнего прохождения
             company_id = user.company_id
             test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
-            if test_result and test_result.is_passed:
-                status_info = f" | ✅ Пройден ({test_result.score:.1f}/{test_result.max_possible_score:.1f})"
-            else:
-                status_info = " | 📋 Доступен"
             
             # Номер с учетом глобального индекса
             global_index = start_index + i
-            tests_list.append(
-                f"<b>{global_index}. {test.name}</b>\n"
-                f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}{status_info}\n"
-                f"   📝 {test.description or 'Описание не указано'}"
-            )
+            test_line = f"#<b>{global_index}</b> <b>{test.name}</b>\n"
+            test_line += f"🎯 Порог прохождения: {test.threshold_score:.1f}/{test.max_score:.1f}\n"
+            
+            # Если тест был пройден, но не получен балл порога - показываем последнюю попытку
+            if test_result and not test_result.is_passed:
+                test_line += f"❌ Последняя попытка: {test_result.score:.1f}/{test_result.max_possible_score:.1f}\n"
+            
+            test_line += f"{test.description or 'Описание не указано'}"
+            tests_list.append(test_line)
         
-        tests_display = "\n\n".join(tests_list)
+        tests_display = "\n━━━━━━━━━━━━\n\n".join(tests_list)
         
         # Информация о странице
         total_pages = (len(available_tests) + per_page - 1) // per_page
@@ -1817,9 +1792,10 @@ async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, 
         
         await callback.message.edit_text(
             f"🗺️ <b>Тесты траектории</b>\n\n"
-            f"У тебя есть доступ к <b>{len(available_tests)}</b> тестам:{page_info}\n\n"
+            f"Сейчас у тебя есть доступ к <b>{len(available_tests)}</b> тестам{page_info}\n"
+            f"━━━━━━━━━━━━\n\n"
             f"{tests_display}\n\n"
-            "💡 <b>Рекомендация:</b> Изучи материалы перед прохождением теста!",
+            "Выбери тест для прохождения:",
             parse_mode="HTML",
             reply_markup=get_test_selection_for_taking_keyboard(available_tests, page, per_page, "trajectory_tests_page")
         )
@@ -2266,24 +2242,23 @@ async def process_trajectory_tests_shortcut(callback: CallbackQuery, state: FSMC
     
     tests_list = []
     for i, test in enumerate(page_tests, 1):
-        stage_info = ""
-        if test.stage_id:
-            stage = await session.execute(select(InternshipStage).where(InternshipStage.id == test.stage_id))
-            stage_obj = stage.scalar_one_or_none()
-            if stage_obj:
-                stage_info = f" | Этап: {stage_obj.name}"
-        
-        materials_info = " | 📚 Есть материалы" if test.material_link else ""
+        # Получаем результат последнего прохождения
+        company_id = user.company_id
+        test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
         
         # Номер с учетом глобального индекса
         global_index = start_index + i
-        tests_list.append(
-            f"<b>{global_index}. {test.name}</b>\n"
-            f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.{stage_info}{materials_info}\n"
-            f"   📝 {test.description or 'Описание не указано'}"
-        )
+        test_line = f"#<b>{global_index}</b> <b>{test.name}</b>\n"
+        test_line += f"🎯 Порог прохождения: {test.threshold_score:.1f}/{test.max_score:.1f}\n"
+        
+        # Если тест был пройден, но не получен балл порога - показываем последнюю попытку
+        if test_result and not test_result.is_passed:
+            test_line += f"❌ Последняя попытка: {test_result.score:.1f}/{test_result.max_possible_score:.1f}\n"
+        
+        test_line += f"\n{test.description or 'Описание не указано'}"
+        tests_list.append(test_line)
     
-    tests_display = "\n\n".join(tests_list)
+    tests_display = "\n━━━━━━━━━━━━\n\n".join(tests_list)
     
     # Информация о странице
     total_pages = (len(available_tests) + per_page - 1) // per_page
@@ -2291,9 +2266,10 @@ async def process_trajectory_tests_shortcut(callback: CallbackQuery, state: FSMC
     
     await callback.message.edit_text(
         f"🗺️ <b>Тесты траектории</b>\n\n"
-        f"У тебя есть доступ к <b>{len(available_tests)}</b> тестам:{page_info}\n\n"
+        f"Сейчас у тебя есть доступ к <b>{len(available_tests)}</b> тестам{page_info}\n"
+        f"━━━━━━━━━━━━\n\n"
         f"{tests_display}\n\n"
-        "💡 <b>Рекомендация:</b> Изучите материалы перед прохождением теста!",
+        "Выбери тест для прохождения:",
         parse_mode="HTML",
         reply_markup=get_test_selection_for_taking_keyboard(available_tests, page, per_page, "trajectory_tests_page")
     )
