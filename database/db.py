@@ -9178,8 +9178,8 @@ async def delete_user(session: AsyncSession, user_id: int, company_id: int = Non
             TraineeSessionProgress, AttestationResult, AttestationQuestionResult,
             TraineeAttestation, TraineeManager, TraineeTestAccess, Test, TestQuestion,
             Attestation, AttestationQuestion, LearningPath, LearningStage, LearningSession,
-            KnowledgeFolder, KnowledgeMaterial, Group, Object, user_roles, user_groups,
-            user_objects, session_tests
+            KnowledgeFolder, KnowledgeMaterial, Group, Object, Company, user_roles,
+            user_groups, user_objects, session_tests
         )
         
         # Проверяем существование пользователя
@@ -9415,7 +9415,15 @@ async def delete_user(session: AsyncSession, user_id: int, company_id: int = Non
         await session.execute(group_update_query.values(created_by_id=None))
         logger.info(f"Обнулен created_by_id для групп пользователя {user_id}")
         
-        # 18. Удаляем many-to-many связи
+        # 18. Обнуляем created_by_id для компаний, которые пользователь создавал
+        await session.execute(
+            update(Company)
+            .where(Company.created_by_id == user_id)
+            .values(created_by_id=None)
+        )
+        logger.info(f"Обнулен created_by_id для компаний пользователя {user_id}")
+        
+        # 19. Удаляем many-to-many связи
         await session.execute(
             delete(user_roles)
             .where(user_roles.c.user_id == user_id)
@@ -9434,7 +9442,7 @@ async def delete_user(session: AsyncSession, user_id: int, company_id: int = Non
         )
         logger.info(f"Удалены user_objects для пользователя {user_id}")
         
-        # 19. Удаляем самого пользователя
+        # 20. Удаляем самого пользователя
         await session.execute(
             delete(User)
             .where(User.id == user_id)

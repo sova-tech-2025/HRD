@@ -18,13 +18,14 @@ router = Router()
 @router.callback_query(F.data == "login_again")
 async def callback_login_again(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot):
     """Кнопка быстрого входа заново после истечения сессии"""
-    await cmd_login(callback.message, state, session, bot)
+    await cmd_login(callback.message, state, session, bot, tg_user=callback.from_user)
     await callback.answer()
 
 @router.message(Command("login"))
-async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, bot):
+async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, bot, tg_user=None):
     try:
-        user = await get_user_by_tg_id(session, message.from_user.id)
+        actor = tg_user or message.from_user
+        user = await get_user_by_tg_id(session, actor.id)
         
         if not user:
             # Для незарегистрированных пользователей показываем выбор: создать или присоединиться к компании
@@ -34,12 +35,12 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
                 "🏢 Выбери действие:",
                 reply_markup=get_company_selection_keyboard()
             )
-            log_user_action(message.from_user.id, message.from_user.username, "failed login attempt - not registered")
+            log_user_action(actor.id, actor.username, "failed login attempt - not registered")
             return
         
         if not user.is_active:
             await message.answer("Твой аккаунт деактивирован. Обратись к администратору.")
-            log_user_error(message.from_user.id, message.from_user.username, "login failed - account deactivated")
+            log_user_error(actor.id, actor.username, "login failed - account deactivated")
             return
         
         # Проверка наличия компании
@@ -48,7 +49,7 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
                 "❌ Ты не привязан ни к одной компании.\n\n"
                 "Обратись к администратору."
             )
-            log_user_error(message.from_user.id, message.from_user.username, "login failed - no company")
+            log_user_error(actor.id, actor.username, "login failed - no company")
             return
         
         # Проверка подписки компании (используем явный запрос вместо lazy loading)
@@ -58,7 +59,7 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
                 "❌ Подписка компании истекла (заморожена).\n\n"
                 "Обратись к администратору компании для продления подписки."
             )
-            log_user_error(message.from_user.id, message.from_user.username, "login failed - company subscription expired")
+            log_user_error(actor.id, actor.username, "login failed - company subscription expired")
             return
         
         # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
@@ -67,14 +68,14 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
                 "❌ Подписка компании истекла (заморожена).\n\n"
                 "Обратись к администратору компании для продления подписки."
             )
-            log_user_error(message.from_user.id, message.from_user.username, "login failed - company finish_date expired")
+            log_user_error(actor.id, actor.username, "login failed - company finish_date expired")
             return
         
         roles = await get_user_roles(session, user.id)
         
         if not roles:
             await message.answer("У тебя нет назначенных ролей. Обратись к рекрутеру.")
-            log_user_error(message.from_user.id, message.from_user.username, "login failed - no roles assigned")
+            log_user_error(actor.id, actor.username, "login failed - no roles assigned")
             return
         
         primary_role = roles[0].name
@@ -95,8 +96,8 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
         )
 
         log_user_action(
-            message.from_user.id,
-            message.from_user.username,
+            actor.id,
+            actor.username,
             "successful login",
             {"role": primary_role, "user_id": user.id, "company_id": user.company_id}
         )
@@ -104,7 +105,7 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
         # не очищаем состояние после успешного логина
         # await state.clear()
     except Exception as e:
-        log_user_error(message.from_user.id, message.from_user.username, "login error", e)
+        log_user_error(actor.id, actor.username, "login error", e)
         await message.answer("Произошла ошибка при входе в систему. Пожалуйста, попробуй позже.")
 
 async def check_auth(message: Message, state: FSMContext, session: AsyncSession) -> bool:
