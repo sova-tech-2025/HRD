@@ -819,7 +819,7 @@ async def process_more_questions_choice(callback: CallbackQuery, state: FSMConte
                 await state.update_data(editor_session_id=session_id)
             
             # Возвращаемся к списку вопросов
-            await _show_questions_list(callback.message, state, session, test_id)
+            await _show_questions_list(callback.message, state, session, test_id, tg_user=callback.from_user)
         else:
             # Создаем новый тест - переходим к настройке проходного балла
             total_score = sum(q['points'] for q in data.get('questions', []))
@@ -1414,9 +1414,10 @@ async def process_new_threshold(message: Message, state: FSMContext, session: As
     )
 
 
-async def _show_questions_list(message, state: FSMContext, session: AsyncSession, test_id: int):
+async def _show_questions_list(message, state: FSMContext, session: AsyncSession, test_id: int, tg_user=None):
     """Внутренняя функция для отображения списка вопросов"""
-    user = await get_user_by_tg_id(session, message.from_user.id)
+    actor = tg_user or message.from_user
+    user = await get_user_by_tg_id(session, actor.id)
     if not user:
         await message.answer("❌ Ты не зарегистрирован в системе.")
         return
@@ -1463,7 +1464,7 @@ async def _show_questions_list(message, state: FSMContext, session: AsyncSession
 async def process_manage_questions(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показывает список вопросов для управления"""
     test_id = int(callback.data.split(':')[1])
-    await _show_questions_list(callback.message, state, session, test_id)
+    await _show_questions_list(callback.message, state, session, test_id, tg_user=callback.from_user)
     await callback.answer()
 
 
@@ -1565,7 +1566,7 @@ async def move_question(callback: CallbackQuery, state: FSMContext, session: Asy
         q.question_number = i + 1
         
     # Обновляем список вопросов
-    await _show_questions_list(callback.message, state, session, test_id)
+    await _show_questions_list(callback.message, state, session, test_id, tg_user=callback.from_user)
     await callback.answer("Порядок вопросов изменен")
 
 
@@ -1813,7 +1814,7 @@ async def process_delete_question(callback: CallbackQuery, state: FSMContext, se
     )
     
     # Возвращаемся к списку вопросов
-    await _show_questions_list(callback.message, state, session, test_id)
+    await _show_questions_list(callback.message, state, session, test_id, tg_user=callback.from_user)
     await callback.answer()
 
 
@@ -1822,7 +1823,7 @@ async def back_to_question_list(callback: CallbackQuery, state: FSMContext, sess
     """Возврат к списку вопросов"""
     data = await state.get_data()
     test_id = data['test_id_to_edit']
-    await _show_questions_list(callback.message, state, session, test_id)
+    await _show_questions_list(callback.message, state, session, test_id, tg_user=callback.from_user)
     await callback.answer()
 
 
@@ -2842,7 +2843,7 @@ async def cancel_question_creation(callback: CallbackQuery, state: FSMContext, s
         # Восстанавливаем session_id после очистки, если был
         if session_id:
             await state.update_data(editor_session_id=session_id)
-        await _show_questions_list(callback.message, state, session, test_id)
+        await _show_questions_list(callback.message, state, session, test_id, tg_user=callback.from_user)
     elif questions:
         # Если создаем новый тест и уже есть добавленные вопросы - 
         # возвращаемся к выбору: добавить еще вопрос или завершить
