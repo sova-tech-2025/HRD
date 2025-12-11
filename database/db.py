@@ -2082,6 +2082,13 @@ async def assign_mentor(session: AsyncSession, mentor_id: int, trainee_id: int, 
             logger.error("Наставник не может быть наставником самому себе")
             return None
         
+        # Fallback: если company_id не передан, получаем из стажера для изоляции
+        if company_id is None:
+            trainee_temp = await session.execute(select(User).where(User.id == trainee_id))
+            trainee_temp_obj = trainee_temp.scalar_one_or_none()
+            if trainee_temp_obj and trainee_temp_obj.company_id:
+                company_id = trainee_temp_obj.company_id
+        
         # Проверяем существование пользователей с изоляцией
         mentor_query = select(User).where(User.id == mentor_id, User.is_active == True)
         if company_id is not None:
@@ -2130,13 +2137,20 @@ async def assign_mentor(session: AsyncSession, mentor_id: int, trainee_id: int, 
         existing_mentorship = existing.scalar_one_or_none()
         
         if existing_mentorship:
-            logger.warning(f"Стажер {trainee.full_name} уже имеет наставника. Переназначение...")
-            # Деактивируем старое наставничество с проверкой company_id
-            if company_id is not None and existing_mentorship.company_id != company_id:
-                logger.error(f"Наставничество {existing_mentorship.id} не принадлежит компании {company_id}")
-                return None
-            stmt = update(Mentorship).where(Mentorship.id == existing_mentorship.id).values(is_active=False)
-            await session.execute(stmt)
+            logger.warning(
+                f"Стажер {trainee.full_name} уже имеет наставника. Переназначение... "
+                f"(деактивируем все активные связи, вне зависимости от company_id)"
+            )
+            # Деактивируем все активные наставничества стажера (без фильтра company_id),
+            # чтобы убрать «мусорные» записи и не блокировать переназначение
+            await session.execute(
+                update(Mentorship)
+                .where(
+                    Mentorship.trainee_id == trainee_id,
+                    Mentorship.is_active == True
+                )
+                .values(is_active=False)
+            )
         
         mentorship = Mentorship(
             mentor_id=mentor_id,
@@ -5610,6 +5624,13 @@ async def assign_mentor_to_trainee(session: AsyncSession, trainee_id: int, mento
     try:
         from database.models import Mentorship, User
 
+        # Fallback: если company_id не передан, получаем из стажера для изоляции
+        if company_id is None:
+            trainee_temp = await session.execute(select(User).where(User.id == trainee_id))
+            trainee_temp_obj = trainee_temp.scalar_one_or_none()
+            if trainee_temp_obj and trainee_temp_obj.company_id:
+                company_id = trainee_temp_obj.company_id
+
         # Проверяем, что стажер существует и активен
         trainee_query = (
             select(User)
@@ -5659,19 +5680,28 @@ async def assign_mentor_to_trainee(session: AsyncSession, trainee_id: int, mento
             logger.error(f"Наставник {mentor_id} не найден или неактивен")
             return False
 
-        # Деактивируем существующие наставничества стажера
-        mentorship_update_query = (
-            update(Mentorship).where(
+        # Проверяем, нет ли уже активного наставничества
+        existing = await session.execute(
+            select(Mentorship).where(
                 Mentorship.trainee_id == trainee_id,
                 Mentorship.is_active == True
             )
         )
+        existing_mentorship = existing.scalar_one_or_none()
         
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            mentorship_update_query = mentorship_update_query.where(Mentorship.company_id == company_id)
-        
-        await session.execute(mentorship_update_query.values(is_active=False))
+        if existing_mentorship:
+            logger.warning(
+                f"Стажер {trainee.full_name} уже имеет наставника. Переназначение... "
+                f"(деактивируем все активные связи, вне зависимости от company_id)"
+            )
+            # Деактивируем все активные наставничества стажера (без фильтра company_id),
+            # чтобы убрать «мусорные» связи и не блокировать переназначение
+            await session.execute(
+                update(Mentorship).where(
+                    Mentorship.trainee_id == trainee_id,
+                    Mentorship.is_active == True
+                ).values(is_active=False)
+            )
 
         # Создаем новое наставничество
         mentorship = Mentorship(
@@ -9299,21 +9329,16 @@ async def delete_user(session: AsyncSession, user_id: int, company_id: int = Non
         logger.info(f"Удалены TraineeManager для пользователя {user_id}")
         
         # 8. Удаляем TraineeTestAccess
-        trainee_test_access_delete_query = (
+        # Удаляем ВСЕ записи TraineeTestAccess, где пользователь участвует (trainee/granted_by)
+        # Безопасность обеспечена проверкой принадлежности пользователя к компании на строке 9192
+        # Это также исправляет проблему с записями, где company_id IS NULL или некорректный
+        await session.execute(
             delete(TraineeTestAccess)
             .where(
                 (TraineeTestAccess.trainee_id == user_id) |
                 (TraineeTestAccess.granted_by_id == user_id)
             )
         )
-        
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            trainee_test_access_delete_query = trainee_test_access_delete_query.where(
-                TraineeTestAccess.company_id == company_id
-            )
-        
-        await session.execute(trainee_test_access_delete_query)
         logger.info(f"Удалены TraineeTestAccess для пользователя {user_id}")
         
         # 9. Удаляем TestResult
@@ -9324,7 +9349,10 @@ async def delete_user(session: AsyncSession, user_id: int, company_id: int = Non
         logger.info(f"Удалены TestResult для пользователя {user_id}")
         
         # 10. Удаляем Mentorship
-        mentorship_delete_query = (
+        # Удаляем ВСЕ записи Mentorship, где пользователь участвует (mentor/trainee/assigned_by)
+        # Безопасность обеспечена проверкой принадлежности пользователя к компании на строке 9192
+        # Это также исправляет проблему с записями, где company_id IS NULL или некорректный
+        await session.execute(
             delete(Mentorship)
             .where(
                 (Mentorship.mentor_id == user_id) |
@@ -9332,14 +9360,6 @@ async def delete_user(session: AsyncSession, user_id: int, company_id: int = Non
                 (Mentorship.assigned_by_id == user_id)
             )
         )
-        
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            mentorship_delete_query = mentorship_delete_query.where(
-                Mentorship.company_id == company_id
-            )
-        
-        await session.execute(mentorship_delete_query)
         logger.info(f"Удалены Mentorship для пользователя {user_id}")
         
         # 11. Обнуляем created_by_id для Test (тесты остаются в системе)
@@ -9457,6 +9477,7 @@ async def delete_user(session: AsyncSession, user_id: int, company_id: int = Non
         
     except Exception as e:
         logger.error(f"Ошибка удаления пользователя {user_id}: {e}")
+        await session.rollback()
         return False
 
 

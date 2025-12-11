@@ -317,9 +317,14 @@ async def process_assignment_confirmation(callback: CallbackQuery, state: FSMCon
     trainee_id = int(parts[2])
     
     user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
     
-    data = await state.get_data()
-    company_id = data.get('company_id')
+    # Получаем company_id с fallback на user.company_id для надежности
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
+    if not company_id:
+        company_id = user.company_id
     
     mentorship = await assign_mentor(session, mentor_id, trainee_id, user.id, bot, company_id)
     
@@ -743,8 +748,11 @@ async def callback_reassign_to_mentor(callback: CallbackQuery, state: FSMContext
             return
         
         # Выполняем переназначение
-        data = await state.get_data()
-        company_id = data.get('company_id')
+        # Получаем company_id с fallback на recruiter.company_id для надежности
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if not company_id:
+            company_id = recruiter.company_id
+        
         success = await assign_mentor(session, new_mentor_id, trainee_id, recruiter.id, bot, company_id)
         
         if success:

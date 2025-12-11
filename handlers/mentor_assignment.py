@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.db import (
     get_trainees_without_mentor, get_available_mentors_for_trainee,
-    assign_mentor_to_trainee, check_user_permission, get_user_by_tg_id
+    assign_mentor_to_trainee, check_user_permission, get_user_by_tg_id,
+    ensure_company_id
 )
 from handlers.auth import check_auth
 from states.states import MentorAssignmentStates
@@ -265,7 +266,16 @@ async def callback_confirm_mentor_assignment(callback: CallbackQuery, state: FSM
         trainee_id = state_data.get("selected_trainee_id")
         mentor_id = state_data.get("selected_mentor_id")
         recruiter_id = callback.from_user.id
-        company_id = state_data.get('company_id')
+
+        # Получаем company_id с fallback на recruiter.company_id для надежности
+        recruiter = await get_user_by_tg_id(session, recruiter_id)
+        if not recruiter:
+            await callback.message.edit_text("Ошибка: пользователь не найден")
+            return
+
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if not company_id:
+            company_id = recruiter.company_id
 
         if not trainee_id or not mentor_id:
             await callback.message.edit_text("Ошибка: данные не найдены")
