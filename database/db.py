@@ -2782,13 +2782,40 @@ async def check_test_access(session: AsyncSession, user_id: int, test_id: int, c
             )
             
             # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
+            # Если company_id не передан, получаем из пользователя для безопасности
+            if company_id is None:
+                user = await get_user_by_id(session, user_id)
+                if user:
+                    company_id = user.company_id
+            
+            # Применяем фильтр: либо company_id совпадает, либо NULL (старые записи)
+            # Но только если пользователь из той же компании
             if company_id is not None:
-                query = query.where(TraineeTestAccess.company_id == company_id)
+                # Ищем записи с company_id = переданный ИЛИ NULL (для совместимости со старыми данными)
+                query = query.where(
+                    (TraineeTestAccess.company_id == company_id) |
+                    (TraineeTestAccess.company_id.is_(None))
+                )
+            # Если company_id все еще None - это ошибка, запрещаем доступ для безопасности
+            else:
+                logger.warning(f"Не удалось определить company_id для проверки доступа пользователя {user_id} к тесту {test_id}")
+                return False
             
             result = await session.execute(query)
             access = result.scalar_one_or_none()
             if not access:
                 return False
+            
+            # КРИТИЧЕСКАЯ ПРОВЕРКА БЕЗОПАСНОСТИ: Если найдена NULL запись, проверяем принадлежность теста компании пользователя
+            # Это предотвращает доступ к тестам других компаний через старые NULL записи
+            if access.company_id is None:
+                test = await get_test_by_id(session, test_id, company_id=company_id)
+                if not test or test.company_id != company_id:
+                    logger.warning(
+                        f"Безопасность: NULL запись TraineeTestAccess найдена, но тест {test_id} "
+                        f"не принадлежит компании {company_id} пользователя {user_id}. Доступ запрещен."
+                    )
+                    return False
             
             # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Если тест из траектории, проверяем открытость этапа
             from database.models import LearningSession, TraineeSessionProgress, TraineeStageProgress, TraineeLearningPath, session_tests, User, LearningPath

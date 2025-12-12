@@ -876,11 +876,24 @@ async def process_test_selection_for_taking(callback: CallbackQuery, state: FSMC
     has_access = await check_test_access(session, user.id, test_id, company_id=company_id)
     
     if not has_access:
-        await callback.message.edit_text(
-            "❌ <b>Доступ запрещен</b>\n\n"
-            "У тебя нет доступа к этому тесту. Обратись к наставнику.",
-            parse_mode="HTML"
+        # Логируем проблему для диагностики
+        logger.warning(
+            f"Доступ запрещен: user_id={user.id}, test_id={test_id}, company_id={company_id}, "
+            f"user_company_id={user.company_id}"
         )
+        # Сообщение с кнопкой теста могло быть с фото (caption). edit_text на фото падает: "no text in the message to edit"
+        deny_text = (
+            "❌ <b>Доступ запрещен</b>\n\n"
+            "У тебя нет доступа к этому тесту. Обратись к наставнику."
+        )
+        try:
+            if callback.message.photo:
+                await callback.message.edit_caption(deny_text, parse_mode="HTML")
+            else:
+                await callback.message.edit_text(deny_text, parse_mode="HTML")
+        except Exception as e:
+            logger.warning(f"Не удалось отредактировать сообщение при отказе доступа: {e}")
+            await callback.message.answer(deny_text, parse_mode="HTML")
         await callback.answer()
         return
     
