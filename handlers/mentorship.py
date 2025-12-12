@@ -562,6 +562,12 @@ async def callback_mentor_assignment_management(callback: CallbackQuery, state: 
 @router.callback_query(F.data == "view_mentor_assignments")
 async def callback_view_mentor_assignments(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Просмотр текущих назначений наставников"""
+    await show_mentor_assignments(callback, session, 0)
+    await callback.answer()
+
+
+async def show_mentor_assignments(callback: CallbackQuery, session: AsyncSession, page: int = 0):
+    """Отображение назначений наставников с пагинацией"""
     try:
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
@@ -580,12 +586,28 @@ async def callback_view_mentor_assignments(callback: CallbackQuery, state: FSMCo
                     [InlineKeyboardButton(text="⬅️ Назад", callback_data="mentor_assignment_management")]
                 ])
             )
-            await callback.answer()
             return
+        
+        # Пагинация: по 5 наставников на страницу
+        per_page = 5
+        total_pages = (len(mentors) + per_page - 1) // per_page
+        
+        # Валидация номера страницы
+        if page < 0:
+            page = 0
+        if page >= total_pages and total_pages > 0:
+            page = total_pages - 1
+        
+        start_idx = page * per_page
+        end_idx = start_idx + per_page
+        page_mentors = mentors[start_idx:end_idx]
         
         assignments_text = "👥 <b>Текущие назначения наставников</b>\n\n"
         
-        for mentor in mentors:
+        if total_pages > 1:
+            assignments_text += f"📄 Страница <b>{page + 1}</b> из <b>{total_pages}</b>\n\n"
+        
+        for mentor in page_mentors:
             trainees = await get_mentor_trainees(session, mentor.id, company_id=user.company_id)
             work_object = mentor.work_object.name if mentor.work_object else "Не указан"
             
@@ -602,18 +624,46 @@ async def callback_view_mentor_assignments(callback: CallbackQuery, state: FSMCo
             
             assignments_text += "\n"
         
+        # Создаем клавиатуру с пагинацией
+        keyboard_buttons = []
+        
+        # Кнопки навигации
+        if total_pages > 1:
+            nav_buttons = []
+            if page > 0:
+                nav_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"assignments_page:{page - 1}"))
+            if page < total_pages - 1:
+                nav_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"assignments_page:{page + 1}"))
+            if nav_buttons:
+                keyboard_buttons.append(nav_buttons)
+        
+        # Кнопки назад и главное меню
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="⬅️ Назад", callback_data="mentor_assignment_management"),
+            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
+        ])
+        
         await callback.message.edit_text(
             assignments_text,
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад", callback_data="mentor_assignment_management")]
-            ])
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         )
-        await callback.answer()
         
     except Exception as e:
         await callback.answer("Ошибка при получении назначений")
         log_user_error(callback.from_user.id, "view_mentor_assignments_error", str(e))
+
+
+@router.callback_query(F.data.startswith("assignments_page:"))
+async def callback_assignments_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик пагинации назначений наставников"""
+    try:
+        page = int(callback.data.split(":")[1])
+        await show_mentor_assignments(callback, session, page)
+        await callback.answer()
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка пагинации")
+        log_user_error(callback.from_user.id, "assignments_page_error", f"Invalid page data: {callback.data}")
 
 
 @router.callback_query(F.data == "reassign_mentor")
