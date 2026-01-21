@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: hrbot_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5442:5442"
+    networks:
+      - hrbot_network
+
+  bot:
+    build: .
+    container_name: hrbot_app
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - ADMIN_INIT_TOKEN=${ADMIN_INIT_TOKEN:-}
+      - ADMIN_INIT_TOKENS=${ADMIN_INIT_TOKENS:-}
+      - MAX_ADMINS=${MAX_ADMINS:-5}
+      - ALLOW_AUTO_AUTH=${ALLOW_AUTO_AUTH:-true}
+      - ALLOW_AUTO_ROLE_ASSIGNMENT=${ALLOW_AUTO_ROLE_ASSIGNMENT:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEFAULT_ROLE=${DEFAULT_ROLE:-Стажер}
+      - MANAGER_IDS=${MANAGER_IDS:-}
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - hrbot_network
+
+volumes:
+  postgres_data:
+
+networks:
+  hrbot_network:
+    driver: bridge
