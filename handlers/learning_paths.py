@@ -1370,14 +1370,20 @@ async def callback_select_attestation(callback: CallbackQuery, state: FSMContext
             "🟡Сохранить траекторию с Аттестацией?"
         )
         
-        await callback.message.edit_text(
-            text,
-            reply_markup=get_trajectory_attestation_confirmation_keyboard(),
-            parse_mode="HTML"
-        )
-        
+        # Устанавливаем state ДО edit_text, чтобы избежать проблемы с "message is not modified"
         await state.set_state(LearningPathStates.waiting_for_attestation_confirmation)
-        
+
+        try:
+            await callback.message.edit_text(
+                text,
+                reply_markup=get_trajectory_attestation_confirmation_keyboard(),
+                parse_mode="HTML"
+            )
+        except Exception as edit_err:
+            # Игнорируем "message is not modified" - state уже установлен
+            if "message is not modified" not in str(edit_err):
+                raise
+
     except Exception as e:
         await callback.answer("Произошла ошибка")
         log_user_error(callback.from_user.id, "select_attestation_error", str(e))
@@ -1387,8 +1393,6 @@ async def callback_select_attestation(callback: CallbackQuery, state: FSMContext
 async def callback_confirm_attestation_and_proceed(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """ПУНКТ 50 ТЗ: Подтверждение аттестации кнопкой 'Да' и переход к выбору группы"""
     try:
-        await callback.answer()
-        
         # Получаем группы
         company_id = await ensure_company_id(session, state, callback.from_user.id)
         groups = await get_all_groups(session, company_id)
@@ -1398,7 +1402,8 @@ async def callback_confirm_attestation_and_proceed(callback: CallbackQuery, stat
         
         # ПУНКТ 52 ТЗ: Точное сообщение
         text = "Выбери группу наставников, которым будет доступна траектория"
-        
+
+        await callback.answer()  # Отвечаем на callback только после проверки групп
         await callback.message.edit_text(
             text,
             reply_markup=get_group_selection_keyboard(groups, page=0),
