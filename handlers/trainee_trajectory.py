@@ -185,7 +185,7 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
                 stages_info += f"{session_status_icon}<b>Сессия {session_progress.session.order_number}:</b> {session_progress.session.name}\n"
 
                 # Показываем тесты в сессии
-                for test in session_progress.session.tests:
+                for test_num, test in enumerate(session_progress.session.tests, 1):
                     # Определяем статус теста
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                     # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
@@ -195,7 +195,7 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
                         test_status_icon = "🟡"  # Этап открыт, тест доступен
                     else:
                         test_status_icon = "⛔️"  # Этап закрыт
-                    stages_info += f"{test_status_icon}<b>Тест {len([t for t in session_progress.session.tests if t.id <= test.id])}:</b> {test.name}\n"
+                    stages_info += f"{test_status_icon}<b>Тест {test_num}:</b> {test.name}\n"
             
             # Добавляем пустую строку после этапа
             stages_info += "\n"
@@ -336,7 +336,7 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
                 stages_info += f"{session_status_icon}<b>Сессия {session_progress.session.order_number}:</b> {session_progress.session.name}\n"
 
                 # Показываем тесты в сессии
-                for test in session_progress.session.tests:
+                for test_num, test in enumerate(session_progress.session.tests, 1):
                     # Определяем статус теста
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                     # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
@@ -346,7 +346,7 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
                         test_status_icon = "🟡"  # Этап открыт, тест доступен
                     else:
                         test_status_icon = "⛔️"  # Этап закрыт
-                    stages_info += f"{test_status_icon}<b>Тест {len([t for t in session_progress.session.tests if t.id <= test.id])}:</b> {test.name}\n"
+                    stages_info += f"{test_status_icon}<b>Тест {test_num}:</b> {test.name}\n"
             
             # Добавляем пустую строку после этапа
             stages_info += "\n"
@@ -486,7 +486,7 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
                 full_trajectory_info += f"{session_icon}<b>Сессия {session_progress.session.order_number}:</b> {session_progress.session.name}\n"
 
                 # Показываем тесты в сессии
-                for test in session_progress.session.tests:
+                for test_num, test in enumerate(session_progress.session.tests, 1):
                     # Определяем статус теста
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                     # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
@@ -496,8 +496,7 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
                         test_icon = "🟡"  # Этап открыт, тест доступен
                     else:
                         test_icon = "⛔️"  # Этап закрыт
-                    test_number = len([t for t in session_progress.session.tests if t.id <= test.id])
-                    full_trajectory_info += f"{test_icon}<b>Тест {test_number}:</b> {test.name}\n"
+                    full_trajectory_info += f"{test_icon}<b>Тест {test_num}:</b> {test.name}\n"
             
             # Добавляем пустую строку после этапа
             full_trajectory_info += "\n"
@@ -646,7 +645,7 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
 
                     # Показываем тесты в сессии
                     if hasattr(session_progress.session, 'tests') and session_progress.session.tests:
-                        for test in session_progress.session.tests:
+                        for test_num, test in enumerate(session_progress.session.tests, 1):
                             # Определяем статус теста
                             test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                             if test_result and test_result.is_passed:
@@ -655,8 +654,7 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
                                 test_icon = "🟡"  # Этап открыт, тест доступен
                             else:
                                 test_icon = "⛔️"  # Этап закрыт
-                            test_number = len([t for t in session_progress.session.tests if t.id <= test.id])
-                            full_trajectory_info += f"{test_icon}<b>Тест {test_number}:</b> {test.name}\n"
+                            full_trajectory_info += f"{test_icon}<b>Тест {test_num}:</b> {test.name}\n"
                     else:
                         full_trajectory_info += "   📝 Тесты не найдены\n"
                 else:
@@ -879,7 +877,7 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
                 full_trajectory_info += f"{session_icon}<b>Сессия {session_progress.session.order_number}:</b> {session_progress.session.name}\n"
 
                 # Показываем тесты в сессии
-                for test in session_progress.session.tests:
+                for test_num, test in enumerate(session_progress.session.tests, 1):
                     # Определяем статус теста
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
                     # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
@@ -889,8 +887,7 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
                         test_icon = "🟡"  # Этап открыт, тест доступен
                     else:
                         test_icon = "⛔️"  # Этап закрыт
-                    test_number = len([t for t in session_progress.session.tests if t.id <= test.id])
-                    full_trajectory_info += f"{test_icon}<b>Тест {test_number}:</b> {test.name}\n"
+                    full_trajectory_info += f"{test_icon}<b>Тест {test_num}:</b> {test.name}\n"
             
             # Добавляем пустую строку после этапа
             full_trajectory_info += "\n"

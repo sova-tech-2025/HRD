@@ -424,7 +424,7 @@ class LearningSession(Base):
     
     # Связи
     stage = relationship("LearningStage", back_populates="sessions")
-    tests = relationship("Test", secondary=session_tests, back_populates="sessions")
+    tests = relationship("Test", secondary=session_tests, back_populates="sessions", order_by=session_tests.c.order_number)
     
     def __repr__(self):
         return f"<LearningSession(id={self.id}, name={self.name}, order={self.order_number})>"

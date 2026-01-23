@@ -1315,7 +1315,7 @@ def generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_
             progress += f"{session_status_icon}<b>Сессия {session_progress.session.order_number}:</b> {session_progress.session.name}\n"
 
             # Получаем тесты сессии
-            for test in session_progress.session.tests:
+            for test_num, test in enumerate(session_progress.session.tests, 1):
                 # Определяем статус теста и процент прохождения
                 if test.id in test_results_dict:
                     result = test_results_dict[test.id]
@@ -1334,8 +1334,8 @@ def generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_
                     test_status = "🟡" if stage_progress.is_opened else "⛔️"
                     percentage_text = ""
 
-                progress += f"{test_status}<b>Тест {len([t for t in session_progress.session.tests if t.id <= test.id])}:</b> {test.name}{percentage_text}\n"
-        
+                progress += f"{test_status}<b>Тест {test_num}:</b> {test.name}{percentage_text}\n"
+
         # Добавляем пустую строку после этапа
         progress += "\n"
 
@@ -1409,7 +1409,7 @@ async def generate_trajectory_progress_with_attestation_status(session, trainee_
             progress += f"{session_status_icon}<b>Сессия {session_progress.session.order_number}:</b> {session_progress.session.name}\n"
 
             # Получаем тесты сессии
-            for test in session_progress.session.tests:
+            for test_num, test in enumerate(session_progress.session.tests, 1):
                 # Определяем статус теста и процент прохождения
                 if test.id in test_results_dict:
                     result = test_results_dict[test.id]
@@ -1426,8 +1426,8 @@ async def generate_trajectory_progress_with_attestation_status(session, trainee_
                     test_status = "🟡" if stage_progress.is_opened else "⛔️"
                     percentage_text = ""
 
-                progress += f"{test_status}<b>Тест {len([t for t in session_progress.session.tests if t.id <= test.id])}:</b> {test.name}{percentage_text}\n"
-        
+                progress += f"{test_status}<b>Тест {test_num}:</b> {test.name}{percentage_text}\n"
+
         # Добавляем пустую строку после этапа
         progress += "\n"
 

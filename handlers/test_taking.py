@@ -2815,13 +2815,13 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
                 stages_info += f"{session_status_icon}<b>Сессия {session_progress.session.order_number}:</b> {session_progress.session.name}\n"
 
                 # Показываем тесты в сессии
-                for test in session_progress.session.tests:
+                for test_num, test in enumerate(session_progress.session.tests, 1):
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
                     if test_result and test_result.is_passed:
                         test_status_icon = "✅"
                     else:
                         test_status_icon = "⛔️"
-                    stages_info += f"{test_status_icon}<b>Тест {len([t for t in session_progress.session.tests if t.id <= test.id])}:</b> {test.name}\n"
+                    stages_info += f"{test_status_icon}<b>Тест {test_num}:</b> {test.name}\n"
             
             # Добавляем пустую строку после этапа
             stages_info += "\n"
