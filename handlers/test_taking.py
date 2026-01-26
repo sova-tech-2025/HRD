@@ -26,6 +26,7 @@ from keyboards.keyboards import get_simple_test_selection_keyboard, get_test_sta
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import TestTakingStates
 from utils.logger import log_user_action, log_user_error, logger
+from utils.test_progress_formatters import get_test_status_icon, format_test_line
 from handlers.auth import check_auth
 
 router = Router()
@@ -2816,11 +2817,9 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
                 # Показываем тесты в сессии
                 for test_num, test in enumerate(session_progress.session.tests, 1):
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
-                    if test_result and test_result.is_passed:
-                        test_status_icon = "✅"
-                    else:
-                        test_status_icon = "⛔️"
-                    stages_info += f"{test_status_icon}<b>Тест {test_num}:</b> {test.name}\n"
+                    is_passed = bool(test_result and test_result.is_passed)
+                    icon = get_test_status_icon(is_passed, stage_progress.is_opened)
+                    stages_info += format_test_line(test_num, test.name, icon)
             
             # Добавляем пустую строку после этапа
             stages_info += "\n"
