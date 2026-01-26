@@ -1539,7 +1539,7 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
                     progress_info += f"{session_icon}<b>Сессия {session_progress.session.order_number}:</b> {session_progress.session.name}\n"
 
                     # Показываем тесты
-                    for test_item in session_progress.session.tests:
+                    for test_num, test_item in enumerate(session_progress.session.tests, 1):
                         # Определяем статус теста
                         test_result = await get_user_test_result(session, user.id, test_item.id, company_id=company_id)
                         if test_result and test_result.is_passed:
@@ -1548,13 +1548,12 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
                             test_icon = "🟡"  # Этап открыт, тест доступен
                         else:
                             test_icon = "⛔️"  # Этап закрыт
-                        test_number = len([t for t in session_progress.session.tests if t.id <= test_item.id])
                         # Добавляем процент для пройденных тестов
                         percentage_text = ""
                         if test_result and test_result.is_passed:
                             percentage = (test_result.score / test_result.max_possible_score) * 100
                             percentage_text = f" - {percentage:.0f}%"
-                        progress_info += f"{test_icon}<b>Тест {test_number}:</b> {test_item.name}{percentage_text}\n"
+                        progress_info += f"{test_icon}<b>Тест {test_num}:</b> {test_item.name}{percentage_text}\n"
                 
                 # Добавляем пустую строку после этапа
                 progress_info += "\n"
