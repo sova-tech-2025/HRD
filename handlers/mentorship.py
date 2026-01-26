@@ -30,6 +30,8 @@ from keyboards.keyboards import (
     get_mentors_main_keyboard, get_mentors_pagination_keyboard,
     get_mentor_assignment_management_keyboard, get_trainees_with_mentors_keyboard
 )
+from utils.test_progress_formatters import get_test_status_icon, format_test_with_percentage
+
 
 def get_days_word(days: int) -> str:
     """Получение правильного склонения слова 'день' в зависимости от числа"""
@@ -1316,25 +1318,12 @@ def generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_
 
             # Получаем тесты сессии
             for test_num, test in enumerate(session_progress.session.tests, 1):
-                # Определяем статус теста и процент прохождения
-                if test.id in test_results_dict:
-                    result = test_results_dict[test.id]
-                    # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
-                    if result.is_passed and stage_progress.is_opened:
-                        test_status = "✅"
-                        # Вычисляем процент прохождения
-                        percentage = (result.score / result.max_possible_score) * 100
-                        percentage_text = f" - {percentage:.0f}%"
-                    else:
-                        # Тест не пройден, или этап закрыт
-                        test_status = "🟡" if stage_progress.is_opened else "⛔️"
-                        percentage_text = ""
-                else:
-                    # Тест не проходился, статус зависит от открытости этапа
-                    test_status = "🟡" if stage_progress.is_opened else "⛔️"
-                    percentage_text = ""
-
-                progress += f"{test_status}<b>Тест {test_num}:</b> {test.name}{percentage_text}\n"
+                result = test_results_dict.get(test.id)
+                is_passed = bool(result and result.is_passed)
+                icon = get_test_status_icon(is_passed, stage_progress.is_opened)
+                score = result.score if result and is_passed else None
+                max_score = result.max_possible_score if result and is_passed else None
+                progress += format_test_with_percentage(test_num, test.name, icon, score, max_score)
 
         # Добавляем пустую строку после этапа
         progress += "\n"
@@ -1410,23 +1399,12 @@ async def generate_trajectory_progress_with_attestation_status(session, trainee_
 
             # Получаем тесты сессии
             for test_num, test in enumerate(session_progress.session.tests, 1):
-                # Определяем статус теста и процент прохождения
-                if test.id in test_results_dict:
-                    result = test_results_dict[test.id]
-                    # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
-                    if result.is_passed and stage_progress.is_opened:
-                        test_status = "✅"
-                        percentage = (result.score / result.max_possible_score) * 100
-                        percentage_text = f" - {percentage:.0f}%"
-                    else:
-                        # Тест не пройден, или этап закрыт
-                        test_status = "🟡" if stage_progress.is_opened else "⛔️"
-                        percentage_text = ""
-                else:
-                    test_status = "🟡" if stage_progress.is_opened else "⛔️"
-                    percentage_text = ""
-
-                progress += f"{test_status}<b>Тест {test_num}:</b> {test.name}{percentage_text}\n"
+                result = test_results_dict.get(test.id)
+                is_passed = bool(result and result.is_passed)
+                icon = get_test_status_icon(is_passed, stage_progress.is_opened)
+                score = result.score if result and is_passed else None
+                max_score = result.max_possible_score if result and is_passed else None
+                progress += format_test_with_percentage(test_num, test.name, icon, score, max_score)
 
         # Добавляем пустую строку после этапа
         progress += "\n"
