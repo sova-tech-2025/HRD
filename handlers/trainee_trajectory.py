@@ -19,6 +19,7 @@ from database.db import (
 from handlers.auth import check_auth
 from keyboards.keyboards import get_main_menu_keyboard, get_mentor_contact_keyboard
 from utils.logger import log_user_action, log_user_error
+from utils.test_progress_formatters import get_test_status_icon, format_test_line
 
 router = Router()
 
@@ -186,16 +187,10 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
 
                 # Показываем тесты в сессии
                 for test_num, test in enumerate(session_progress.session.tests, 1):
-                    # Определяем статус теста
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
-                    # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
-                    if test_result and test_result.is_passed and stage_progress.is_opened:
-                        test_status_icon = "✅"  # Тест пройден (только если этап открыт)
-                    elif stage_progress.is_opened:
-                        test_status_icon = "🟡"  # Этап открыт, тест доступен
-                    else:
-                        test_status_icon = "⛔️"  # Этап закрыт
-                    stages_info += f"{test_status_icon}<b>Тест {test_num}:</b> {test.name}\n"
+                    is_passed = bool(test_result and test_result.is_passed)
+                    icon = get_test_status_icon(is_passed, stage_progress.is_opened)
+                    stages_info += format_test_line(test_num, test.name, icon)
             
             # Добавляем пустую строку после этапа
             stages_info += "\n"
@@ -337,16 +332,10 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
 
                 # Показываем тесты в сессии
                 for test_num, test in enumerate(session_progress.session.tests, 1):
-                    # Определяем статус теста
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
-                    # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
-                    if test_result and test_result.is_passed and stage_progress.is_opened:
-                        test_status_icon = "✅"  # Тест пройден (только если этап открыт)
-                    elif stage_progress.is_opened:
-                        test_status_icon = "🟡"  # Этап открыт, тест доступен
-                    else:
-                        test_status_icon = "⛔️"  # Этап закрыт
-                    stages_info += f"{test_status_icon}<b>Тест {test_num}:</b> {test.name}\n"
+                    is_passed = bool(test_result and test_result.is_passed)
+                    icon = get_test_status_icon(is_passed, stage_progress.is_opened)
+                    stages_info += format_test_line(test_num, test.name, icon)
             
             # Добавляем пустую строку после этапа
             stages_info += "\n"
@@ -487,16 +476,10 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
 
                 # Показываем тесты в сессии
                 for test_num, test in enumerate(session_progress.session.tests, 1):
-                    # Определяем статус теста
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
-                    # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
-                    if test_result and test_result.is_passed and sp.is_opened:
-                        test_icon = "✅"  # Тест пройден (только если этап открыт)
-                    elif sp.is_opened:
-                        test_icon = "🟡"  # Этап открыт, тест доступен
-                    else:
-                        test_icon = "⛔️"  # Этап закрыт
-                    full_trajectory_info += f"{test_icon}<b>Тест {test_num}:</b> {test.name}\n"
+                    is_passed = bool(test_result and test_result.is_passed)
+                    icon = get_test_status_icon(is_passed, sp.is_opened)
+                    full_trajectory_info += format_test_line(test_num, test.name, icon)
             
             # Добавляем пустую строку после этапа
             full_trajectory_info += "\n"
@@ -646,15 +629,10 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
                     # Показываем тесты в сессии
                     if hasattr(session_progress.session, 'tests') and session_progress.session.tests:
                         for test_num, test in enumerate(session_progress.session.tests, 1):
-                            # Определяем статус теста
                             test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
-                            if test_result and test_result.is_passed:
-                                test_icon = "✅"  # Тест пройден
-                            elif sp.is_opened:
-                                test_icon = "🟡"  # Этап открыт, тест доступен
-                            else:
-                                test_icon = "⛔️"  # Этап закрыт
-                            full_trajectory_info += f"{test_icon}<b>Тест {test_num}:</b> {test.name}\n"
+                            is_passed = bool(test_result and test_result.is_passed)
+                            icon = get_test_status_icon(is_passed, sp.is_opened)
+                            full_trajectory_info += format_test_line(test_num, test.name, icon)
                     else:
                         full_trajectory_info += "   📝 Тесты не найдены\n"
                 else:
@@ -878,16 +856,10 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
 
                 # Показываем тесты в сессии
                 for test_num, test in enumerate(session_progress.session.tests, 1):
-                    # Определяем статус теста
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=user.company_id)
-                    # ИСПРАВЛЕНИЕ: показываем зеленый только если этап открыт И тест пройден
-                    if test_result and test_result.is_passed and sp.is_opened:
-                        test_icon = "✅"  # Тест пройден (только если этап открыт)
-                    elif sp.is_opened:
-                        test_icon = "🟡"  # Этап открыт, тест доступен
-                    else:
-                        test_icon = "⛔️"  # Этап закрыт
-                    full_trajectory_info += f"{test_icon}<b>Тест {test_num}:</b> {test.name}\n"
+                    is_passed = bool(test_result and test_result.is_passed)
+                    icon = get_test_status_icon(is_passed, sp.is_opened)
+                    full_trajectory_info += format_test_line(test_num, test.name, icon)
             
             # Добавляем пустую строку после этапа
             full_trajectory_info += "\n"
