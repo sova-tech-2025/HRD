@@ -1008,14 +1008,14 @@ async def process_edit_group(callback: CallbackQuery, session: AsyncSession, sta
         await callback.answer("❌ Ошибка: не выбран пользователь")
         return
 
-    company_id = data.get('company_id')
+    # Единственный источник company_id для всей функции
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
+
     target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
     if not target_user:
         await callback.answer("❌ Пользователь не найден")
         return
 
-    # Получение company_id из контекста (добавлен CompanyMiddleware)
-    company_id = await ensure_company_id(session, state, callback.from_user.id)
     # Получаем все группы
     groups = await get_all_groups(session, company_id)
 
