@@ -2609,7 +2609,7 @@ def get_user_groups_multiselect_keyboard(
         prefix = "✅ " if group.id in selected_group_ids else ""
         group_name = group.name[:20] + "..." if len(group.name) > 20 else group.name
         keyboard.append([InlineKeyboardButton(
-            text=f"{prefix}{{ {group_name} }}",
+            text=f"{prefix}{group_name}",
             callback_data=f"user_edit_toggle_group:{group.id}"
         )])
 
