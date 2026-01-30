@@ -4877,9 +4877,10 @@ async def update_user_groups(session: AsyncSession, user_id: int, new_group_ids:
         valid_groups = result.scalars().all()
         valid_group_ids = [g.id for g in valid_groups]
 
-        # Проверяем, что все запрошенные группы найдены
-        if len(valid_group_ids) != len(new_group_ids):
-            missing_ids = set(new_group_ids) - set(valid_group_ids)
+        # Проверяем, что все запрошенные группы найдены (дедупликация на случай повторов)
+        unique_new_group_ids = set(new_group_ids)
+        if set(valid_group_ids) != unique_new_group_ids:
+            missing_ids = unique_new_group_ids - set(valid_group_ids)
             logger.error(
                 f"Группы {missing_ids} не найдены или не принадлежат компании {company_id}"
             )
