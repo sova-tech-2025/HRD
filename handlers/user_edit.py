@@ -42,6 +42,13 @@ def format_user_groups(user) -> str:
     return "Нет группы"
 
 
+def get_groups_label(user) -> str:
+    """Возвращает 'Группа' или 'Группы' в зависимости от количества групп."""
+    if user.groups and len(user.groups) > 1:
+        return "Группы"
+    return "Группа"
+
+
 async def show_user_info_detail(callback: CallbackQuery, user_id: int, session: AsyncSession, filter_type: str = "all", company_id: int = None):
     """Общая функция для отображения детальной информации о пользователе"""
     user = await get_user_with_details(session, user_id, company_id=company_id)
@@ -52,6 +59,7 @@ async def show_user_info_detail(callback: CallbackQuery, user_id: int, session: 
     # Формируем информацию о пользователе
     role_name = user.roles[0].name if user.roles else "Нет роли"
     group_name = format_user_groups(user)
+    groups_label = get_groups_label(user)
 
     text = (
         f"🦸🏻‍♂️ <b>Пользователь:</b> {user.full_name}\n\n"
@@ -61,7 +69,7 @@ async def show_user_info_detail(callback: CallbackQuery, user_id: int, session: 
         f"<b>Дата регистрации:</b> {user.registration_date.strftime('%d.%m.%Y %H:%M') if user.registration_date else 'Не указана'}\n\n"
         f"━━━━━━━━━━━━\n\n"
         f"🗂️ <b>Статус:</b>\n"
-        f"<b>Группа:</b> {group_name}\n"
+        f"<b>{groups_label}:</b> {group_name}\n"
         f"<b>Роль:</b> {role_name}\n\n"
         f"━━━━━━━━━━━━\n\n"
         f"📍 <b>Объект:</b>\n"
@@ -467,8 +475,9 @@ async def callback_edit_user(callback: CallbackQuery, state: FSMContext, session
         # Формируем меню редактора
         role_name = user.roles[0].name if user.roles else "Нет роли"
         group_name = format_user_groups(user)
+        groups_label = get_groups_label(user)
         is_trainee = role_name in ["Стажер", "Стажёр"]
-        
+
         text = (
             f"🦸🏻‍♂️ <b>Пользователь:</b> {user.full_name}\n\n"
             f"<b>Телефон:</b> {user.phone_number}\n"
@@ -477,7 +486,7 @@ async def callback_edit_user(callback: CallbackQuery, state: FSMContext, session
             f"<b>Дата регистрации:</b> {user.registration_date.strftime('%d.%m.%Y %H:%M') if user.registration_date else 'Не указана'}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"🗂️ <b>Статус:</b>\n"
-            f"<b>Группа:</b> {group_name}\n"
+            f"<b>{groups_label}:</b> {group_name}\n"
             f"<b>Роль:</b> {role_name}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"📍 <b>Объект:</b>\n"
@@ -733,6 +742,7 @@ async def show_user_editor(message: Message, session: AsyncSession,
     # Формируем информацию о пользователе
     role_name = target_user.roles[0].name if target_user.roles else "Нет роли"
     group_name = format_user_groups(target_user)
+    groups_label = get_groups_label(target_user)
 
     user_info = f"""✏️<b>РЕДАКТОР ПОЛЬЗОВАТЕЛЯ</b>✏️
 
@@ -742,7 +752,7 @@ async def show_user_editor(message: Message, session: AsyncSession,
 👤 Username: @{target_user.username if target_user.username else 'Не указан'}
 📅 Дата регистрации: {target_user.registration_date.strftime('%d.%m.%Y %H:%M') if target_user.registration_date else 'Не указана'}
 👑 Роли: {role_name}
-🗂️Группа: {group_name}"""
+🗂️{groups_label}: {group_name}"""
     
     # Добавляем объект стажировки только для стажеров
     if role_name in ["Стажер", "Стажёр"] and target_user.internship_object:
@@ -1270,7 +1280,7 @@ async def process_new_internship_object(callback: CallbackQuery, session: AsyncS
 👤 Username: @{target_user.username if target_user.username else 'Не указан'}
 📅 Дата регистрации: {target_user.registration_date.strftime('%d.%m.%Y %H:%M') if target_user.registration_date else 'Не указана'}
 👑 Роли: {target_user.roles[0].name if target_user.roles else 'Нет роли'}
-🗂️Группа: {format_user_groups(target_user)}
+🗂️{get_groups_label(target_user)}: {format_user_groups(target_user)}
 📍1️⃣Объект стажировки: {target_user.internship_object.name if target_user.internship_object else 'Не назначен'}"""
 
         keyboard = get_edit_confirmation_keyboard()
@@ -1369,7 +1379,7 @@ async def process_new_work_object(callback: CallbackQuery, session: AsyncSession
 👤 Username: @{target_user.username if target_user.username else 'Не указан'}
 📅 Дата регистрации: {target_user.registration_date.strftime('%d.%m.%Y %H:%M') if target_user.registration_date else 'Не указана'}
 👑 Роли: {current_role}
-🗂️Группа: {format_user_groups(target_user)}
+🗂️{get_groups_label(target_user)}: {format_user_groups(target_user)}
 📍2️⃣Объект работы: {target_user.work_object.name if target_user.work_object else 'Не назначен'}"""
         
         keyboard = get_edit_confirmation_keyboard()
@@ -1450,7 +1460,8 @@ async def process_confirm_change(callback: CallbackQuery, session: AsyncSession,
             # Формируем полное сообщение как требует ТЗ
             role_name = target_user.roles[0].name if target_user.roles else "Нет роли"
             group_name = format_user_groups(target_user)
-            
+            groups_label = get_groups_label(target_user)
+
             success_message = f"""✅ <b>Данные изменены</b>
 
 🦸🏻‍♂️ <b>Пользователь:</b> {target_user.full_name}
@@ -1463,7 +1474,7 @@ async def process_confirm_change(callback: CallbackQuery, session: AsyncSession,
 ━━━━━━━━━━━━
 
 🗂️ <b>Статус:</b>
-<b>Группа:</b> {group_name}
+<b>{groups_label}:</b> {group_name}
 <b>Роль:</b> {role_name}
 
 ━━━━━━━━━━━━
@@ -1664,8 +1675,9 @@ async def callback_cancel_delete_user(callback: CallbackQuery, state: FSMContext
         roles = await get_user_roles(session, user.id)
         role_name = roles[0].name if roles else "Не назначена"
         group_name = format_user_groups(user)
+        groups_label = get_groups_label(user)
         is_trainee = role_name in ["Стажер", "Стажёр"]
-        
+
         # Формируем текст для редактора
         text = (
             f"🦸🏻‍♂️ <b>Пользователь:</b> {user.full_name}\n\n"
@@ -1675,7 +1687,7 @@ async def callback_cancel_delete_user(callback: CallbackQuery, state: FSMContext
             f"<b>Дата регистрации:</b> {user.registration_date.strftime('%d.%m.%Y %H:%M') if user.registration_date else 'Не указана'}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"🗂️ <b>Статус:</b>\n"
-            f"<b>Группа:</b> {group_name}\n"
+            f"<b>{groups_label}:</b> {group_name}\n"
             f"<b>Роль:</b> {role_name}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"📍 <b>Объект:</b>\n"
@@ -1774,6 +1786,7 @@ async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext, sessi
         # Формируем текст с информацией о пользователе
         role_name = target_user.roles[0].name if target_user.roles else "Нет роли"
         group_name = format_user_groups(target_user)
+        groups_label = get_groups_label(target_user)
 
         text = (
             f"🦸🏻‍♂️ <b>Пользователь:</b> {target_user.full_name}\n\n"
@@ -1783,7 +1796,7 @@ async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext, sessi
             f"<b>Дата регистрации:</b> {target_user.registration_date.strftime('%d.%m.%Y %H:%M') if target_user.registration_date else 'Не указана'}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"🗂️ <b>Статус:</b>\n"
-            f"<b>Группа:</b> {group_name}\n"
+            f"<b>{groups_label}:</b> {group_name}\n"
             f"<b>Роль:</b> {role_name}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"📍 <b>Объект:</b>\n"
