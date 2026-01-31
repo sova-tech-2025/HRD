@@ -1,21 +1,24 @@
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
 from database.db import (
-    get_all_users, get_user_by_id, get_all_roles, 
+    get_all_users, get_user_by_id, get_all_roles,
     add_user_role, remove_user_role, get_user_roles, get_all_trainees,
     get_user_by_tg_id, check_user_permission, get_trainee_mentor,
-    get_user_test_results, get_test_by_id
+    get_user_test_results, get_test_by_id,
+    get_trainee_learning_path, get_managers_for_attestation,
+    get_trainee_attestation_status, get_attestation_by_id,
+    assign_attestation_to_trainee
 )
 from keyboards.keyboards import (
-    get_user_selection_keyboard, get_user_action_keyboard, 
+    get_user_selection_keyboard, get_user_action_keyboard,
     get_role_change_keyboard, get_confirmation_keyboard
 )
-from states.states import AdminStates
+from states.states import AdminStates, RecruiterAttestationStates
 from utils.logger import log_user_action, log_user_error, logger
 from handlers.auth import check_auth
 
@@ -661,10 +664,6 @@ async def show_trainee_progress(callback: CallbackQuery, session: AsyncSession, 
 @router.callback_query(F.data.startswith("recruiter_open_attestation:"))
 async def callback_recruiter_open_attestation(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик кнопки 'Открыть аттестацию' - показывает список руководителей"""
-    from states.states import RecruiterAttestationStates
-    from database.db import get_trainee_learning_path, get_managers_for_attestation, get_trainee_attestation_status
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
     try:
         await callback.answer()
 
@@ -754,10 +753,6 @@ async def callback_recruiter_open_attestation(callback: CallbackQuery, state: FS
 @router.callback_query(F.data.startswith("recruiter_select_manager:"))
 async def callback_recruiter_select_manager(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик выбора руководителя для аттестации рекрутером"""
-    from states.states import RecruiterAttestationStates
-    from database.db import get_trainee_learning_path, get_attestation_by_id
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
     try:
         await callback.answer()
 
@@ -830,9 +825,6 @@ async def callback_recruiter_select_manager(callback: CallbackQuery, state: FSMC
 @router.callback_query(F.data == "recruiter_confirm_attestation")
 async def callback_recruiter_confirm_attestation(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик подтверждения назначения аттестации рекрутером"""
-    from database.db import assign_attestation_to_trainee, get_trainee_learning_path, get_attestation_by_id
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
     try:
         await callback.answer()
 
