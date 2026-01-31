@@ -512,18 +512,25 @@ async def show_trainee_detail(callback: CallbackQuery, session: AsyncSession, tr
     """Показать детальную информацию о стажере"""
     from keyboards.keyboards import get_trainee_detail_keyboard
     from database.db import get_trainee_learning_path
-    
+
     # Получаем информацию о стажере
     trainee = await get_user_by_id(session, trainee_id)
     if not trainee:
         await callback.answer("Стажер не найден", show_alert=True)
         return
-    
+
     # Получаем траекторию стажера с изоляцией по компании
     company_id = trainee.company_id
     trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
     trajectory_name = trainee_path.learning_path.name if trainee_path else "не выбрано"
-    
+
+    # Проверяем наличие аттестации у траектории
+    has_attestation = (
+        trainee_path is not None
+        and trainee_path.learning_path is not None
+        and trainee_path.learning_path.attestation is not None
+    )
+
     # Формируем сообщение согласно ТЗ
     message_text = f"🦸🏻‍♂️ <b>Стажер:</b> {trainee.full_name}\n"
     message_text += f"<b>Траектория:</b> {trajectory_name}\n\n"
@@ -540,13 +547,13 @@ async def show_trainee_detail(callback: CallbackQuery, session: AsyncSession, tr
     if trainee.roles and trainee.roles[0].name == "Стажер":
         message_text += f"<b>Стажировки:</b> {trainee.internship_object.name if trainee.internship_object else 'Не указан'}\n"
     message_text += f"<b>Работы:</b> {trainee.work_object.name if trainee.work_object else 'Не указан'}"
-    
+
     await callback.message.edit_text(
         message_text,
         parse_mode="HTML",
-        reply_markup=get_trainee_detail_keyboard(trainee_id)
+        reply_markup=get_trainee_detail_keyboard(trainee_id, has_attestation=has_attestation)
     )
-    
+
     log_user_action(callback.from_user.id, callback.from_user.username, "viewed trainee detail", {"trainee_id": trainee_id})
 
 
@@ -644,4 +651,324 @@ async def show_trainee_progress(callback: CallbackQuery, session: AsyncSession, 
         reply_markup=get_trainee_progress_keyboard(trainee_id)
     )
     
-    log_user_action(callback.from_user.id, callback.from_user.username, "viewed trainee progress", {"trainee_id": trainee_id}) 
+    log_user_action(callback.from_user.id, callback.from_user.username, "viewed trainee progress", {"trainee_id": trainee_id})
+
+
+# ===============================
+# Открытие аттестации рекрутером (без прохождения этапов)
+# ===============================
+
+@router.callback_query(F.data.startswith("recruiter_open_attestation:"))
+async def callback_recruiter_open_attestation(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик кнопки 'Открыть аттестацию' - показывает список руководителей"""
+    from states.states import RecruiterAttestationStates
+    from database.db import get_trainee_learning_path, get_managers_for_attestation, get_trainee_attestation_status
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    try:
+        await callback.answer()
+
+        trainee_id = int(callback.data.split(":")[1])
+
+        # Получаем стажера
+        trainee = await get_user_by_id(session, trainee_id)
+        if not trainee:
+            await callback.answer("Стажер не найден", show_alert=True)
+            return
+
+        company_id = trainee.company_id
+
+        # Получаем траекторию с аттестацией
+        trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
+        if not trainee_path or not trainee_path.learning_path or not trainee_path.learning_path.attestation:
+            await callback.answer("У стажера нет траектории с аттестацией", show_alert=True)
+            return
+
+        attestation = trainee_path.learning_path.attestation
+
+        # Проверяем, не назначена ли уже аттестация
+        attestation_status = await get_trainee_attestation_status(session, trainee_id, attestation.id, company_id=company_id)
+        if attestation_status in ["🟡", "✅"]:
+            status_text = "уже назначена" if attestation_status == "🟡" else "уже пройдена"
+            await callback.answer(f"Аттестация {status_text}", show_alert=True)
+            return
+
+        # Получаем список руководителей
+        group_id = trainee.groups[0].id if trainee.groups else None
+        managers = await get_managers_for_attestation(session, group_id, company_id=company_id)
+
+        if not managers:
+            await callback.message.edit_text(
+                "❌ Нет доступных руководителей для проведения аттестации.\n"
+                "Обратитесь к администратору.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"trainee_detail:{trainee_id}")]
+                ])
+            )
+            return
+
+        # Сохраняем данные в состоянии
+        await state.update_data(
+            trainee_id=trainee_id,
+            attestation_id=attestation.id
+        )
+
+        # Формируем сообщение
+        message_text = (
+            f"🦸🏻‍♂️ <b>Стажер:</b> {trainee.full_name}\n"
+            f"<b>Траектория:</b> {trainee_path.learning_path.name}\n\n"
+            f"<b>Телефон:</b> {trainee.phone_number}\n"
+            f"<b>Username:</b> @{trainee.username or 'не указан'}\n"
+            f"<b>Номер:</b> #{trainee_id}\n\n"
+            "━━━━━━━━━━━━\n\n"
+            f"🏁 <b>Аттестация:</b> {attestation.name}\n\n"
+            "🟡 <b>Выберите руководителя для проведения аттестации:</b>"
+        )
+
+        # Создаем клавиатуру с руководителями
+        keyboard = []
+        for manager in managers:
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"{manager.full_name}",
+                    callback_data=f"recruiter_select_manager:{manager.id}"
+                )
+            ])
+
+        keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"trainee_detail:{trainee_id}")])
+
+        await callback.message.edit_text(
+            message_text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+
+        await state.set_state(RecruiterAttestationStates.selecting_manager)
+        log_user_action(callback.from_user.id, callback.from_user.username, "recruiter_open_attestation_started", {"trainee_id": trainee_id})
+
+    except Exception as e:
+        logger.error(f"Ошибка открытия меню аттестации рекрутером: {e}")
+        await callback.answer("Произошла ошибка", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("recruiter_select_manager:"))
+async def callback_recruiter_select_manager(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик выбора руководителя для аттестации рекрутером"""
+    from states.states import RecruiterAttestationStates
+    from database.db import get_trainee_learning_path, get_attestation_by_id
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    try:
+        await callback.answer()
+
+        manager_id = int(callback.data.split(":")[1])
+
+        # Получаем данные из состояния
+        state_data = await state.get_data()
+        trainee_id = state_data.get("trainee_id")
+        attestation_id = state_data.get("attestation_id")
+
+        if not trainee_id or not attestation_id:
+            await callback.message.edit_text("Ошибка: данные не найдены в состоянии")
+            await state.clear()
+            return
+
+        # Получаем данные
+        trainee = await get_user_by_id(session, trainee_id)
+        manager = await get_user_by_id(session, manager_id)
+        company_id = trainee.company_id if trainee else None
+        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+        trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
+
+        if not trainee or not manager or not attestation:
+            await callback.message.edit_text("Ошибка: данные не найдены")
+            await state.clear()
+            return
+
+        # Сохраняем выбранного руководителя
+        await state.update_data(manager_id=manager_id)
+
+        # Формируем сообщение подтверждения
+        confirmation_text = (
+            f"🦸🏻‍♂️ <b>Стажер:</b> {trainee.full_name}\n"
+            f"<b>Траектория:</b> {trainee_path.learning_path.name if trainee_path else 'не выбрана'}\n\n"
+            f"<b>Телефон:</b> {trainee.phone_number}\n"
+            f"<b>Username:</b> @{trainee.username or 'не указан'}\n"
+            f"<b>Номер:</b> #{trainee_id}\n\n"
+            "━━━━━━━━━━━━\n\n"
+            "🗂️ <b>Статус:</b>\n"
+            f"<b>Группа:</b> {', '.join([group.name for group in trainee.groups]) if trainee.groups else 'Не указана'}\n"
+            f"<b>Роль:</b> {', '.join([role.name for role in trainee.roles])}\n\n"
+            "━━━━━━━━━━━━\n\n"
+            f"🏁 <b>Аттестация:</b> {attestation.name}\n"
+            f"🟢 <b>Руководитель:</b> {manager.full_name}\n\n"
+            "🟡 <b>Открыть аттестацию для стажера?</b>\n\n"
+            "<i>Стажер сможет пройти аттестацию без прохождения этапов траектории</i>"
+        )
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да, открыть", callback_data="recruiter_confirm_attestation"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data=f"recruiter_open_attestation:{trainee_id}")
+            ]
+        ])
+
+        await callback.message.edit_text(
+            confirmation_text,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+
+        await state.set_state(RecruiterAttestationStates.confirming_assignment)
+        log_user_action(callback.from_user.id, callback.from_user.username, "recruiter_manager_selected", {"manager_id": manager_id, "trainee_id": trainee_id})
+
+    except Exception as e:
+        logger.error(f"Ошибка выбора руководителя рекрутером: {e}")
+        await callback.answer("Произошла ошибка при выборе руководителя", show_alert=True)
+
+
+@router.callback_query(F.data == "recruiter_confirm_attestation")
+async def callback_recruiter_confirm_attestation(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик подтверждения назначения аттестации рекрутером"""
+    from database.db import assign_attestation_to_trainee, get_trainee_learning_path, get_attestation_by_id
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    try:
+        await callback.answer()
+
+        # Получаем данные из состояния
+        state_data = await state.get_data()
+        trainee_id = state_data.get("trainee_id")
+        attestation_id = state_data.get("attestation_id")
+        manager_id = state_data.get("manager_id")
+
+        if not trainee_id or not attestation_id or not manager_id:
+            await callback.message.edit_text("Ошибка: данные не найдены в состоянии")
+            await state.clear()
+            return
+
+        # Получаем данные
+        trainee = await get_user_by_id(session, trainee_id)
+        manager = await get_user_by_id(session, manager_id)
+        recruiter = await get_user_by_tg_id(session, callback.from_user.id)
+
+        if not trainee or not manager or not recruiter:
+            await callback.message.edit_text("Ошибка: данные не найдены")
+            await state.clear()
+            return
+
+        company_id = trainee.company_id
+        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+        trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
+
+        if not attestation:
+            await callback.message.edit_text("Ошибка: аттестация не найдена")
+            await state.clear()
+            return
+
+        # Назначаем аттестацию (assigned_by_id = recruiter.id)
+        result = await assign_attestation_to_trainee(
+            session=session,
+            trainee_id=trainee_id,
+            manager_id=manager_id,
+            attestation_id=attestation_id,
+            assigned_by_id=recruiter.id,
+            company_id=company_id
+        )
+
+        if not result:
+            await callback.message.edit_text(
+                "❌ Не удалось назначить аттестацию. Попробуйте позже.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"trainee_detail:{trainee_id}")]
+                ])
+            )
+            await state.clear()
+            return
+
+        await session.commit()
+
+        # Формируем сообщение об успехе
+        success_text = (
+            f"✅ <b>Аттестация открыта!</b>\n\n"
+            f"🦸🏻‍♂️ <b>Стажер:</b> {trainee.full_name}\n"
+            f"🏁 <b>Аттестация:</b> {attestation.name}\n"
+            f"👨‍💼 <b>Руководитель:</b> {manager.full_name}\n\n"
+            "Стажер и руководитель получили уведомления."
+        )
+
+        await callback.message.edit_text(
+            success_text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ К стажеру", callback_data=f"trainee_detail:{trainee_id}")],
+                [InlineKeyboardButton(text="📋 К списку стажеров", callback_data="back_to_recruiter_trainees")]
+            ])
+        )
+
+        # Отправляем уведомление стажеру
+        await send_attestation_notification_to_trainee(
+            callback.bot, trainee, attestation, manager, trainee_path
+        )
+
+        # Отправляем уведомление руководителю
+        await send_attestation_notification_to_manager(
+            callback.bot, trainee, attestation, manager, recruiter
+        )
+
+        await state.clear()
+        log_user_action(
+            callback.from_user.id,
+            callback.from_user.username,
+            "recruiter_attestation_assigned",
+            {"trainee_id": trainee_id, "attestation_id": attestation_id, "manager_id": manager_id}
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка подтверждения аттестации рекрутером: {e}")
+        await callback.answer("Произошла ошибка при назначении аттестации", show_alert=True)
+        await state.clear()
+
+
+async def send_attestation_notification_to_trainee(bot, trainee, attestation, manager, trainee_path):
+    """Отправка уведомления стажеру об открытии аттестации"""
+    try:
+        notification_text = (
+            f"🎉 <b>Тебе открыта аттестация!</b>\n\n"
+            f"🏁 <b>Аттестация:</b> {attestation.name}\n"
+            f"👨‍💼 <b>Руководитель:</b> {manager.full_name}\n"
+            f"📚 <b>Траектория:</b> {trainee_path.learning_path.name if trainee_path else 'не указана'}\n\n"
+            "❗️ <b>Свяжись с руководителем, чтобы согласовать дату и время аттестации</b>"
+        )
+
+        await bot.send_message(
+            chat_id=trainee.tg_id,
+            text=notification_text,
+            parse_mode="HTML"
+        )
+        logger.info(f"Уведомление об аттестации отправлено стажеру {trainee.id}")
+    except Exception as e:
+        logger.error(f"Ошибка отправки уведомления стажеру {trainee.id}: {e}")
+
+
+async def send_attestation_notification_to_manager(bot, trainee, attestation, manager, recruiter):
+    """Отправка уведомления руководителю о назначении стажера на аттестацию"""
+    try:
+        notification_text = (
+            f"📋 <b>Новое назначение на аттестацию</b>\n\n"
+            f"🦸🏻‍♂️ <b>Стажер:</b> {trainee.full_name}\n"
+            f"📞 <b>Телефон:</b> {trainee.phone_number}\n"
+            f"🏁 <b>Аттестация:</b> {attestation.name}\n"
+            f"👤 <b>Назначил:</b> {recruiter.full_name} (рекрутер)\n\n"
+            "• Стажер готов к прохождению аттестации\n"
+            "• Свяжитесь со стажером для согласования даты"
+        )
+
+        await bot.send_message(
+            chat_id=manager.tg_id,
+            text=notification_text,
+            parse_mode="HTML"
+        )
+        logger.info(f"Уведомление об аттестации отправлено руководителю {manager.id}")
+    except Exception as e:
+        logger.error(f"Ошибка отправки уведомления руководителю {manager.id}: {e}")

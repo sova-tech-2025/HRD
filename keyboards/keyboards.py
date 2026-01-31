@@ -2166,12 +2166,22 @@ def get_trainees_list_keyboard(trainees: list, page: int = 0, per_page: int = 5)
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_trainee_detail_keyboard(trainee_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура для детального просмотра стажера"""
+def get_trainee_detail_keyboard(trainee_id: int, has_attestation: bool = False) -> InlineKeyboardMarkup:
+    """Клавиатура для детального просмотра стажера
+
+    Args:
+        trainee_id: ID стажера
+        has_attestation: True если у стажера есть траектория с аттестацией
+    """
     keyboard = [
-        [InlineKeyboardButton(text="📊 Просмотреть прогресс", callback_data=f"view_trainee_progress:{trainee_id}")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_recruiter_trainees")]
+        [InlineKeyboardButton(text="📊 Просмотреть прогресс", callback_data=f"view_trainee_progress:{trainee_id}")]
     ]
+
+    # Добавляем кнопку открытия аттестации если есть траектория с аттестацией
+    if has_attestation:
+        keyboard.append([InlineKeyboardButton(text="🏁 Открыть аттестацию", callback_data=f"recruiter_open_attestation:{trainee_id}")])
+
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_recruiter_trainees")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
