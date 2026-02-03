@@ -1037,12 +1037,12 @@ async def process_edit_group(callback: CallbackQuery, session: AsyncSession, sta
     # Определяем роли пользователя
     role_names = [r.name for r in target_user.roles]
 
-    # Наставникам показываем мультивыбор групп
-    if "Наставник" in role_names:
+    # Наставникам и рекрутерам показываем мультивыбор групп
+    if "Наставник" in role_names or "Рекрутер" in role_names:
         current_groups = format_user_groups(target_user)
         selected_group_ids = [g.id for g in target_user.groups]
 
-        message_text = f"""Выбери <b>ГРУППЫ</b> для наставника:
+        message_text = f"""Выбери <b>ГРУППЫ</b> для пользователя:
 
 🧑 ФИО: {target_user.full_name}
 🗂️ Текущие группы: {current_groups}
