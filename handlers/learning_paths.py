@@ -22,11 +22,11 @@ from keyboards.keyboards import (
     get_test_description_skip_keyboard, get_question_type_keyboard,
     get_more_questions_keyboard, get_session_management_keyboard,
     get_attestation_selection_keyboard, get_trajectory_save_confirmation_keyboard,
-    get_trajectory_attestation_confirmation_keyboard, get_trajectory_final_confirmation_keyboard, 
-    get_attestations_main_keyboard, get_attestation_creation_start_keyboard, 
-    get_attestation_questions_keyboard, get_group_selection_keyboard, 
+    get_trajectory_attestation_confirmation_keyboard, get_trajectory_final_confirmation_keyboard,
+    get_attestations_main_keyboard, get_attestation_creation_start_keyboard,
+    get_attestation_questions_keyboard, get_group_selection_keyboard,
     get_main_menu_keyboard, get_keyboard_by_role, get_trajectory_selection_keyboard,
-    get_trajectory_deletion_confirmation_keyboard
+    get_trajectory_deletion_confirmation_keyboard, is_main_menu_text
 )
 from utils.logger import log_user_action, log_user_error
 from utils.validators import validate_name
@@ -463,10 +463,26 @@ async def callback_skip_materials(callback: CallbackQuery, state: FSMContext, se
 async def process_test_materials(message: Message, state: FSMContext, session: AsyncSession):
     """Обработка материалов теста"""
     try:
+        if not message.text:
+            await message.answer(
+                "❌ Пожалуйста, отправь ссылку на материалы или нажми кнопку 'Пропустить'.",
+                reply_markup=get_test_materials_skip_keyboard()
+            )
+            return
+
+        if is_main_menu_text(message.text):
+            # Игнорируем нажатия на кнопки главного меню
+            await message.answer(
+                "⚠️ Похоже, ты нажал кнопку меню.\n\n"
+                "📎 Отправь ссылку на материалы или нажми кнопку 'Пропустить'.",
+                reply_markup=get_test_materials_skip_keyboard()
+            )
+            return
+
         materials = message.text.strip()
         await state.update_data(new_test_materials=materials)
         await show_test_description_step(message, state)
-        
+
     except Exception as e:
         await message.answer("Произошла ошибка при обработке материалов")
         log_user_error(message.from_user.id, "test_materials_error", str(e))
