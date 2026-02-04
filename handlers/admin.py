@@ -490,9 +490,10 @@ async def callback_back_to_recruiter_trainees(callback: CallbackQuery, state: FS
     """Обработчик возврата к списку стажеров"""
     try:
         from keyboards.keyboards import get_trainees_list_keyboard
-        
-        data = await state.get_data()
-        company_id = data.get('company_id')
+
+        # Получаем company_id из пользователя (надёжнее чем из state)
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        company_id = user.company_id if user else None
         trainees = await get_all_trainees(session, company_id)
         
         if not trainees:
@@ -527,12 +528,17 @@ async def show_trainee_detail(callback: CallbackQuery, session: AsyncSession, tr
     trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
     trajectory_name = trainee_path.learning_path.name if trainee_path else "не выбрано"
 
-    # Проверяем наличие аттестации у траектории
-    has_attestation = (
-        trainee_path is not None
+    # Проверяем наличие аттестации у траектории И что она ещё не назначена
+    has_attestation = False
+    if (trainee_path is not None
         and trainee_path.learning_path is not None
-        and trainee_path.learning_path.attestation is not None
-    )
+        and trainee_path.learning_path.attestation is not None):
+        # Проверяем, не назначена ли уже аттестация
+        attestation_status = await get_trainee_attestation_status(
+            session, trainee_id, trainee_path.learning_path.attestation.id, company_id=company_id
+        )
+        # Показываем кнопку только если аттестация НЕ назначена (статус ⛔️)
+        has_attestation = (attestation_status == "⛔️")
 
     # Формируем сообщение согласно ТЗ
     message_text = f"🦸🏻‍♂️ <b>Стажер:</b> {trainee.full_name}\n"
