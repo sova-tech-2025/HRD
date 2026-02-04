@@ -701,7 +701,7 @@ async def callback_recruiter_open_attestation(callback: CallbackQuery, state: FS
                 "❌ Нет доступных руководителей для проведения аттестации.\n"
                 "Обратитесь к администратору.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"trainee_detail:{trainee_id}")]
+                    [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"view_trainee:{trainee_id}")]
                 ])
             )
             return
@@ -734,7 +734,7 @@ async def callback_recruiter_open_attestation(callback: CallbackQuery, state: FS
                 )
             ])
 
-        keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"trainee_detail:{trainee_id}")])
+        keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"view_trainee:{trainee_id}")])
 
         await callback.message.edit_text(
             message_text,
@@ -872,7 +872,7 @@ async def callback_recruiter_confirm_attestation(callback: CallbackQuery, state:
             await callback.message.edit_text(
                 "❌ Не удалось назначить аттестацию. Попробуйте позже.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"trainee_detail:{trainee_id}")]
+                    [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"view_trainee:{trainee_id}")]
                 ])
             )
             await state.clear()
@@ -893,7 +893,7 @@ async def callback_recruiter_confirm_attestation(callback: CallbackQuery, state:
             success_text,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ К стажеру", callback_data=f"trainee_detail:{trainee_id}")],
+                [InlineKeyboardButton(text="⬅️ К стажеру", callback_data=f"view_trainee:{trainee_id}")],
                 [InlineKeyboardButton(text="📋 К списку стажеров", callback_data="back_to_recruiter_trainees")]
             ])
         )
