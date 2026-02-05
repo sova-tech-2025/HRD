@@ -23,8 +23,7 @@ from keyboards.keyboards import (
     get_test_actions_keyboard, get_test_filter_keyboard,
     get_question_type_keyboard, get_test_edit_menu,
     get_question_management_keyboard, get_test_settings_keyboard,
-    get_finish_options_keyboard, get_test_start_keyboard, get_tests_main_keyboard,
-    is_main_menu_text
+    get_finish_options_keyboard, get_test_start_keyboard, get_tests_main_keyboard
 )
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import TestCreationStates, TestTakingStates
@@ -508,14 +507,6 @@ async def process_materials_input(message: Message, state: FSMContext):
         # Пользователь отправил текст
         if message.text.lower() == 'пропустить':
             await state.update_data(material_link=None)
-        elif is_main_menu_text(message.text):
-            # Игнорируем нажатия на кнопки главного меню
-            await message.answer(
-                "⚠️ Похоже, ты нажал кнопку меню.\n\n"
-                "📎 Отправь ссылку на материалы, документ, изображение или нажми кнопку 'Пропустить'.",
-                reply_markup=get_test_materials_keyboard()
-            )
-            return
         else:
             await state.update_data(material_link=message.text.strip())
     else:
@@ -2480,13 +2471,6 @@ async def save_new_materials(message: Message, state: FSMContext, session: Async
                 "material_file_path": None,
                 "material_type": None
             }
-        elif is_main_menu_text(message.text):
-            # Игнорируем нажатия на кнопки главного меню
-            await message.answer(
-                "⚠️ Похоже, ты нажал кнопку меню.\n\n"
-                "📎 Отправь ссылку на материалы, документ, изображение или напиши 'удалить'."
-            )
-            return
         else:
             update_data = {
                 "material_link": message.text.strip(),
@@ -2499,7 +2483,7 @@ async def save_new_materials(message: Message, state: FSMContext, session: Async
             "❌ Пожалуйста, отправь ссылку на материалы, документ, изображение или напиши 'удалить'."
         )
         return
-
+    
     await update_test(session, test_id, update_data, company_id=user.company_id)
     
     test = await get_test_by_id(session, test_id, company_id=user.company_id)

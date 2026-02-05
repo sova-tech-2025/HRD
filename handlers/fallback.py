@@ -6,14 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import get_user_by_tg_id
 
 from states.states import (
-    AuthStates, RegistrationStates, AdminStates,
-    TestCreationStates, TestTakingStates,
+    AuthStates, RegistrationStates, AdminStates, 
+    TestCreationStates, TestTakingStates, 
     MentorshipStates, TraineeManagementStates,
     GroupManagementStates, ObjectManagementStates, UserActivationStates,
     UserEditStates, LearningPathStates, AttestationStates,
-    TraineeTrajectoryStates, MentorAssignmentStates, AttestationAssignmentStates,
+    TraineeTrajectoryStates, MentorAssignmentStates, AttestationAssignmentStates, 
     ManagerAttestationStates, BroadcastStates, KnowledgeBaseStates,
-    CompanyManagementStates, RecruiterAttestationStates
+    CompanyManagementStates
 )
 from keyboards.keyboards import get_role_selection_keyboard, get_yes_no_keyboard, get_question_type_keyboard, get_fallback_keyboard
 from utils.logger import log_user_action
@@ -1292,27 +1292,9 @@ async def handle_unexpected_callback(callback: CallbackQuery, state: FSMContext)
 async def handle_unexpected_manager_selection_input(message: Message, state: FSMContext):
     """Обработка неожиданного ввода при выборе руководителя для аттестации"""
     await send_fallback_message(message, state)
-
-
 @router.message(StateFilter(AttestationAssignmentStates.confirming_attestation_assignment))
 async def handle_unexpected_attestation_confirmation_input(message: Message, state: FSMContext):
     """Обработка неожиданного ввода при подтверждении назначения аттестации"""
-    await send_fallback_message(message, state)
-
-
-# =================================
-# FALLBACK HANDLERS ДЛЯ РЕКРУТЕРСКОГО ОТКРЫТИЯ АТТЕСТАЦИИ
-# =================================
-
-@router.message(StateFilter(RecruiterAttestationStates.selecting_manager))
-async def handle_unexpected_recruiter_manager_selection(message: Message, state: FSMContext):
-    """Обработка неожиданного ввода при выборе руководителя рекрутером"""
-    await send_fallback_message(message, state)
-
-
-@router.message(StateFilter(RecruiterAttestationStates.confirming_assignment))
-async def handle_unexpected_recruiter_confirmation(message: Message, state: FSMContext):
-    """Обработка неожиданного ввода при подтверждении назначения аттестации рекрутером"""
     await send_fallback_message(message, state)
 @router.message(StateFilter(ManagerAttestationStates.waiting_for_date))
 async def handle_unexpected_date_input(message: Message, state: FSMContext):

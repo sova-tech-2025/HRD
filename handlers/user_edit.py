@@ -8,7 +8,7 @@ from database.db import (
     check_user_permission, get_all_activated_users, get_users_by_group, get_users_by_object,
     get_user_with_details, get_user_by_id, get_user_by_tg_id, get_user_by_phone,
     update_user_full_name, update_user_phone_number, update_user_role,
-    update_user_group, update_user_groups, update_user_internship_object, update_user_work_object,
+    update_user_group, update_user_internship_object, update_user_work_object,
     get_all_groups, get_all_objects, get_object_by_id, get_group_by_id, get_user_roles,
     get_role_change_warnings, delete_user, search_activated_users_by_name, ensure_company_id
 )
@@ -20,33 +20,12 @@ from keyboards.keyboards import (
     get_object_selection_keyboard, get_users_filter_keyboard,
     get_group_filter_keyboard, get_object_filter_keyboard,
     get_users_list_keyboard, get_user_info_keyboard,
-    get_user_deletion_confirmation_keyboard, get_user_groups_multiselect_keyboard
+    get_user_deletion_confirmation_keyboard
 )
 from utils.logger import log_user_action, log_user_error
 from utils.validators import validate_full_name, validate_phone_number
 
 router = Router()
-
-
-def format_user_groups(user) -> str:
-    """Форматирование списка групп пользователя для отображения.
-
-    Args:
-        user: Объект пользователя с загруженными группами
-
-    Returns:
-        Строка с названиями групп через запятую или 'Нет группы'
-    """
-    if user.groups:
-        return ", ".join(g.name for g in user.groups)
-    return "Нет группы"
-
-
-def get_groups_label(user) -> str:
-    """Возвращает 'Группа' или 'Группы' в зависимости от количества групп."""
-    if user.groups and len(user.groups) > 1:
-        return "Группы"
-    return "Группа"
 
 
 async def show_user_info_detail(callback: CallbackQuery, user_id: int, session: AsyncSession, filter_type: str = "all", company_id: int = None):
@@ -58,9 +37,8 @@ async def show_user_info_detail(callback: CallbackQuery, user_id: int, session: 
     
     # Формируем информацию о пользователе
     role_name = user.roles[0].name if user.roles else "Нет роли"
-    group_name = format_user_groups(user)
-    groups_label = get_groups_label(user)
-
+    group_name = user.groups[0].name if user.groups else "Нет группы"
+    
     text = (
         f"🦸🏻‍♂️ <b>Пользователь:</b> {user.full_name}\n\n"
         f"<b>Телефон:</b> {user.phone_number}\n"
@@ -69,7 +47,7 @@ async def show_user_info_detail(callback: CallbackQuery, user_id: int, session: 
         f"<b>Дата регистрации:</b> {user.registration_date.strftime('%d.%m.%Y %H:%M') if user.registration_date else 'Не указана'}\n\n"
         f"━━━━━━━━━━━━\n\n"
         f"🗂️ <b>Статус:</b>\n"
-        f"<b>{groups_label}:</b> {group_name}\n"
+        f"<b>Группа:</b> {group_name}\n"
         f"<b>Роль:</b> {role_name}\n\n"
         f"━━━━━━━━━━━━\n\n"
         f"📍 <b>Объект:</b>\n"
@@ -474,10 +452,9 @@ async def callback_edit_user(callback: CallbackQuery, state: FSMContext, session
         
         # Формируем меню редактора
         role_name = user.roles[0].name if user.roles else "Нет роли"
-        group_name = format_user_groups(user)
-        groups_label = get_groups_label(user)
+        group_name = user.groups[0].name if user.groups else "Нет группы"
         is_trainee = role_name in ["Стажер", "Стажёр"]
-
+        
         text = (
             f"🦸🏻‍♂️ <b>Пользователь:</b> {user.full_name}\n\n"
             f"<b>Телефон:</b> {user.phone_number}\n"
@@ -486,7 +463,7 @@ async def callback_edit_user(callback: CallbackQuery, state: FSMContext, session
             f"<b>Дата регистрации:</b> {user.registration_date.strftime('%d.%m.%Y %H:%M') if user.registration_date else 'Не указана'}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"🗂️ <b>Статус:</b>\n"
-            f"<b>{groups_label}:</b> {group_name}\n"
+            f"<b>Группа:</b> {group_name}\n"
             f"<b>Роль:</b> {role_name}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"📍 <b>Объект:</b>\n"
@@ -736,14 +713,13 @@ async def process_user_number(message: Message, session: AsyncSession, state: FS
     await show_user_editor(message, session, target_user, state)
     
 
-async def show_user_editor(message: Message, session: AsyncSession,
+async def show_user_editor(message: Message, session: AsyncSession, 
                           target_user, state: FSMContext):
     """Отображение редактора пользователя"""
     # Формируем информацию о пользователе
     role_name = target_user.roles[0].name if target_user.roles else "Нет роли"
-    group_name = format_user_groups(target_user)
-    groups_label = get_groups_label(target_user)
-
+    group_name = target_user.groups[0].name if target_user.groups else "Нет группы"
+    
     user_info = f"""✏️<b>РЕДАКТОР ПОЛЬЗОВАТЕЛЯ</b>✏️
 
 🧑 ФИО: {target_user.full_name}
@@ -752,7 +728,7 @@ async def show_user_editor(message: Message, session: AsyncSession,
 👤 Username: @{target_user.username if target_user.username else 'Не указан'}
 📅 Дата регистрации: {target_user.registration_date.strftime('%d.%m.%Y %H:%M') if target_user.registration_date else 'Не указана'}
 👑 Роли: {role_name}
-🗂️{groups_label}: {group_name}"""
+🗂️Группа: {group_name}"""
     
     # Добавляем объект стажировки только для стажеров
     if role_name in ["Стажер", "Стажёр"] and target_user.internship_object:
@@ -1013,153 +989,49 @@ async def process_edit_group(callback: CallbackQuery, session: AsyncSession, sta
     """Начало редактирования группы"""
     data = await state.get_data()
     editing_user_id = data.get('editing_user_id')
-
+    
     if not editing_user_id:
         await callback.answer("❌ Ошибка: не выбран пользователь")
         return
-
-    # Единственный источник company_id для всей функции
-    company_id = await ensure_company_id(session, state, callback.from_user.id)
-
+        
+    data = await state.get_data()
+    company_id = data.get('company_id')
     target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
     if not target_user:
         await callback.answer("❌ Пользователь не найден")
         return
+        
+    current_group = target_user.groups[0].name if target_user.groups else "Нет группы"
+    
+    message_text = f"""Выбери новую <b>ГРУППУ</b> для пользователя:
 
+🧑 ФИО: {target_user.full_name}"""
+    
+    # Получение company_id из контекста (добавлен CompanyMiddleware)
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
     # Получаем все группы
     groups = await get_all_groups(session, company_id)
-
+    
     if not groups:
         await callback.message.edit_text("❌ В системе нет доступных групп")
         await callback.answer()
         return
-
-    # Определяем роли пользователя
-    role_names = [r.name for r in target_user.roles]
-
-    # Наставникам и рекрутерам показываем мультивыбор групп
-    if "Наставник" in role_names or "Рекрутер" in role_names:
-        current_groups = format_user_groups(target_user)
-        selected_group_ids = [g.id for g in target_user.groups]
-
-        message_text = f"""Выбери <b>ГРУППЫ</b> для пользователя:
-
-🧑 ФИО: {target_user.full_name}
-🗂️ Текущие группы: {current_groups}
-
-Отметь галочками нужные группы и нажми "Сохранить"."""
-
-        keyboard = get_user_groups_multiselect_keyboard(groups, selected_group_ids, page=0)
-
-        await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
-        await state.set_state(UserEditStates.waiting_for_new_group)
-        await state.update_data(
-            edit_type="groups",
-            old_value=current_groups,
-            selected_group_ids=selected_group_ids
-        )
-    else:
-        # Для остальных ролей - одиночный выбор группы
-        current_group = format_user_groups(target_user)
-
-        message_text = f"""Выбери новую <b>ГРУППУ</b> для пользователя:
-
-🧑 ФИО: {target_user.full_name}"""
-
-        keyboard = get_group_selection_keyboard(groups, 0)
-
-        await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
-        await state.set_state(UserEditStates.waiting_for_new_group)
-        await state.update_data(edit_type="group", old_value=current_group)
-
+    
+    keyboard = get_group_selection_keyboard(groups, 0)
+    
+    await callback.message.edit_text(message_text, reply_markup=keyboard, parse_mode="HTML")
+    await state.set_state(UserEditStates.waiting_for_new_group)
+    await state.update_data(edit_type="group", old_value=current_group)
     await callback.answer()
 
 
 @router.callback_query(UserEditStates.waiting_for_new_group)
 async def process_new_group(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
-    """Обработка выбора новой группы (одиночный выбор или мультивыбор для наставников)"""
-    data = await state.get_data()
-    edit_type = data.get('edit_type')
-
-    # === Мультивыбор групп для наставников ===
-    if callback.data.startswith("user_edit_toggle_group:"):
-        # Переключение выбора группы
+    """Обработка выбора новой группы"""
+    if callback.data.startswith("select_group:"):
         group_id = int(callback.data.split(":")[1])
-        selected_group_ids = data.get('selected_group_ids', [])
-
-        if group_id in selected_group_ids:
-            selected_group_ids.remove(group_id)
-        else:
-            selected_group_ids.append(group_id)
-
-        await state.update_data(selected_group_ids=selected_group_ids)
-
-        # Перерисовываем клавиатуру с обновленным выбором
-        company_id = await ensure_company_id(session, state, callback.from_user.id)
-        groups = await get_all_groups(session, company_id)
-        page = data.get('groups_page', 0)
-        keyboard = get_user_groups_multiselect_keyboard(groups, selected_group_ids, page=page)
-        await callback.message.edit_reply_markup(reply_markup=keyboard)
-        await callback.answer()
-
-    elif callback.data.startswith("user_edit_groups_page:"):
-        # Пагинация мультивыбора групп
-        page = int(callback.data.split(":")[1])
-        selected_group_ids = data.get('selected_group_ids', [])
-        await state.update_data(groups_page=page)
-
-        company_id = await ensure_company_id(session, state, callback.from_user.id)
-        groups = await get_all_groups(session, company_id)
-        keyboard = get_user_groups_multiselect_keyboard(groups, selected_group_ids, page=page)
-        await callback.message.edit_reply_markup(reply_markup=keyboard)
-        await callback.answer()
-
-    elif callback.data == "user_edit_save_groups":
-        # Сохранение выбранных групп для наставника - показываем подтверждение
-        selected_group_ids = data.get('selected_group_ids', [])
-        editing_user_id = data.get('editing_user_id')
-        company_id = data.get('company_id')
-        old_groups = data.get('old_value', 'Нет групп')
-
-        if not selected_group_ids:
-            await callback.answer("❌ Выберите хотя бы одну группу", show_alert=True)
-            return
-
-        target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
-        if not target_user:
-            await callback.answer("❌ Пользователь не найден")
-            await state.clear()
-            return
-
-        # Получаем названия выбранных групп
-        groups = await get_all_groups(session, company_id)
-        groups_dict = {g.id: g.name for g in groups}
-        new_group_names = ", ".join(
-            groups_dict.get(gid, f"ID:{gid}") for gid in selected_group_ids
-        )
-
-        confirmation_text = f"""⚠️НОВЫЕ ГРУППЫ:
-⚠️{new_group_names}
-
-Было: {old_groups}
-
-Для пользователя:
-🧑 ФИО: {target_user.full_name}
-📞 Телефон: {target_user.phone_number}
-🆔 Telegram ID: {target_user.tg_id}
-👤 Username: @{target_user.username if target_user.username else 'Не указан'}"""
-
-        await state.update_data(new_value=selected_group_ids, new_group_names=new_group_names)
-
-        keyboard = get_edit_confirmation_keyboard()
-        await callback.message.edit_text(confirmation_text, reply_markup=keyboard)
-        await state.set_state(UserEditStates.waiting_for_change_confirmation)
-        await callback.answer()
-
-    # === Одиночный выбор группы (для всех кроме наставников) ===
-    elif callback.data.startswith("select_group:"):
-        group_id = int(callback.data.split(":")[1])
-
+        
+        data = await state.get_data()
         editing_user_id = data.get('editing_user_id')
         company_id = data.get('company_id')
         target_user = await get_user_with_details(session, editing_user_id, company_id=company_id)
@@ -1167,16 +1039,16 @@ async def process_new_group(callback: CallbackQuery, session: AsyncSession, stat
             await callback.answer("❌ Пользователь не найден")
             await state.clear()
             return
-
+            
         # Получаем название группы
         group = await get_group_by_id(session, group_id, company_id=target_user.company_id)
         if not group:
             await callback.answer("❌ Группа не найдена")
             return
-
+            
         # Сохраняем новое значение и показываем подтверждение
         await state.update_data(new_value=group_id, new_group_name=group.name)
-
+        
         confirmation_text = f"""⚠️НОВАЯ ГРУППА:
 ⚠️{group.name}
 
@@ -1185,21 +1057,21 @@ async def process_new_group(callback: CallbackQuery, session: AsyncSession, stat
 📞 Телефон: {target_user.phone_number}
 🆔 Telegram ID: {target_user.tg_id}
 👤 Username: @{target_user.username if target_user.username else 'Не указан'}"""
-
+        
         keyboard = get_edit_confirmation_keyboard()
         await callback.message.edit_text(confirmation_text, reply_markup=keyboard)
         await state.set_state(UserEditStates.waiting_for_change_confirmation)
         await callback.answer()
-
+        
     elif callback.data.startswith("groups_page:"):
-        # Обработка пагинации (одиночный выбор)
+        # Обработка пагинации
         page = int(callback.data.split(":")[1])
         company_id = await ensure_company_id(session, state, callback.from_user.id)
         groups = await get_all_groups(session, company_id)
         keyboard = get_group_selection_keyboard(groups, page)
         await callback.message.edit_reply_markup(reply_markup=keyboard)
         await callback.answer()
-
+    
     elif callback.data == "cancel_edit":
         # Обработка кнопки "Назад" - делегируем универсальному обработчику
         await callback_cancel_edit(callback, state, session)
@@ -1280,14 +1152,14 @@ async def process_new_internship_object(callback: CallbackQuery, session: AsyncS
 👤 Username: @{target_user.username if target_user.username else 'Не указан'}
 📅 Дата регистрации: {target_user.registration_date.strftime('%d.%m.%Y %H:%M') if target_user.registration_date else 'Не указана'}
 👑 Роли: {target_user.roles[0].name if target_user.roles else 'Нет роли'}
-🗂️{get_groups_label(target_user)}: {format_user_groups(target_user)}
+🗂️Группа: {target_user.groups[0].name if target_user.groups else 'Нет группы'}
 📍1️⃣Объект стажировки: {target_user.internship_object.name if target_user.internship_object else 'Не назначен'}"""
-
+        
         keyboard = get_edit_confirmation_keyboard()
         await callback.message.edit_text(confirmation_text, reply_markup=keyboard)
         await state.set_state(UserEditStates.waiting_for_change_confirmation)
         await callback.answer()
-
+        
     elif callback.data.startswith("internship_object_page:"):
         # Обработка пагинации
         page = int(callback.data.split(":")[1])
@@ -1379,7 +1251,7 @@ async def process_new_work_object(callback: CallbackQuery, session: AsyncSession
 👤 Username: @{target_user.username if target_user.username else 'Не указан'}
 📅 Дата регистрации: {target_user.registration_date.strftime('%d.%m.%Y %H:%M') if target_user.registration_date else 'Не указана'}
 👑 Роли: {current_role}
-🗂️{get_groups_label(target_user)}: {format_user_groups(target_user)}
+🗂️Группа: {target_user.groups[0].name if target_user.groups else 'Нет группы'}
 📍2️⃣Объект работы: {target_user.work_object.name if target_user.work_object else 'Не назначен'}"""
         
         keyboard = get_edit_confirmation_keyboard()
@@ -1442,10 +1314,6 @@ async def process_confirm_change(callback: CallbackQuery, session: AsyncSession,
     elif edit_type == "group":
         success = await update_user_group(session, editing_user_id, new_value, recruiter.id, bot, company_id=company_id)
         error_message = "❌ Ошибка при изменении группы"
-    elif edit_type == "groups":
-        # Мультивыбор групп для наставников
-        success = await update_user_groups(session, editing_user_id, new_value, recruiter.id, bot, company_id=company_id)
-        error_message = "❌ Ошибка при изменении групп"
     elif edit_type == "internship_object":
         success = await update_user_internship_object(session, editing_user_id, new_value, recruiter.id, bot, company_id=company_id)
         error_message = "❌ Ошибка при изменении объекта стажировки"
@@ -1459,9 +1327,8 @@ async def process_confirm_change(callback: CallbackQuery, session: AsyncSession,
         if target_user:
             # Формируем полное сообщение как требует ТЗ
             role_name = target_user.roles[0].name if target_user.roles else "Нет роли"
-            group_name = format_user_groups(target_user)
-            groups_label = get_groups_label(target_user)
-
+            group_name = target_user.groups[0].name if target_user.groups else "Нет группы"
+            
             success_message = f"""✅ <b>Данные изменены</b>
 
 🦸🏻‍♂️ <b>Пользователь:</b> {target_user.full_name}
@@ -1474,7 +1341,7 @@ async def process_confirm_change(callback: CallbackQuery, session: AsyncSession,
 ━━━━━━━━━━━━
 
 🗂️ <b>Статус:</b>
-<b>{groups_label}:</b> {group_name}
+<b>Группа:</b> {group_name}
 <b>Роль:</b> {role_name}
 
 ━━━━━━━━━━━━
@@ -1674,10 +1541,9 @@ async def callback_cancel_delete_user(callback: CallbackQuery, state: FSMContext
         
         roles = await get_user_roles(session, user.id)
         role_name = roles[0].name if roles else "Не назначена"
-        group_name = format_user_groups(user)
-        groups_label = get_groups_label(user)
+        group_name = user.groups[0].name if user.groups else "Не назначена"
         is_trainee = role_name in ["Стажер", "Стажёр"]
-
+        
         # Формируем текст для редактора
         text = (
             f"🦸🏻‍♂️ <b>Пользователь:</b> {user.full_name}\n\n"
@@ -1687,7 +1553,7 @@ async def callback_cancel_delete_user(callback: CallbackQuery, state: FSMContext
             f"<b>Дата регистрации:</b> {user.registration_date.strftime('%d.%m.%Y %H:%M') if user.registration_date else 'Не указана'}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"🗂️ <b>Статус:</b>\n"
-            f"<b>{groups_label}:</b> {group_name}\n"
+            f"<b>Группа:</b> {group_name}\n"
             f"<b>Роль:</b> {role_name}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"📍 <b>Объект:</b>\n"
@@ -1785,9 +1651,8 @@ async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext, sessi
         
         # Формируем текст с информацией о пользователе
         role_name = target_user.roles[0].name if target_user.roles else "Нет роли"
-        group_name = format_user_groups(target_user)
-        groups_label = get_groups_label(target_user)
-
+        group_name = target_user.groups[0].name if target_user.groups else "Нет группы"
+        
         text = (
             f"🦸🏻‍♂️ <b>Пользователь:</b> {target_user.full_name}\n\n"
             f"<b>Телефон:</b> {target_user.phone_number}\n"
@@ -1796,7 +1661,7 @@ async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext, sessi
             f"<b>Дата регистрации:</b> {target_user.registration_date.strftime('%d.%m.%Y %H:%M') if target_user.registration_date else 'Не указана'}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"🗂️ <b>Статус:</b>\n"
-            f"<b>{groups_label}:</b> {group_name}\n"
+            f"<b>Группа:</b> {group_name}\n"
             f"<b>Роль:</b> {role_name}\n\n"
             f"━━━━━━━━━━━━\n\n"
             f"📍 <b>Объект:</b>\n"
