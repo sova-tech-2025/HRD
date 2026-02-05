@@ -289,6 +289,12 @@ class AttestationAssignmentStates(StatesGroup):
     confirming_attestation_assignment = State()  # Подтверждение назначения аттестации
 
 
+class RecruiterAttestationStates(StatesGroup):
+    """Состояния для открытия аттестации стажеру рекрутером (без прохождения этапов)"""
+    selecting_manager = State()  # Выбор руководителя для аттестации
+    confirming_assignment = State()  # Подтверждение назначения аттестации
+
+
 class BroadcastStates(StatesGroup):
     """Состояния для массовой рассылки тестов по группам (Task 8)"""
     waiting_for_script = State()  # Ввод текста рассылки

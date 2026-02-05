@@ -2,6 +2,48 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
+# Тексты кнопок главного меню для всех ролей
+# Используется для валидации ввода - чтобы случайное нажатие на меню не сохранялось как данные
+MAIN_MENU_TEXTS = {
+    # Общие для всех
+    "Мой профиль 🦸🏻‍♂️",
+    "Помощь ❓",
+    "База знаний 📁️",
+    "База знаний 📁",
+    "Мои тесты 📋",
+    "Мои тесты 📁",  # старая версия или опечатка
+    "Посмотреть баллы 📊",
+    # Стажер
+    "Траектория обучения 📖",
+    "Мой наставник 🎓",
+    "Тесты траектории 🗺️",
+    # Рекрутер
+    "Рассылка ✈️",
+    "Тесты 📄",
+    "Наставники 🦉",
+    "Наставники 🎓",  # возможная путаница с "Мой наставник"
+    "Стажеры 🐣",
+    "Группы 🗂️",
+    "Объекты 📍",
+    "Траектория 📖",
+    "Все пользователи 🚸",
+    "Новые пользователи ➕",
+    "Компания 🏢",
+    # Наставник
+    "Мои стажеры 👥",
+    "Тесты стажеров 📝",
+    # Руководитель
+    "Аттестация ✔️",
+    # Главное меню (текст)
+    "≡ Главное меню",
+}
+
+
+def is_main_menu_text(text: str) -> bool:
+    """Проверяет, является ли текст кнопкой главного меню"""
+    return text.strip() in MAIN_MENU_TEXTS
+
+
 def get_welcome_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для приветствия незарегистрированных пользователей"""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -2166,12 +2208,22 @@ def get_trainees_list_keyboard(trainees: list, page: int = 0, per_page: int = 5)
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_trainee_detail_keyboard(trainee_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура для детального просмотра стажера"""
+def get_trainee_detail_keyboard(trainee_id: int, has_attestation: bool = False) -> InlineKeyboardMarkup:
+    """Клавиатура для детального просмотра стажера
+
+    Args:
+        trainee_id: ID стажера
+        has_attestation: True если у стажера есть траектория с аттестацией
+    """
     keyboard = [
-        [InlineKeyboardButton(text="📊 Просмотреть прогресс", callback_data=f"view_trainee_progress:{trainee_id}")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_recruiter_trainees")]
+        [InlineKeyboardButton(text="📊 Просмотреть прогресс", callback_data=f"view_trainee_progress:{trainee_id}")]
     ]
+
+    # Добавляем кнопку открытия аттестации если есть траектория с аттестацией
+    if has_attestation:
+        keyboard.append([InlineKeyboardButton(text="🏁 Открыть аттестацию", callback_data=f"recruiter_open_attestation:{trainee_id}")])
+
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_recruiter_trainees")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -2575,3 +2627,68 @@ def get_company_bot_link_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="company:view_code")]
     ])
     return keyboard
+
+
+def get_user_groups_multiselect_keyboard(
+    groups: list,
+    selected_group_ids: list,
+    page: int = 0,
+    per_page: int = 5
+) -> InlineKeyboardMarkup:
+    """Клавиатура мультивыбора групп для редактирования пользователя (наставника)
+
+    Args:
+        groups: Список объектов Group
+        selected_group_ids: Список ID выбранных групп
+        page: Номер текущей страницы (0-indexed)
+        per_page: Количество групп на странице
+
+    Returns:
+        InlineKeyboardMarkup с кнопками групп, пагинацией и управлением
+    """
+    keyboard = []
+    selected_group_ids = selected_group_ids or []
+
+    # Пагинация: вычисляем срез групп для текущей страницы
+    total_groups = len(groups)
+    total_pages = (total_groups + per_page - 1) // per_page if total_groups > 0 else 1
+    start_idx = page * per_page
+    end_idx = min(start_idx + per_page, total_groups)
+    page_groups = groups[start_idx:end_idx]
+
+    # Кнопки групп с отметками о выборе
+    for group in page_groups:
+        prefix = "✅ " if group.id in selected_group_ids else ""
+        group_name = group.name[:20] + "..." if len(group.name) > 20 else group.name
+        keyboard.append([InlineKeyboardButton(
+            text=f"{prefix}{group_name}",
+            callback_data=f"user_edit_toggle_group:{group.id}"
+        )])
+
+    # Кнопки пагинации
+    pagination_row = []
+    if page > 0:
+        pagination_row.append(InlineKeyboardButton(
+            text="⬅️",
+            callback_data=f"user_edit_groups_page:{page - 1}"
+        ))
+    if page < total_pages - 1:
+        pagination_row.append(InlineKeyboardButton(
+            text="➡️",
+            callback_data=f"user_edit_groups_page:{page + 1}"
+        ))
+    if pagination_row:
+        keyboard.append(pagination_row)
+
+    # Кнопка сохранения (только если есть выбранные группы)
+    if selected_group_ids:
+        keyboard.append([InlineKeyboardButton(
+            text="💾 Сохранить",
+            callback_data="user_edit_save_groups"
+        )])
+
+    # Кнопки навигации
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_edit")])
+    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)

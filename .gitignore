@@ -177,6 +177,8 @@ docker-compose.local.yml
 !handlers/
 !keyboards/
 !database/
+!tests/
+!**/test_*_keyboard*.py
 
 # Файлы состояния
 *.state
@@ -205,3 +207,7 @@ sample_data/
 .memory-base
 .claude
 .task
+.env
+AGENTS.md
+CLAUDE.md
+docs

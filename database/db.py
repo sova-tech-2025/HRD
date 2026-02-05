@@ -4827,7 +4827,98 @@ async def update_user_group(session: AsyncSession, user_id: int, new_group_id: i
         return False
 
 
-async def update_user_internship_object(session: AsyncSession, user_id: int, 
+async def update_user_groups(session: AsyncSession, user_id: int, new_group_ids: List[int],
+                            recruiter_id: int, bot=None, company_id: int = None) -> bool:
+    """Обновление нескольких групп пользователя (для наставников) с изоляцией по компании.
+
+    Args:
+        session: Асинхронная сессия SQLAlchemy
+        user_id: ID пользователя
+        new_group_ids: Список ID новых групп (не может быть пустым)
+        recruiter_id: ID рекрутера, вносящего изменения
+        bot: Инстанс бота для отправки уведомлений
+        company_id: ID компании для изоляции
+
+    Returns:
+        True если обновление прошло успешно, False в случае ошибки
+    """
+    try:
+        # Валидация: список групп не может быть пустым
+        if not new_group_ids:
+            logger.error(f"Список групп пуст для пользователя {user_id}")
+            return False
+
+        user = await get_user_with_details(session, user_id)
+        if not user:
+            logger.error(f"Пользователь {user_id} не найден")
+            return False
+
+        # Получаем company_id для изоляции
+        if company_id is None:
+            company_id = user.company_id
+
+        # Изоляция по компании - проверяем принадлежность пользователя
+        if company_id is not None and user.company_id != company_id:
+            logger.error(f"Пользователь {user_id} не принадлежит компании {company_id}")
+            return False
+
+        # Получаем старые группы для уведомления
+        old_group_names = ", ".join([g.name for g in user.groups]) if user.groups else "Нет групп"
+
+        # Проверяем существование всех групп с изоляцией по компании
+        query = select(Group).where(
+            Group.id.in_(new_group_ids),
+            Group.is_active == True
+        )
+        if company_id is not None:
+            query = query.where(Group.company_id == company_id)
+
+        result = await session.execute(query)
+        valid_groups = result.scalars().all()
+        valid_group_ids = [g.id for g in valid_groups]
+
+        # Проверяем, что все запрошенные группы найдены (дедупликация на случай повторов)
+        unique_new_group_ids = set(new_group_ids)
+        if set(valid_group_ids) != unique_new_group_ids:
+            missing_ids = unique_new_group_ids - set(valid_group_ids)
+            logger.error(
+                f"Группы {missing_ids} не найдены или не принадлежат компании {company_id}"
+            )
+            return False
+
+        # Удаляем старые группы
+        delete_stmt = delete(user_groups).where(user_groups.c.user_id == user_id)
+        await session.execute(delete_stmt)
+
+        # Добавляем новые группы
+        for group_id in valid_group_ids:
+            insert_stmt = insert(user_groups).values(user_id=user_id, group_id=group_id)
+            await session.execute(insert_stmt)
+
+        await session.commit()
+
+        # Формируем строку с именами новых групп
+        new_group_names = ", ".join([g.name for g in valid_groups])
+
+        # Отправляем уведомление пользователю
+        if bot:
+            await send_notification_about_data_change(
+                session, bot, user_id, recruiter_id,
+                "ГРУППЫ", old_group_names, new_group_names, company_id
+            )
+
+        logger.info(
+            f"Группы пользователя {user_id} изменены с '{old_group_names}' на '{new_group_names}'"
+        )
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка обновления групп пользователя {user_id}: {e}")
+        await session.rollback()
+        return False
+
+
+async def update_user_internship_object(session: AsyncSession, user_id: int,
                                        new_object_id: int, recruiter_id: int, bot=None, company_id: int = None) -> bool:
     """Обновление объекта стажировки пользователя с изоляцией по компании"""
     try:
@@ -4943,13 +5034,22 @@ async def send_notification_about_data_change(session: AsyncSession, bot, user_i
             return False
         
         # Специальная обработка для ролевых уведомлений (роль, группа, объекты)
-        if field_name in ["РОЛЬ", "ГРУППА", "ОБЪЕКТ СТАЖИРОВКИ", "ОБЪЕКТ РАБОТЫ"]:
+        if field_name in ["РОЛЬ", "ГРУППА", "ГРУППЫ", "ОБЪЕКТ СТАЖИРОВКИ", "ОБЪЕКТ РАБОТЫ"]:
             if field_name == "РОЛЬ":
                 # new_value уже содержит полный текст с предупреждениями
                 notification_text = f"""‼️Твои данные изменены:
 
 
 {new_value}
+
+
+Изменение внес: Рекрутер - {recruiter.full_name}"""
+            elif field_name == "ГРУППЫ":
+                # Для множественных групп используем множественное число глагола
+                notification_text = f"""‼️Твои данные изменены:
+
+
+{field_name} изменены с '{old_value}' на '{new_value}'
 
 
 Изменение внес: Рекрутер - {recruiter.full_name}"""
@@ -4971,7 +5071,7 @@ async def send_notification_about_data_change(session: AsyncSession, bot, user_i
 
         # Создаем клавиатуру с кнопкой "Перезагрузка" для ролевых уведомлений
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        if field_name in ["РОЛЬ", "ГРУППА", "ОБЪЕКТ СТАЖИРОВКИ", "ОБЪЕКТ РАБОТЫ"]:
+        if field_name in ["РОЛЬ", "ГРУППА", "ГРУППЫ", "ОБЪЕКТ СТАЖИРОВКИ", "ОБЪЕКТ РАБОТЫ"]:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔄 Перезагрузка", callback_data="reload_menu")]
             ])

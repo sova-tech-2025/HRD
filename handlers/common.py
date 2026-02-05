@@ -29,6 +29,7 @@ async def format_profile_text(user, session: AsyncSession) -> str:
     
     # Формируем информацию о группах
     groups_str = ", ".join([group.name for group in user.groups]) if user.groups else "Не указана"
+    groups_label = "Группы" if user.groups and len(user.groups) > 1 else "Группа"
     
     # Формируем информацию об объектах
     internship_obj = user.internship_object.name if user.internship_object else "Не указан"
@@ -49,7 +50,7 @@ async def format_profile_text(user, session: AsyncSession) -> str:
 ━━━━━━━━━━━━
 
 🗂️ <b>Статус ▾</b>
-<b>Группа:</b> {groups_str}
+<b>{groups_label}:</b> {groups_str}
 <b>Роль:</b> {primary_role}
 
 ━━━━━━━━━━━━
