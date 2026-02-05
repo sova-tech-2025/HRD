@@ -3410,10 +3410,13 @@ async def callback_toggle_stage(callback: CallbackQuery, state: FSMContext, sess
                     TraineeSessionProgress.stage_progress_id == current_stage_progress.id
                 ).values(is_opened=False)
             )
-            
+
+            # Коммитим изменения сразу, чтобы они были видны в БД
+            await session.commit()
+
             # Уведомление стажеру о закрытии этапа не отправляем
             # (стажеру не нужно знать о закрытии этапов)
-            
+
             action_text = "закрыт"
         else:
             # Открываем этап
