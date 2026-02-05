@@ -3365,6 +3365,9 @@ async def callback_toggle_stage(callback: CallbackQuery, state: FSMContext, sess
     try:
         await callback.answer()
 
+        # Сбрасываем кэш сессии чтобы получить актуальные данные из БД
+        session.expire_all()
+
         parts = callback.data.split(":")
         trainee_id = int(parts[1])
         stage_id = int(parts[2])
@@ -3531,11 +3534,16 @@ async def update_stages_management_interface(callback: CallbackQuery, session: A
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
-        await callback.message.edit_text(
-            header_info,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
+        try:
+            await callback.message.edit_text(
+                header_info,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        except Exception as edit_err:
+            # Игнорируем ошибку "message is not modified" - не критично
+            if "message is not modified" not in str(edit_err):
+                raise
 
     except Exception as e:
         log_user_error(callback.from_user.id, "update_stages_interface_error", str(e))
