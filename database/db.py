@@ -5999,6 +5999,18 @@ async def assign_learning_path_to_trainee(session: AsyncSession, trainee_id: int
             logger.error(f"Стажер {trainee_id} или траектория {learning_path_id} не найдены")
             return False
 
+        # Проверяем, не назначена ли уже эта же траектория
+        existing_result = await session.execute(
+            select(TraineeLearningPath).where(
+                TraineeLearningPath.trainee_id == trainee_id,
+                TraineeLearningPath.learning_path_id == learning_path_id,
+                TraineeLearningPath.is_active == True
+            )
+        )
+        if existing_result.scalar_one_or_none():
+            logger.info(f"Траектория {learning_path_id} уже назначена стажеру {trainee_id}, пропускаем переназначение")
+            return True  # Уже назначена, ничего не делаем
+
         # Деактивируем существующие назначения траекторий стажеру
         await session.execute(
             update(TraineeLearningPath).where(
