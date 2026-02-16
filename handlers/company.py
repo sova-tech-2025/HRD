@@ -30,7 +30,7 @@ router = Router()
 async def _send_mentor_menu_photo(message: Message):
     """Отправляет главное меню наставника с баннером"""
     menu_text = (
-        "≡ <b>Главное меню</b>\n\n"
+        "☰ <b>Главное меню</b>\n\n"
         "Используй кнопки для навигации по системе"
     )
     keyboard = get_mentor_inline_menu()

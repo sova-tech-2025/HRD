@@ -134,7 +134,7 @@ async def cmd_profile(message: Message, state: FSMContext, session: AsyncSession
     # Используем универсальную функцию формирования профиля
     profile_text = await format_profile_text(user, session)
     profile_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
     ])
     await message.answer(profile_text, parse_mode="HTML", reply_markup=profile_keyboard)
 
@@ -160,7 +160,7 @@ async def cmd_mentor_main_menu(message: Message, state: FSMContext, session: Asy
     from keyboards.keyboards import get_mentor_inline_menu
 
     main_menu_text = (
-        "≡ <b>Главное меню</b>\n\n"
+        "☰ <b>Главное меню</b>\n\n"
         "Используй команды бота или кнопки клавиатуры для навигации по системе"
     )
     keyboard = get_mentor_inline_menu()
@@ -219,7 +219,7 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext, session:
             from keyboards.keyboards import get_mentor_inline_menu
 
             main_menu_text = (
-                "≡ <b>Главное меню</b>\n\n"
+                "☰ <b>Главное меню</b>\n\n"
                 "Используй команды бота или кнопки клавиатуры для навигации по системе"
             )
             keyboard = get_mentor_inline_menu()
@@ -253,7 +253,7 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext, session:
         keyboard = get_keyboard_by_role(primary_role.name)
 
         main_menu_text = (
-            "≡ Главное меню\n\n"
+            "☰ Главное меню\n\n"
             "Используй команды бота или кнопки клавиатуры для навигации по системе."
         )
 

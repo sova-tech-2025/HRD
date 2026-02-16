@@ -20,7 +20,7 @@ router = Router()
 async def _send_mentor_menu(message: Message):
     """Отправляет главное меню наставника с баннером (по Figma 7.1-7.4)"""
     menu_text = (
-        "≡ <b>Главное меню</b>\n\n"
+        "☰ <b>Главное меню</b>\n\n"
         "Используй кнопки для навигации по системе"
     )
     photo_source = None
