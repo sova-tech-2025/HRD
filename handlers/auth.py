@@ -8,7 +8,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.db import get_user_by_tg_id, get_user_roles, get_company_by_id
-from keyboards.keyboards import get_keyboard_by_role, get_welcome_keyboard
+from keyboards.keyboards import get_keyboard_by_role, get_welcome_keyboard, get_mentor_inline_menu
 from states.states import AuthStates, RegistrationStates
 from utils.logger import log_user_action, log_user_error
 from utils.bot_commands import set_bot_commands
@@ -79,14 +79,27 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
             return
         
         primary_role = roles[0].name
-        
-        await message.answer(
-            f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
-            reply_markup=get_keyboard_by_role(primary_role)
-        )
-        
+
+        if primary_role == "Наставник":
+            from aiogram.types import ReplyKeyboardRemove
+            await message.answer(
+                f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            await message.answer(
+                "≡ <b>Главное меню</b>\n\n"
+                "Используй кнопки для навигации по системе",
+                parse_mode="HTML",
+                reply_markup=get_mentor_inline_menu()
+            )
+        else:
+            await message.answer(
+                f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
+                reply_markup=get_keyboard_by_role(primary_role)
+            )
+
         await set_bot_commands(bot, primary_role)
-        
+
         await state.update_data(
             user_id=user.id,
             role=primary_role,
@@ -308,14 +321,27 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession, 
             return
         
         primary_role = roles[0].name
-        
-        await message.answer(
-            f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
-            reply_markup=get_keyboard_by_role(primary_role)
-        )
-        
+
+        if primary_role == "Наставник":
+            from aiogram.types import ReplyKeyboardRemove
+            await message.answer(
+                f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            await message.answer(
+                "≡ <b>Главное меню</b>\n\n"
+                "Используй кнопки для навигации по системе",
+                parse_mode="HTML",
+                reply_markup=get_mentor_inline_menu()
+            )
+        else:
+            await message.answer(
+                f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
+                reply_markup=get_keyboard_by_role(primary_role)
+            )
+
         await set_bot_commands(bot, primary_role)
-        
+
         await state.update_data(
             user_id=user.id,
             role=primary_role,
@@ -323,11 +349,11 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession, 
             auth_time=message.date.timestamp(),
             company_id=user.company_id
         )
-        
+
         log_user_action(
-            message.from_user.id, 
-            message.from_user.username, 
-            "successful login from start", 
+            message.from_user.id,
+            message.from_user.username,
+            "successful login from start",
             {"role": primary_role, "user_id": user.id, "company_id": user.company_id}
         )
     except Exception as e:

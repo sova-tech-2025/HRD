@@ -15,7 +15,8 @@ from database.models import Company
 from keyboards.keyboards import (
     get_contact_keyboard, get_company_info_keyboard, get_company_edit_name_keyboard,
     get_company_edit_description_keyboard, get_company_code_keyboard,
-    get_company_code_only_keyboard, get_company_bot_link_keyboard
+    get_company_code_only_keyboard, get_company_bot_link_keyboard,
+    get_mentor_inline_menu
 )
 from states.states import CompanyCreationStates, CompanyJoinStates, CompanyManagementStates
 from utils.logger import log_user_action, log_user_error
@@ -306,10 +307,23 @@ async def finalize_company_creation(message: Message, state: FSMContext, session
                 await set_bot_commands(bot, primary_role)
                 
                 # Приветственное сообщение с клавиатурой
-                await message.answer(
-                    f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
-                    reply_markup=get_keyboard_by_role(primary_role)
-                )
+                if primary_role == "Наставник":
+                    from aiogram.types import ReplyKeyboardRemove
+                    await message.answer(
+                        f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
+                        reply_markup=ReplyKeyboardRemove()
+                    )
+                    await message.answer(
+                        "≡ <b>Главное меню</b>\n\n"
+                        "Используй кнопки для навигации по системе",
+                        parse_mode="HTML",
+                        reply_markup=get_mentor_inline_menu()
+                    )
+                else:
+                    await message.answer(
+                        f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
+                        reply_markup=get_keyboard_by_role(primary_role)
+                    )
                 
                 log_user_action(
                     message.from_user.id,
