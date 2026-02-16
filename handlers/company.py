@@ -1,9 +1,11 @@
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from sqlalchemy.ext.asyncio import AsyncSession
 import re
+
+from config import MENTOR_MENU_IMAGE_FILE_ID, MENTOR_MENU_IMAGE_PATH
 
 from database.db import (
     create_company, get_company_by_invite_code, check_company_access,
@@ -23,6 +25,30 @@ from utils.logger import log_user_action, log_user_error
 from utils.validators import validate_full_name, validate_phone_number
 
 router = Router()
+
+
+async def _send_mentor_menu_photo(message: Message):
+    """Отправляет главное меню наставника с баннером"""
+    menu_text = (
+        "≡ <b>Главное меню</b>\n\n"
+        "Используй кнопки для навигации по системе"
+    )
+    keyboard = get_mentor_inline_menu()
+    photo_source = None
+    if MENTOR_MENU_IMAGE_FILE_ID:
+        photo_source = MENTOR_MENU_IMAGE_FILE_ID
+    elif MENTOR_MENU_IMAGE_PATH:
+        try:
+            photo_source = FSInputFile(MENTOR_MENU_IMAGE_PATH)
+        except Exception:
+            pass
+    if photo_source:
+        try:
+            await message.answer_photo(photo=photo_source, caption=menu_text, parse_mode="HTML", reply_markup=keyboard)
+            return
+        except Exception:
+            pass
+    await message.answer(menu_text, parse_mode="HTML", reply_markup=keyboard)
 
 
 # ==============================================================================
@@ -313,12 +339,7 @@ async def finalize_company_creation(message: Message, state: FSMContext, session
                         f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
                         reply_markup=ReplyKeyboardRemove()
                     )
-                    await message.answer(
-                        "≡ <b>Главное меню</b>\n\n"
-                        "Используй кнопки для навигации по системе",
-                        parse_mode="HTML",
-                        reply_markup=get_mentor_inline_menu()
-                    )
+                    await _send_mentor_menu_photo(message)
                 else:
                     await message.answer(
                         f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",

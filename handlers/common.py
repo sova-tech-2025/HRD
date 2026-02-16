@@ -4,13 +4,25 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import MAIN_MENU_IMAGE_FILE_ID, MAIN_MENU_IMAGE_URL, MAIN_MENU_IMAGE_PATH
+from config import MAIN_MENU_IMAGE_FILE_ID, MAIN_MENU_IMAGE_URL, MAIN_MENU_IMAGE_PATH, MENTOR_MENU_IMAGE_FILE_ID, MENTOR_MENU_IMAGE_PATH
 from database.db import get_user_by_tg_id, get_user_roles, check_user_permission
 from handlers.auth import check_auth
 from keyboards.keyboards import format_help_message
 from utils.logger import logger, log_user_action
 
 router = Router()
+
+
+def _get_mentor_menu_photo():
+    """Получает источник фото для меню наставника"""
+    if MENTOR_MENU_IMAGE_FILE_ID:
+        return MENTOR_MENU_IMAGE_FILE_ID
+    if MENTOR_MENU_IMAGE_PATH:
+        try:
+            return FSInputFile(MENTOR_MENU_IMAGE_PATH)
+        except Exception:
+            pass
+    return None
 
 
 async def format_profile_text(user, session: AsyncSession) -> str:
@@ -148,15 +160,24 @@ async def cmd_mentor_main_menu(message: Message, state: FSMContext, session: Asy
     from keyboards.keyboards import get_mentor_inline_menu
 
     main_menu_text = (
-        "☰ <b>Главное меню</b>\n\n"
+        "≡ <b>Главное меню</b>\n\n"
         "Используй команды бота или кнопки клавиатуры для навигации по системе"
     )
+    keyboard = get_mentor_inline_menu()
 
-    await message.answer(
-        main_menu_text,
-        parse_mode="HTML",
-        reply_markup=get_mentor_inline_menu()
-    )
+    photo_source = _get_mentor_menu_photo()
+    if photo_source:
+        try:
+            await message.answer_photo(
+                photo=photo_source,
+                caption=main_menu_text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+        except Exception:
+            await message.answer(main_menu_text, parse_mode="HTML", reply_markup=keyboard)
+    else:
+        await message.answer(main_menu_text, parse_mode="HTML", reply_markup=keyboard)
 
     await state.clear()
     log_user_action(message.from_user.id, message.from_user.username, "opened_mentor_main_menu")
@@ -193,31 +214,34 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext, session:
         
         primary_role = max(roles, key=lambda r: role_priority.get(r.name, 0))
 
-        # Специальная обработка для Наставника — инлайн-меню
+        # Специальная обработка для Наставника — инлайн-меню с баннером (по Figma 7.1-7.4)
         if primary_role.name == "Наставник":
             from keyboards.keyboards import get_mentor_inline_menu
 
             main_menu_text = (
-                "☰ <b>Главное меню</b>\n\n"
+                "≡ <b>Главное меню</b>\n\n"
                 "Используй команды бота или кнопки клавиатуры для навигации по системе"
             )
+            keyboard = get_mentor_inline_menu()
 
+            photo_source = _get_mentor_menu_photo()
             try:
-                await callback.message.edit_text(
-                    main_menu_text,
-                    parse_mode="HTML",
-                    reply_markup=get_mentor_inline_menu()
-                )
-            except Exception:
-                await callback.message.answer(
-                    main_menu_text,
-                    parse_mode="HTML",
-                    reply_markup=get_mentor_inline_menu()
-                )
+                await callback.message.delete()
+            except:
+                pass
+
+            if photo_source:
                 try:
-                    await callback.message.delete()
-                except:
-                    pass
+                    await callback.message.answer_photo(
+                        photo=photo_source,
+                        caption=main_menu_text,
+                        parse_mode="HTML",
+                        reply_markup=keyboard
+                    )
+                except Exception:
+                    await callback.message.answer(main_menu_text, parse_mode="HTML", reply_markup=keyboard)
+            else:
+                await callback.message.answer(main_menu_text, parse_mode="HTML", reply_markup=keyboard)
 
             await state.clear()
             await callback.answer()
