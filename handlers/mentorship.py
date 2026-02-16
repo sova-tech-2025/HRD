@@ -1173,9 +1173,27 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
         await callback.answer()
         return
 
-    # Назначаем траекторию
+    # Проверяем, не назначена ли уже эта же траектория
     data = await state.get_data()
     company_id = data.get('company_id')
+    existing_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
+    if existing_path and existing_path.learning_path_id == learning_path_id:
+        # Та же траектория уже активна — перенаправляем к управлению этапами
+        await callback.message.edit_text(
+            f"📚 Траектория <b>{existing_path.learning_path.name if existing_path.learning_path else ''}</b> "
+            f"уже назначена стажеру <b>{trainee.full_name}</b>.\n\n"
+            "Используй кнопку ниже для управления этапами.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🟡 Этапы", callback_data=f"manage_stages:{trainee_id}")],
+                [InlineKeyboardButton(text="👥 Мои стажеры", callback_data="my_trainees"),
+                 InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
+            ])
+        )
+        await callback.answer()
+        return
+
+    # Назначаем траекторию
     success = await assign_learning_path_to_trainee(session, trainee_id, learning_path_id, mentor.id, bot, company_id=company_id)
 
     if success:
