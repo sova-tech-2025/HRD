@@ -19,8 +19,8 @@ from typing import Optional
 
 # Константы для иконок статуса теста
 TEST_ICON_PASSED = "✅"
-TEST_ICON_AVAILABLE = "🟡"
-TEST_ICON_CLOSED = "⛔️"
+TEST_ICON_AVAILABLE = "♻️"
+TEST_ICON_CLOSED = "❌"
 
 
 def get_test_status_icon(is_passed: bool, is_stage_opened: bool) -> str:
@@ -36,8 +36,8 @@ def get_test_status_icon(is_passed: bool, is_stage_opened: bool) -> str:
 
     Логика (единая для всего приложения):
         - Пройден И этап открыт: ✅
-        - Не пройден И этап открыт: 🟡
-        - Этап закрыт: ⛔️
+        - Не пройден И этап открыт: ♻️
+        - Этап закрыт: ❌
     """
     if is_passed and is_stage_opened:
         return TEST_ICON_PASSED

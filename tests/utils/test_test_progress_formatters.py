@@ -18,17 +18,17 @@ class TestGetTestStatusIcon:
     def test_passed_but_stage_closed_returns_closed(self):
         """Если тест пройден, но этап закрыт - закрытый"""
         icon = get_test_status_icon(is_passed=True, is_stage_opened=False)
-        assert icon == "⛔️"
+        assert icon == "❌"
 
     def test_not_passed_stage_open_returns_available(self):
         """Если тест не пройден и этап открыт - доступен"""
         icon = get_test_status_icon(is_passed=False, is_stage_opened=True)
-        assert icon == "🟡"
+        assert icon == "♻️"
 
     def test_not_passed_stage_closed_returns_closed(self):
         """Если тест не пройден и этап закрыт - закрытый"""
         icon = get_test_status_icon(is_passed=False, is_stage_opened=False)
-        assert icon == "⛔️"
+        assert icon == "❌"
 
 
 class TestFormatTestLine:
@@ -41,8 +41,8 @@ class TestFormatTestLine:
 
     def test_formats_with_custom_icon(self):
         """Форматирование с кастомной иконкой"""
-        line = format_test_line(test_num=2, test_name="SQL запросы", icon="🟡")
-        assert line == "🟡<b>Тест 2:</b> SQL запросы\n"
+        line = format_test_line(test_num=2, test_name="SQL запросы", icon="♻️")
+        assert line == "♻️<b>Тест 2:</b> SQL запросы\n"
 
 
 class TestFormatTestWithPercentage:
@@ -64,11 +64,11 @@ class TestFormatTestWithPercentage:
         line = format_test_with_percentage(
             test_num=2,
             test_name="SQL запросы",
-            icon="🟡",
+            icon="♻️",
             score=None,
             max_score=None
         )
-        assert line == "🟡<b>Тест 2:</b> SQL запросы\n"
+        assert line == "♻️<b>Тест 2:</b> SQL запросы\n"
 
     def test_rounds_percentage(self):
         """Проценты округляются до целых"""
