@@ -283,17 +283,14 @@ async def callback_mentor_panel(callback: CallbackQuery, state: FSMContext, sess
             )
     else:
         try:
-            await callback.message.edit_text(
-                instruction_text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
-        except:
-            await callback.message.answer(
-                instruction_text,
-                reply_markup=keyboard,
-                parse_mode="HTML"
-            )
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(
+            instruction_text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
 
     await callback.answer()
     log_user_action(callback.from_user.id, callback.from_user.username, "opened_mentor_panel")
@@ -373,7 +370,12 @@ async def callback_mentor_profile(callback: CallbackQuery, session: AsyncSession
         f"<b>Работы:</b> {user.work_object.name if user.work_object else 'Не указан'}\n"
     )
 
-    await callback.message.edit_text(
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    await callback.message.answer(
         profile_text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -394,7 +396,12 @@ async def callback_mentor_help(callback: CallbackQuery, session: AsyncSession):
         "доступна в разделе <b>Панель наставника</b>."
     )
 
-    await callback.message.edit_text(
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    await callback.message.answer(
         help_text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -475,7 +482,11 @@ async def callback_mentor_my_tests(callback: CallbackQuery, state: FSMContext, s
     available_tests = await get_user_broadcast_tests(session, user.id, exclude_completed=False, company_id=company_id)
 
     if not available_tests:
-        await callback.message.edit_text(
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(
             "❌ Пока новых тестов нет\n"
             "Когда появятся, тебе придёт уведомление",
             parse_mode="HTML",
