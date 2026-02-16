@@ -1,10 +1,12 @@
 ﻿from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from datetime import datetime
+
+from config import MENTOR_PANEL_IMAGE_FILE_ID, MENTOR_PANEL_IMAGE_PATH
 
 from database.db import (
     get_unassigned_trainees, get_available_mentors, assign_mentor,
@@ -217,7 +219,88 @@ async def cmd_mentor_trainees(message: Message, state: FSMContext, session: Asyn
 
 @router.callback_query(F.data == "mentor_panel")
 async def callback_mentor_panel(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
-    """Обработчик инлайн-кнопки 'Панель наставника 🎓' — список стажеров"""
+    """Обработчик инлайн-кнопки 'Панель наставника 🎓' — инструкция + навигация (по Figma 11.1-11.6)"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Не зарегистрирован", show_alert=True)
+        return
+
+    instruction_text = (
+        "<b>Инструкция для наставника</b>\n\n"
+        "<b>Напиши новому стажеру:</b>\n"
+        "👋 При появлении нового стажера у тебя есть возможность "
+        "сразу посмотреть его контактные данные для связи\n\n"
+        "<b>Назначение траектории:</b>\n"
+        "📖 Обязательно назначь обучающую траекторию — это пошаговый "
+        "маршрут с закреплёнными материалами и тестами, чтобы обучение "
+        "было последовательным\n\n"
+        "<b>Управление доступом:</b>\n"
+        "🔓 Открывай доступ к этапам траектории постепенно. Так стажер "
+        "не перегрузится сразу, будет идти по шагам и лучше усваивать материал\n\n"
+        "<b>Отслеживание прогресса:</b>\n"
+        "📈 Следи за прогрессом: выбирая стажера, можешь видеть, "
+        "на каком он этапе и как успешно проходит каждый тест\n\n"
+        "<b>Аттестация:</b>\n"
+        "🎓 Для завершения стажировки стажеру нужно сдать аттестацию. "
+        "Ты можешь назначить ее только после успешного прохождения всех тестов."
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Мои стажеры", callback_data="mentor_my_trainees")],
+        [InlineKeyboardButton(text="Назначить тест", callback_data="mentor_assign_test")],
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+    ])
+
+    # Отправляем фото-баннер + инструкцию (по Figma 11.1-11.2)
+    photo_source = None
+    if MENTOR_PANEL_IMAGE_FILE_ID:
+        photo_source = MENTOR_PANEL_IMAGE_FILE_ID
+    elif MENTOR_PANEL_IMAGE_PATH:
+        try:
+            photo_source = FSInputFile(MENTOR_PANEL_IMAGE_PATH)
+        except Exception:
+            pass
+
+    if photo_source:
+        try:
+            await callback.message.delete()
+        except:
+            pass
+        try:
+            await callback.message.answer_photo(
+                photo=photo_source,
+                caption=instruction_text,
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+        except Exception:
+            # Фоллбэк — текст без фото
+            await callback.message.answer(
+                instruction_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+    else:
+        try:
+            await callback.message.edit_text(
+                instruction_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        except:
+            await callback.message.answer(
+                instruction_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+
+    await callback.answer()
+    log_user_action(callback.from_user.id, callback.from_user.username, "opened_mentor_panel")
+
+
+@router.callback_query(F.data == "mentor_my_trainees")
+async def callback_mentor_my_trainees(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик 'Мои стажеры' — список стажеров наставника (по Figma 11.7-11.11)"""
     user = await get_user_by_tg_id(session, callback.from_user.id)
     if not user:
         await callback.answer("❌ Не зарегистрирован", show_alert=True)
@@ -227,12 +310,13 @@ async def callback_mentor_panel(callback: CallbackQuery, state: FSMContext, sess
 
     if not trainees:
         await callback.message.edit_text(
-            "👥 <b>Твои стажеры</b>\n\n"
+            "👥 <b>Мои стажеры</b>\n\n"
             "У тебя пока нет назначенных стажеров.\n"
             "Обратись к рекрутеру для назначения стажеров.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="← назад", callback_data="mentor_panel")],
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -249,8 +333,9 @@ async def callback_mentor_panel(callback: CallbackQuery, state: FSMContext, sess
             )
         ])
 
-    keyboard.inline_keyboard.append([
-        InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
+    keyboard.inline_keyboard.extend([
+        [InlineKeyboardButton(text="← назад", callback_data="mentor_panel")],
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
     ])
 
     await callback.message.edit_text(
@@ -259,7 +344,7 @@ async def callback_mentor_panel(callback: CallbackQuery, state: FSMContext, sess
         parse_mode="HTML"
     )
     await callback.answer()
-    log_user_action(callback.from_user.id, callback.from_user.username, "opened_mentor_panel")
+    log_user_action(callback.from_user.id, callback.from_user.username, "viewed_mentor_trainees")
 
 
 @router.callback_query(F.data == "mentor_profile")
@@ -291,7 +376,7 @@ async def callback_mentor_profile(callback: CallbackQuery, session: AsyncSession
         profile_text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ])
     )
     await callback.answer()
@@ -299,35 +384,71 @@ async def callback_mentor_profile(callback: CallbackQuery, session: AsyncSession
 
 @router.callback_query(F.data == "mentor_help")
 async def callback_mentor_help(callback: CallbackQuery, session: AsyncSession):
-    """Обработчик 'Помощь' из инлайн-меню наставника — инструкция по Figma"""
+    """Обработчик 'Помощь' из инлайн-меню наставника — общая справка"""
     help_text = (
-        "<b>Инструкция для наставника</b>\n\n"
-        "<b>Напиши новому стажеру:</b>\n"
-        "👋 При появлении нового стажера у тебя есть возможность "
-        "сразу посмотреть его контактные данные для связи\n\n"
-        "<b>Назначение траектории:</b>\n"
-        "📖 Обязательно назначь обучающую траекторию — это пошаговый "
-        "маршрут с закреплёнными материалами и тестами, чтобы обучение "
-        "было последовательным\n\n"
-        "<b>Управление доступом:</b>\n"
-        "🔓 Открывай доступ к этапам траектории постепенно. Так стажер "
-        "не перегрузится сразу, будет идти по шагам и лучше усваивать материал\n\n"
-        "<b>Отслеживание прогресса:</b>\n"
-        "📈 Следи за прогрессом: выбирая стажера, можешь видеть, "
-        "на каком он этапе и как успешно проходит каждый тест\n\n"
-        "<b>5. Аттестация:</b>\n"
-        "🎓 Для завершения стажировки стажеру нужно сдать аттестацию. "
-        "Ты можешь назначить ее только после успешного прохождения всех тестов."
+        "<b>Помощь</b>\n\n"
+        "Если у тебя возникли вопросы или проблемы, "
+        "обратись к рекрутеру своей компании.\n\n"
+        "Подробная инструкция по работе с ботом "
+        "доступна в разделе <b>Панель наставника</b>."
     )
 
     await callback.message.edit_text(
         help_text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
         ])
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "mentor_assign_test")
+async def callback_mentor_assign_test(callback: CallbackQuery, session: AsyncSession):
+    """Назначить тест — выбор стажера из панели наставника (по Figma)"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Не зарегистрирован", show_alert=True)
+        return
+
+    trainees = await get_mentor_trainees(session, user.id, company_id=user.company_id)
+
+    if not trainees:
+        await callback.message.edit_text(
+            "У тебя пока нет назначенных стажеров.\n"
+            "Обратись к рекрутеру для назначения стажеров.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="← назад", callback_data="mentor_panel")],
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
+            ])
+        )
+        await callback.answer()
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    message_text = "<b>Назначить тест</b>\n\nВыбери стажера:"
+
+    for trainee in trainees:
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text=f"{trainee.full_name}",
+                callback_data=f"assign_extra_test:{trainee.id}"
+            )
+        ])
+
+    keyboard.inline_keyboard.extend([
+        [InlineKeyboardButton(text="← назад", callback_data="mentor_panel")],
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+    ])
+
+    await callback.message.edit_text(
+        message_text,
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+    log_user_action(callback.from_user.id, callback.from_user.username, "mentor_assign_test_select_trainee")
 
 
 @router.callback_query(F.data == "mentor_my_tests")
@@ -1192,13 +1313,11 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
 
     if trainee_path:
         keyboard.inline_keyboard.extend([
-            [InlineKeyboardButton(text="Назначить тест", callback_data=f"assign_extra_test:{trainee_id}")],
-            [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
             [InlineKeyboardButton(text="Доступ к этапам", callback_data=f"manage_stages:{trainee_id}")],
             [InlineKeyboardButton(text="Назначить аттестацию", callback_data=f"view_trainee_attestation:{trainee_id}")],
-            [InlineKeyboardButton(text="Поменять траекторию", callback_data=f"change_trajectory:{trainee_id}")],
             [InlineKeyboardButton(text="Посмотреть прогресс", callback_data=f"view_trainee_progress:{trainee_id}")],
-            [InlineKeyboardButton(text="← назад", callback_data="mentor_panel")],
+            [InlineKeyboardButton(text="Поменять траекторию", callback_data=f"change_trajectory:{trainee_id}")],
+            [InlineKeyboardButton(text="← назад", callback_data="mentor_my_trainees")],
         ])
     else:
         # Без траектории — показываем доступные траектории
@@ -1215,7 +1334,7 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
                     )
                 ])
         keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="← назад", callback_data="mentor_panel")
+            InlineKeyboardButton(text="← назад", callback_data="mentor_my_trainees")
         ])
 
     await callback.message.edit_text(
@@ -1343,7 +1462,7 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="Доступ к этапам", callback_data=f"manage_stages:{trainee_id}")],
                 [InlineKeyboardButton(text="К стажеру", callback_data=f"select_trainee_for_trajectory:{trainee_id}")],
-                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -1358,7 +1477,7 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="К стажеру", callback_data=f"select_trainee_for_trajectory:{trainee_id}")],
-                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
             ])
         )
     else:
@@ -1595,7 +1714,7 @@ async def callback_confirm_extra_test(callback: CallbackQuery, session: AsyncSes
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="К стажеру", callback_data=f"select_trainee_for_trajectory:{trainee_id}")],
-                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
             ])
         )
     else:
@@ -1641,8 +1760,8 @@ async def callback_view_trainee_progress(callback: CallbackQuery, session: Async
     )
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="К стажеру", callback_data=f"select_trainee_for_trajectory:{trainee_id}")],
-        [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
+        [InlineKeyboardButton(text="← назад", callback_data=f"select_trainee_for_trajectory:{trainee_id}")],
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
     ])
 
     await callback.message.edit_text(

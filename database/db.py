@@ -3809,19 +3809,19 @@ async def send_notification_about_activation(session: AsyncSession, bot, user_id
         
         # Формируем уведомление в зависимости от роли
         details_lines = [
-            f'Твоя роль: "{role_name}"',
-            f'Твоя группа: "{group_name}"'
+            f'Твоя роль: <b>{role_name}</b>',
+            f'Твоя группа: <b>{group_name}</b>'
         ]
 
         if role_name == "Стажер" and internship_object_name != "Не назначен":
-            details_lines.append(f'Объект стажировки: "{internship_object_name}"')
+            details_lines.append(f'Объект стажировки: <b>{internship_object_name}</b>')
 
-        details_lines.append(f'Объект работы: "{work_object_name}"')
+        details_lines.append(f'Объект работы: <b>{work_object_name}</b>')
 
         notification_text = (
-            "✅Доступ активирован\n\n"
-            "Добро пожаловать в команду!\n\n"
-            "━━━━━━━━━━━━\n\n"
+            "✅ Доступ активирован\n"
+            "Добро пожаловать в команду!\n"
+            "_______\n\n"
             + "\n".join(details_lines)
         )
 
