@@ -87,3 +87,8 @@ def format_test_with_percentage(
         return f"{icon}<b>Тест {test_num}:</b> {test_name} - {percentage:.0f}%\n"
     else:
         return format_test_line(test_num, test_name, icon)
+
+
+def format_test_line_figma(test_name: str, icon: str) -> str:
+    """Форматирует строку теста в стиле Figma (без номера)."""
+    return f"{icon} Тест: {test_name}\n"
