@@ -134,6 +134,34 @@ async def button_profile(message: Message, state: FSMContext, session: AsyncSess
 async def button_help(message: Message, state: FSMContext, session: AsyncSession):
     await cmd_help(message, state, session)
 
+@router.message(F.text == "☰ Главное меню")
+async def cmd_mentor_main_menu(message: Message, state: FSMContext, session: AsyncSession):
+    """Обработчик reply-кнопки 'Главное меню' для наставника"""
+    is_auth = await check_auth(message, state, session)
+    if not is_auth:
+        return
+
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        return
+
+    from keyboards.keyboards import get_mentor_inline_menu
+
+    main_menu_text = (
+        "☰ <b>Главное меню</b>\n\n"
+        "Используй команды бота или кнопки клавиатуры для навигации по системе"
+    )
+
+    await message.answer(
+        main_menu_text,
+        parse_mode="HTML",
+        reply_markup=get_mentor_inline_menu()
+    )
+
+    await state.clear()
+    log_user_action(message.from_user.id, message.from_user.username, "opened_mentor_main_menu")
+
+
 @router.callback_query(F.data == "main_menu")
 async def process_main_menu(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Универсальный обработчик возврата в главное меню с обновлением клавиатуры согласно роли"""
@@ -164,7 +192,38 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext, session:
         }
         
         primary_role = max(roles, key=lambda r: role_priority.get(r.name, 0))
-        
+
+        # Специальная обработка для Наставника — инлайн-меню
+        if primary_role.name == "Наставник":
+            from keyboards.keyboards import get_mentor_inline_menu
+
+            main_menu_text = (
+                "☰ <b>Главное меню</b>\n\n"
+                "Используй команды бота или кнопки клавиатуры для навигации по системе"
+            )
+
+            try:
+                await callback.message.edit_text(
+                    main_menu_text,
+                    parse_mode="HTML",
+                    reply_markup=get_mentor_inline_menu()
+                )
+            except Exception:
+                await callback.message.answer(
+                    main_menu_text,
+                    parse_mode="HTML",
+                    reply_markup=get_mentor_inline_menu()
+                )
+                try:
+                    await callback.message.delete()
+                except:
+                    pass
+
+            await state.clear()
+            await callback.answer()
+            log_user_action(callback.from_user.id, callback.from_user.username, "returned_to_main_menu")
+            return
+
         # Получаем клавиатуру согласно роли
         from keyboards.keyboards import get_keyboard_by_role
         keyboard = get_keyboard_by_role(primary_role.name)
@@ -206,7 +265,7 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext, session:
                 parse_mode="HTML",
                 reply_markup=keyboard
             )
-        
+
         # Удаляем старое inline сообщение
         try:
             await callback.message.delete()

@@ -206,6 +206,7 @@ test_data/
 sample_data/
 .memory-base
 .claude
+.mcp.json
 .task
 .env
 AGENTS.md
