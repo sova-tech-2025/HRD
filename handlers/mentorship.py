@@ -22,7 +22,8 @@ from database.db import (
     get_stage_sessions, get_session_tests, get_attestation_by_id, get_user_attestation_result, get_user_roles,
     get_managers_for_attestation, assign_attestation_to_trainee, get_trainee_attestation_by_id,
     check_all_stages_completed, get_trainee_attestation_status, ensure_company_id,
-    get_user_broadcast_tests, get_accessible_knowledge_folders_for_user
+    get_user_broadcast_tests, get_accessible_knowledge_folders_for_user,
+    get_test_results_summary
 )
 from keyboards.keyboards import (
     get_unassigned_trainees_keyboard, get_mentor_selection_keyboard,
@@ -337,6 +338,7 @@ async def callback_mentor_my_trainees(callback: CallbackQuery, state: FSMContext
         ])
 
     keyboard.inline_keyboard.extend([
+        [InlineKeyboardButton(text="Список моих стажеров", callback_data="mentor_trainees_detail_list")],
         [InlineKeyboardButton(text="← назад", callback_data="mentor_panel")],
         [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
     ])
@@ -348,6 +350,73 @@ async def callback_mentor_my_trainees(callback: CallbackQuery, state: FSMContext
     )
     await callback.answer()
     log_user_action(callback.from_user.id, callback.from_user.username, "viewed_mentor_trainees")
+
+
+@router.callback_query(F.data == "mentor_trainees_detail_list")
+async def callback_mentor_trainees_detail_list(callback: CallbackQuery, session: AsyncSession):
+    """Детальный список стажеров наставника (по Figma 11.9)"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Не зарегистрирован", show_alert=True)
+        return
+
+    trainees = await get_mentor_trainees(session, user.id, company_id=user.company_id)
+
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    if not trainees:
+        await callback.message.answer(
+            "👥 <b>Твои стажеры</b>\n\n"
+            "У тебя пока нет назначенных стажеров.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="← назад", callback_data="mentor_my_trainees")],
+                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+            ])
+        )
+        await callback.answer()
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    message_text = "👥 <b>Твои стажеры</b>\n\n"
+
+    for i, trainee in enumerate(trainees, 1):
+        trainee_path = await get_trainee_learning_path(session, trainee.id, company_id=trainee.company_id)
+        trajectory_name = trainee_path.learning_path.name if trainee_path else "не выбрано"
+
+        days_as_trainee = (datetime.now() - trainee.role_assigned_date).days
+        days_word = get_days_word(days_as_trainee)
+
+        message_text += f"{i}. <b>{trainee.full_name}</b>\n\n"
+        message_text += f"<b>Телефон:</b> {trainee.phone_number}\n"
+        message_text += f"<b>В статусе стажера:</b> {days_as_trainee} {days_word}\n"
+        message_text += f"<b>Объект стажировки:</b> {trainee.internship_object.name if trainee.internship_object else 'Не указан'}\n"
+        message_text += f"<b>Объект работы:</b> {trainee.work_object.name if trainee.work_object else 'Не указан'}\n\n"
+        message_text += f"📌<b>Траектория:</b> {trajectory_name}\n\n"
+        message_text += "━━━━━━━━━━━━\n\n"
+
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text=f"{trainee.full_name}",
+                callback_data=f"select_trainee_for_trajectory:{trainee.id}"
+            )
+        ])
+
+    keyboard.inline_keyboard.extend([
+        [InlineKeyboardButton(text="← назад", callback_data="mentor_my_trainees")],
+        [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
+    ])
+
+    await callback.message.answer(
+        message_text + "Выбери стажёра для взаимодействия:",
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+    log_user_action(callback.from_user.id, callback.from_user.username, "viewed_mentor_trainees_detail_list")
 
 
 @router.callback_query(F.data == "mentor_profile")
@@ -418,23 +487,23 @@ async def callback_mentor_help(callback: CallbackQuery, session: AsyncSession):
 
 @router.callback_query(F.data == "mentor_assign_test")
 async def callback_mentor_assign_test(callback: CallbackQuery, session: AsyncSession):
-    """Назначить тест — выбор стажера из панели наставника (по Figma)"""
+    """Назначить тест — список тестов из панели наставника (по Figma 11.25-11.27)"""
     user = await get_user_by_tg_id(session, callback.from_user.id)
     if not user:
         await callback.answer("❌ Не зарегистрирован", show_alert=True)
         return
 
-    trainees = await get_mentor_trainees(session, user.id, company_id=user.company_id)
+    tests = await get_all_active_tests(session, company_id=user.company_id)
 
     try:
         await callback.message.delete()
     except Exception:
         pass
 
-    if not trainees:
+    if not tests:
         await callback.message.answer(
-            "У тебя пока нет назначенных стажеров.\n"
-            "Обратись к рекрутеру для назначения стажеров.",
+            "📋 <b>Назначить тест</b>\n\n"
+            "Нет доступных тестов для назначения.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="← назад", callback_data="mentor_panel")],
@@ -444,14 +513,18 @@ async def callback_mentor_assign_test(callback: CallbackQuery, session: AsyncSes
         await callback.answer()
         return
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
-    message_text = "<b>Назначить тест</b>\n\nВыбери стажера:"
+    message_text = (
+        "📋 <b>Здесь можно назначить тест стажёру</b>\n\n"
+        "Используй это, если нужно уделить внимание отдельной теме "
+        "или проверить материал, которого нет в основной траектории👇"
+    )
 
-    for trainee in trainees:
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    for test in tests:
         keyboard.inline_keyboard.append([
             InlineKeyboardButton(
-                text=f"{trainee.full_name}",
-                callback_data=f"assign_extra_test:{trainee.id}"
+                text=test.name,
+                callback_data=f"mentor_test_detail:{test.id}"
             )
         ])
 
@@ -466,7 +539,257 @@ async def callback_mentor_assign_test(callback: CallbackQuery, session: AsyncSes
         parse_mode="HTML"
     )
     await callback.answer()
-    log_user_action(callback.from_user.id, callback.from_user.username, "mentor_assign_test_select_trainee")
+    log_user_action(callback.from_user.id, callback.from_user.username, "mentor_assign_test_list")
+
+
+@router.callback_query(F.data.startswith("mentor_test_detail:"))
+async def callback_mentor_test_detail(callback: CallbackQuery, session: AsyncSession):
+    """Детали теста из панели назначения (по Figma 11.28-11.29)"""
+    test_id = int(callback.data.split(":")[1])
+
+    mentor = await get_user_by_tg_id(session, callback.from_user.id)
+    if not mentor:
+        await callback.answer("❌ Не найден", show_alert=True)
+        return
+
+    test = await get_test_by_id(session, test_id)
+    if not test:
+        await callback.answer("❌ Тест не найден", show_alert=True)
+        return
+
+    questions_count = len(test.questions) if test.questions else 0
+
+    detail_text = (
+        f"📋 <b>{test.name}</b>\n\n"
+        f"<b>Описание:</b> {test.description or 'Не указано'}\n"
+        f"<b>Количество вопросов:</b> {questions_count}\n"
+        f"<b>Макс. балл:</b> {test.max_score}\n"
+        f"<b>Порог прохождения:</b> {test.threshold_score}\n"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Предоставить доступ стажерам", callback_data=f"mentor_test_grant:{test_id}")],
+        [InlineKeyboardButton(text="Материалы", callback_data=f"mentor_test_materials:{test_id}")],
+        [InlineKeyboardButton(text="Результаты", callback_data=f"mentor_test_results:{test_id}")],
+        [InlineKeyboardButton(text="Назад", callback_data="mentor_assign_test")],
+    ])
+
+    try:
+        await callback.message.edit_text(
+            detail_text,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+    except Exception:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(
+            detail_text,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("mentor_test_grant:"))
+async def callback_mentor_test_grant(callback: CallbackQuery, session: AsyncSession):
+    """Выбор стажера для предоставления доступа к тесту"""
+    test_id = int(callback.data.split(":")[1])
+
+    mentor = await get_user_by_tg_id(session, callback.from_user.id)
+    if not mentor:
+        await callback.answer("❌ Не найден", show_alert=True)
+        return
+
+    trainees = await get_mentor_trainees(session, mentor.id, company_id=mentor.company_id)
+
+    if not trainees:
+        await callback.message.edit_text(
+            "У тебя пока нет назначенных стажеров.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="← назад", callback_data=f"mentor_test_detail:{test_id}")]
+            ])
+        )
+        await callback.answer()
+        return
+
+    test = await get_test_by_id(session, test_id)
+    message_text = f"👥 <b>Предоставить доступ к тесту «{test.name}»</b>\n\nВыбери стажера:"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    for trainee in trainees:
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(
+                text=trainee.full_name,
+                callback_data=f"mentor_test_grant_confirm:{test_id}:{trainee.id}"
+            )
+        ])
+
+    keyboard.inline_keyboard.append([
+        InlineKeyboardButton(text="← назад", callback_data=f"mentor_test_detail:{test_id}")
+    ])
+
+    await callback.message.edit_text(
+        message_text,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("mentor_test_grant_confirm:"))
+async def callback_mentor_test_grant_confirm(callback: CallbackQuery, session: AsyncSession):
+    """Подтверждение предоставления доступа к тесту стажеру"""
+    parts = callback.data.split(":")
+    test_id = int(parts[1])
+    trainee_id = int(parts[2])
+
+    mentor = await get_user_by_tg_id(session, callback.from_user.id)
+    if not mentor:
+        await callback.answer("❌ Не найден", show_alert=True)
+        return
+
+    bot = callback.message.bot
+    success = await grant_test_access(
+        session, trainee_id, test_id, mentor.id,
+        company_id=mentor.company_id, bot=bot
+    )
+
+    trainee = await get_user_by_id(session, trainee_id)
+    test = await get_test_by_id(session, test_id)
+
+    if success:
+        await callback.message.edit_text(
+            f"✅ Тест «{test.name}» назначен стажеру {trainee.full_name}!",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="К тесту", callback_data=f"mentor_test_detail:{test_id}")],
+                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
+            ])
+        )
+    else:
+        await callback.message.edit_text(
+            f"⚠️ Тест «{test.name}» уже назначен стажеру или произошла ошибка.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="К тесту", callback_data=f"mentor_test_detail:{test_id}")],
+                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
+            ])
+        )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("mentor_test_materials:"))
+async def callback_mentor_test_materials(callback: CallbackQuery, session: AsyncSession):
+    """Материалы теста из панели назначения"""
+    test_id = int(callback.data.split(":")[1])
+
+    test = await get_test_by_id(session, test_id)
+    if not test:
+        await callback.answer("❌ Тест не найден", show_alert=True)
+        return
+
+    back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="← назад", callback_data=f"mentor_test_detail:{test_id}")]
+    ])
+
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    if test.material_file_path:
+        try:
+            if test.material_type == "photo":
+                await callback.message.answer_photo(
+                    photo=test.material_file_path,
+                    caption=f"📎 Материалы к тесту «{test.name}»",
+                    reply_markup=back_keyboard
+                )
+            elif test.material_type == "video":
+                await callback.message.answer_video(
+                    video=test.material_file_path,
+                    caption=f"📎 Материалы к тесту «{test.name}»",
+                    reply_markup=back_keyboard
+                )
+            else:
+                await callback.message.answer_document(
+                    document=test.material_file_path,
+                    caption=f"📎 Материалы к тесту «{test.name}»",
+                    reply_markup=back_keyboard
+                )
+        except Exception:
+            await callback.message.answer(
+                f"⚠️ Не удалось отправить файл материалов к тесту «{test.name}».",
+                parse_mode="HTML",
+                reply_markup=back_keyboard
+            )
+    elif test.material_link:
+        await callback.message.answer(
+            f"📎 <b>Материалы к тесту «{test.name}»</b>\n\n"
+            f"🔗 {test.material_link}",
+            parse_mode="HTML",
+            reply_markup=back_keyboard
+        )
+    else:
+        await callback.message.answer(
+            f"📎 Материалы к тесту «{test.name}» не добавлены.",
+            parse_mode="HTML",
+            reply_markup=back_keyboard
+        )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("mentor_test_results:"))
+async def callback_mentor_test_results(callback: CallbackQuery, session: AsyncSession):
+    """Результаты прохождения теста стажерами"""
+    test_id = int(callback.data.split(":")[1])
+
+    mentor = await get_user_by_tg_id(session, callback.from_user.id)
+    if not mentor:
+        await callback.answer("❌ Не найден", show_alert=True)
+        return
+
+    test = await get_test_by_id(session, test_id)
+    if not test:
+        await callback.answer("❌ Тест не найден", show_alert=True)
+        return
+
+    results = await get_test_results_summary(session, test_id, company_id=mentor.company_id)
+
+    back_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="← назад", callback_data=f"mentor_test_detail:{test_id}")]
+    ])
+
+    if not results:
+        await callback.message.edit_text(
+            f"📊 <b>Результаты теста «{test.name}»</b>\n\n"
+            "Пока нет результатов.",
+            parse_mode="HTML",
+            reply_markup=back_keyboard
+        )
+        await callback.answer()
+        return
+
+    message_text = f"📊 <b>Результаты теста «{test.name}»</b>\n\n"
+
+    for r in results:
+        user = await get_user_by_id(session, r.user_id)
+        user_name = user.full_name if user else f"ID {r.user_id}"
+        passed_icon = "✅" if r.is_passed else "❌"
+        date_str = r.end_time.strftime("%d.%m.%Y") if r.end_time else "—"
+        message_text += f"{passed_icon} <b>{user_name}</b> — {r.score}/{r.max_possible_score} ({date_str})\n"
+
+    await callback.message.edit_text(
+        message_text,
+        parse_mode="HTML",
+        reply_markup=back_keyboard
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "mentor_my_tests")
