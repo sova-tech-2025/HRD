@@ -1,4 +1,4 @@
-﻿from aiogram import Router, F
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
@@ -1712,7 +1712,7 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
     else:
         trajectory_info = (
             "______________________________\n\n"
-            "<b>У стажера нет назначенной траектории.</b>\n"
+            "У стажера нет назначенной траектории.\n"
             "Выбери подходящую из списка ниже, чтобы он начал обучение 👇"
         )
 
@@ -1742,7 +1742,7 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
             [InlineKeyboardButton(text="Доступ к этапам", callback_data=f"manage_stages:{trainee_id}")],
             [InlineKeyboardButton(text="Назначить аттестацию", callback_data=f"view_trainee_attestation:{trainee_id}")],
             [InlineKeyboardButton(text="Поменять траекторию", callback_data=f"change_trajectory:{trainee_id}")],
-            [InlineKeyboardButton(text="Посмотреть прогресс", callback_data=f"view_trainee_progress:{trainee_id}")],
+            [InlineKeyboardButton(text="Посмотреть прогресс", callback_data=f"mentor_view_progress:{trainee_id}")],
             [InlineKeyboardButton(text="← назад", callback_data="mentor_my_trainees")],
         ])
     else:
@@ -1761,9 +1761,6 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
                 ])
         keyboard.inline_keyboard.append([
             InlineKeyboardButton(text="← назад", callback_data="mentor_my_trainees")
-        ])
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
         ])
 
     await callback.message.edit_text(
@@ -1878,8 +1875,7 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
         return
 
     # Проверяем, не назначена ли уже эта же траектория
-    data = await state.get_data()
-    company_id = data.get('company_id')
+    company_id = trainee.company_id
     existing_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
     if existing_path and existing_path.learning_path_id == learning_path_id:
         # Та же траектория уже активна — показываем как успешное назначение (Figma 11.4)
@@ -2152,8 +2148,8 @@ async def callback_confirm_extra_test(callback: CallbackQuery, session: AsyncSes
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("view_trainee_progress:"))
-async def callback_view_trainee_progress(callback: CallbackQuery, session: AsyncSession):
+@router.callback_query(F.data.startswith("mentor_view_progress:"))
+async def callback_mentor_view_progress(callback: CallbackQuery, session: AsyncSession):
     """Посмотреть полный прогресс стажера по траектории"""
     trainee_id = int(callback.data.split(":")[1])
 
