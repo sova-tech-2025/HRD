@@ -1739,11 +1739,10 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
 
     if trainee_path:
         keyboard.inline_keyboard.extend([
-            [InlineKeyboardButton(text="Посмотреть прогресс", callback_data=f"view_trainee_progress:{trainee_id}")],
             [InlineKeyboardButton(text="Доступ к этапам", callback_data=f"manage_stages:{trainee_id}")],
             [InlineKeyboardButton(text="Назначить аттестацию", callback_data=f"view_trainee_attestation:{trainee_id}")],
             [InlineKeyboardButton(text="Поменять траекторию", callback_data=f"change_trajectory:{trainee_id}")],
-            [InlineKeyboardButton(text="Назначить тест", callback_data=f"assign_extra_test:{trainee_id}")],
+            [InlineKeyboardButton(text="Посмотреть прогресс", callback_data=f"view_trainee_progress:{trainee_id}")],
             [InlineKeyboardButton(text="← назад", callback_data="mentor_my_trainees")],
             [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
         ])
