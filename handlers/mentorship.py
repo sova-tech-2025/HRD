@@ -1744,7 +1744,6 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
             [InlineKeyboardButton(text="Поменять траекторию", callback_data=f"change_trajectory:{trainee_id}")],
             [InlineKeyboardButton(text="Посмотреть прогресс", callback_data=f"view_trainee_progress:{trainee_id}")],
             [InlineKeyboardButton(text="← назад", callback_data="mentor_my_trainees")],
-            [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
         ])
     else:
         # Без траектории — показываем доступные траектории
@@ -1880,16 +1879,12 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
     company_id = data.get('company_id')
     existing_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
     if existing_path and existing_path.learning_path_id == learning_path_id:
-        # Та же траектория уже активна — перенаправляем к управлению этапами
+        # Та же траектория уже активна — показываем как успешное назначение (Figma 11.4)
         await callback.message.edit_text(
-            f"📚 Траектория <b>{existing_path.learning_path.name if existing_path.learning_path else ''}</b> "
-            f"уже назначена стажеру <b>{trainee.full_name}</b>.\n\n"
-            "Используй кнопку ниже для управления этапами.",
+            "Стажеру назначена новая траектория✅",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Доступ к этапам", callback_data=f"manage_stages:{trainee_id}")],
                 [InlineKeyboardButton(text="К стажеру", callback_data=f"select_trainee_for_trajectory:{trainee_id}")],
-                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
             ])
         )
         await callback.answer()
@@ -1904,7 +1899,6 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="К стажеру", callback_data=f"select_trainee_for_trajectory:{trainee_id}")],
-                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
             ])
         )
     else:
@@ -2204,7 +2198,7 @@ def generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_
     if not trainee_path:
         return "📖 <b>Траектория:</b> не выбрано"
 
-    progress = f"📖 <b>Траектория:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
+    progress = f"______________________________\n\n📖 <b>Траектория:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
 
     test_results_dict = {}
     if test_results:
@@ -2236,11 +2230,11 @@ def generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_
 
         progress += f"<b>Этап {stage_progress.stage.order_number} ▾</b>\n"
         progress += f"{stage_progress.stage.name}\n"
-        progress += f"Доступ: {access_text}\n\n"
+        progress += f"<b>Доступ:</b> {access_text}\n\n"
 
         # Сессии и тесты
         for session_progress in sessions_progress:
-            progress += f"{session_progress.session.name}\n"
+            progress += f"<b>{session_progress.session.name}</b>\n"
 
             if hasattr(session_progress.session, 'tests'):
                 for test in session_progress.session.tests:
@@ -2251,9 +2245,9 @@ def generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_
 
         # Итог этапа
         if all_completed:
-            progress += "\n👉 Этап завершен!\n"
+            progress += "\n👉 <b>Этап завершен!</b>\n"
         elif stage_progress.is_opened and total_tests > 0:
-            progress += f"\n👉 Пройдено: {passed_tests}/{total_tests} тестов\n"
+            progress += f"\n👉 <b>Пройдено:</b> {passed_tests}/{total_tests} тестов\n"
 
         progress += "______________________________\n\n"
 
@@ -2269,7 +2263,7 @@ async def generate_trajectory_progress_with_attestation_status(session, trainee_
     if not trainee_path:
         return "📖 <b>Траектория:</b> не выбрано"
 
-    progress = f"📖 <b>Траектория:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
+    progress = f"______________________________\n\n📖 <b>Траектория:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
 
     test_results_dict = {}
     if test_results:
@@ -2301,11 +2295,11 @@ async def generate_trajectory_progress_with_attestation_status(session, trainee_
 
         progress += f"<b>Этап {stage_progress.stage.order_number} ▾</b>\n"
         progress += f"{stage_progress.stage.name}\n"
-        progress += f"Доступ: {access_text}\n\n"
+        progress += f"<b>Доступ:</b> {access_text}\n\n"
 
         # Сессии и тесты
         for session_progress in sessions_progress:
-            progress += f"{session_progress.session.name}\n"
+            progress += f"<b>{session_progress.session.name}</b>\n"
 
             if hasattr(session_progress.session, 'tests'):
                 for test in session_progress.session.tests:
@@ -2316,9 +2310,9 @@ async def generate_trajectory_progress_with_attestation_status(session, trainee_
 
         # Итог этапа
         if all_completed:
-            progress += "\n👉 Этап завершен!\n"
+            progress += "\n👉 <b>Этап завершен!</b>\n"
         elif stage_progress.is_opened and total_tests > 0:
-            progress += f"\n👉 Пройдено: {passed_tests}/{total_tests} тестов\n"
+            progress += f"\n👉 <b>Пройдено:</b> {passed_tests}/{total_tests} тестов\n"
 
         progress += "______________________________\n\n"
 
