@@ -1712,7 +1712,7 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
     else:
         trajectory_info = (
             "______________________________\n\n"
-            "У стажера нет назначенной траектории.\n"
+            "<b>У стажера нет назначенной траектории.</b>\n"
             "Выбери подходящую из списка ниже, чтобы он начал обучение 👇"
         )
 
@@ -1761,6 +1761,9 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
                 ])
         keyboard.inline_keyboard.append([
             InlineKeyboardButton(text="← назад", callback_data="mentor_my_trainees")
+        ])
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
         ])
 
     await callback.message.edit_text(
