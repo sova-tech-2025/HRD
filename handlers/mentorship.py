@@ -306,8 +306,13 @@ async def callback_mentor_my_trainees(callback: CallbackQuery, state: FSMContext
 
     trainees = await get_mentor_trainees(session, user.id, company_id=user.company_id)
 
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
     if not trainees:
-        await callback.message.edit_text(
+        await callback.message.answer(
             "👥 <b>Мои стажеры</b>\n\n"
             "У тебя пока нет назначенных стажеров.\n"
             "Обратись к рекрутеру для назначения стажеров.",
@@ -336,7 +341,7 @@ async def callback_mentor_my_trainees(callback: CallbackQuery, state: FSMContext
         [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
     ])
 
-    await callback.message.edit_text(
+    await callback.message.answer(
         message_text,
         reply_markup=keyboard,
         parse_mode="HTML"
@@ -421,8 +426,13 @@ async def callback_mentor_assign_test(callback: CallbackQuery, session: AsyncSes
 
     trainees = await get_mentor_trainees(session, user.id, company_id=user.company_id)
 
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
     if not trainees:
-        await callback.message.edit_text(
+        await callback.message.answer(
             "У тебя пока нет назначенных стажеров.\n"
             "Обратись к рекрутеру для назначения стажеров.",
             parse_mode="HTML",
@@ -450,7 +460,7 @@ async def callback_mentor_assign_test(callback: CallbackQuery, session: AsyncSes
         [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
     ])
 
-    await callback.message.edit_text(
+    await callback.message.answer(
         message_text,
         reply_markup=keyboard,
         parse_mode="HTML"
