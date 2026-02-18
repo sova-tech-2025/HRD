@@ -19,14 +19,14 @@ from database.db import (
     get_user_broadcast_tests, get_user_mentor, ensure_company_id
 )
 from handlers.mentorship import get_days_word
-from handlers.trainee_trajectory import format_trajectory_info
+from handlers.trainee_trajectory import build_trajectory_text, get_no_trajectory_text
 from database.models import InternshipStage, TestResult
 from sqlalchemy import select
 from keyboards.keyboards import get_simple_test_selection_keyboard, get_test_start_keyboard, get_test_selection_for_taking_keyboard, get_mentor_contact_keyboard, get_test_results_keyboard
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import TestTakingStates
 from utils.logger import log_user_action, log_user_error, logger
-from utils.test_progress_formatters import get_test_status_icon, format_test_line
+from utils.test_progress_formatters import get_test_status_icon
 from handlers.auth import check_auth
 
 router = Router()
@@ -2824,59 +2824,19 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
 
         if not trainee_path:
             await callback.message.edit_text(
-                "🗺️ <b>ТРАЕКТОРИЯ ОБУЧЕНИЯ</b> 🗺️\n\n"
-                "❌ <b>Траектория не назначена</b>\n\n"
-                "Обратись к своему наставнику для назначения траектории, пока курс не выбран",
+                get_no_trajectory_text(),
                 parse_mode="HTML",
                 reply_markup=get_mentor_contact_keyboard()
             )
             return
 
-        # Получаем этапы траектории
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
-
-        # Формируем информацию о траектории
-        trajectory_info = await format_trajectory_info(user, trainee_path)
-
-        # Формируем информацию об этапах
-        stages_info = ""
-        for stage_progress in stages_progress:
-            stage = stage_progress.stage
-            status_icon = "✅" if stage_progress.is_completed else ("🟡" if stage_progress.is_opened else "⛔️")
-            stages_info += f"{status_icon}<b>Этап {stage.order_number}:</b> {stage.name}\n"
-
-            # Получаем информацию о сессиях
-            sessions_progress = await get_stage_session_progress(session, stage_progress.id)
-            for session_progress in sessions_progress:
-                session_status_icon = "✅" if session_progress.is_completed else ("🟡" if session_progress.is_opened else "⛔️")
-                stages_info += f"{session_status_icon}<b>Сессия {session_progress.session.order_number}:</b> {session_progress.session.name}\n"
-
-                # Показываем тесты в сессии
-                for test_num, test in enumerate(session_progress.session.tests, 1):
-                    test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
-                    is_passed = bool(test_result and test_result.is_passed)
-                    icon = get_test_status_icon(is_passed, stage_progress.is_opened)
-                    stages_info += format_test_line(test_num, test.name, icon)
-            
-            # Добавляем пустую строку после этапа
-            stages_info += "\n"
-
-        # Добавляем информацию об аттестации с правильным статусом
-        if trainee_path.learning_path.attestation:
-            attestation_status = await get_trainee_attestation_status(
-                session, user.id, trainee_path.learning_path.attestation.id, company_id=company_id
-            )
-            stages_info += f"🏁<b>Аттестация:</b> {trainee_path.learning_path.attestation.name} {attestation_status}\n\n"
-        else:
-            stages_info += f"🏁<b>Аттестация:</b> Не указана ⛔️\n\n"
+        trajectory_text, stages_progress = await build_trajectory_text(session, user, trainee_path, company_id)
 
         available_stages = [sp for sp in stages_progress if sp.is_opened and not sp.is_completed]
 
-        # Создаем клавиатуру с доступными этапами
         keyboard_buttons = []
-
         if available_stages:
-            stages_info += "Выбери этап траектории👇"
+            trajectory_text += "Выбери этап траектории 👇"
             for stage_progress in available_stages:
                 keyboard_buttons.append([
                     InlineKeyboardButton(
@@ -2885,13 +2845,18 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
                     )
                 ])
         else:
-            stages_info += "❌ Нет открытых этапов для прохождения"
+            trajectory_text += "❌ Нет открытых этапов для прохождения"
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="Связаться с наставником 👀", callback_data="contact_mentor")
+        ])
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
+        ])
 
         await callback.message.edit_text(
-            trajectory_info + stages_info,
-            reply_markup=keyboard,
+            trajectory_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
             parse_mode="HTML"
         )
 
