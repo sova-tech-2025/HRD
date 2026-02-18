@@ -4,6 +4,7 @@
 """
 
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -116,6 +117,44 @@ def _get_trajectory_photo():
         except Exception:
             pass
     return None
+
+
+async def _safe_edit_message(message, text, reply_markup=None, parse_mode=None):
+    """Редактирует сообщение, корректно обрабатывая фото-сообщения (edit_caption вместо edit_text)."""
+    if message.photo:
+        try:
+            await message.edit_caption(
+                caption=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+            return
+        except TelegramBadRequest:
+            pass
+        # Fallback: удалить и отправить заново
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        photo_source = _get_trajectory_photo()
+        if photo_source:
+            try:
+                await message.answer_photo(
+                    photo=photo_source,
+                    caption=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+                return
+            except Exception:
+                pass
+        await message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    else:
+        await message.edit_text(
+            text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        )
 
 
 # ==============================
@@ -242,7 +281,7 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await callback.message.edit_text("Ты не зарегистрирован в системе.")
+            await _safe_edit_message(callback.message,"Ты не зарегистрирован в системе.")
             return
 
         company_id = user.company_id
@@ -312,7 +351,7 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
                 await callback.message.answer(trajectory_text, reply_markup=keyboard, parse_mode="HTML")
         else:
             try:
-                await callback.message.edit_text(
+                await _safe_edit_message(callback.message,
                     trajectory_text,
                     reply_markup=keyboard,
                     parse_mode="HTML"
@@ -323,7 +362,7 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
         log_user_action(user.tg_id, "trajectory_opened", f"Открыта траектория {trainee_path.learning_path.name}")
 
     except Exception as e:
-        await callback.message.edit_text("Произошла ошибка при открытии траектории")
+        await _safe_edit_message(callback.message,"Произошла ошибка при открытии траектории")
         log_user_error(callback.from_user.id, "trajectory_command_error", str(e))
 
 
@@ -337,20 +376,20 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await callback.message.edit_text("Пользователь не найден")
+            await _safe_edit_message(callback.message,"Пользователь не найден")
             return
 
         company_id = user.company_id
         trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
-            await callback.message.edit_text("Траектория не найдена")
+            await _safe_edit_message(callback.message,"Траектория не найдена")
             return
 
         stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
         stage_progress = next((sp for sp in stages_progress if sp.stage_id == stage_id), None)
 
         if not stage_progress or not stage_progress.is_opened:
-            await callback.message.edit_text("Этап не доступен для прохождения")
+            await _safe_edit_message(callback.message,"Этап не доступен для прохождения")
             return
 
         sessions_progress = await get_stage_session_progress(session, stage_progress.id)
@@ -378,7 +417,7 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
             InlineKeyboardButton(text="← назад", callback_data="trajectory_command")
         ])
 
-        await callback.message.edit_text(
+        await _safe_edit_message(callback.message,
             trajectory_text,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
             parse_mode="HTML"
@@ -387,7 +426,7 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
         log_user_action(callback.from_user.id, "stage_selected", f"Выбран этап {stage_progress.stage.name}")
 
     except Exception as e:
-        await callback.message.edit_text("Произошла ошибка при выборе этапа")
+        await _safe_edit_message(callback.message,"Произошла ошибка при выборе этапа")
         log_user_error(callback.from_user.id, "select_stage_error", str(e))
 
 
@@ -401,19 +440,19 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await callback.message.edit_text("Пользователь не найден")
+            await _safe_edit_message(callback.message,"Пользователь не найден")
             return
 
         company_id = user.company_id
         trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
-            await callback.message.edit_text("Траектория не найдена")
+            await _safe_edit_message(callback.message,"Траектория не найдена")
             return
 
         from database.db import get_session_with_tests
         selected_session = await get_session_with_tests(session, session_id, company_id=company_id)
         if not selected_session:
-            await callback.message.edit_text("Сессия не найдена")
+            await _safe_edit_message(callback.message,"Сессия не найдена")
             return
 
         tests = selected_session.tests if hasattr(selected_session, 'tests') and selected_session.tests else []
@@ -438,7 +477,7 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
             )
         ])
 
-        await callback.message.edit_text(
+        await _safe_edit_message(callback.message,
             trajectory_text,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
             parse_mode="HTML"
@@ -447,7 +486,7 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
         log_user_action(callback.from_user.id, "session_selected", f"Выбрана сессия {selected_session.name}")
 
     except Exception as e:
-        await callback.message.edit_text("Произошла ошибка при выборе сессии")
+        await _safe_edit_message(callback.message,"Произошла ошибка при выборе сессии")
         log_user_error(callback.from_user.id, "select_session_error", str(e))
 
 
@@ -479,7 +518,7 @@ async def callback_take_test(callback: CallbackQuery, state: FSMContext, session
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+            await _safe_edit_message(callback.message,"❌ Ты не зарегистрирован в системе.")
             return
 
         session_id = int(parts[1])
@@ -488,7 +527,7 @@ async def callback_take_test(callback: CallbackQuery, state: FSMContext, session
         from database.db import get_test_by_id
         test = await get_test_by_id(session, test_id, company_id=user.company_id)
         if not test:
-            await callback.message.edit_text("Тест не найден")
+            await _safe_edit_message(callback.message,"Тест не найден")
             return
 
         test_info = f"""📌 <b>{test.name}</b>
@@ -510,7 +549,7 @@ async def callback_take_test(callback: CallbackQuery, state: FSMContext, session
             ]
         ])
 
-        await callback.message.edit_text(
+        await _safe_edit_message(callback.message,
             test_info,
             reply_markup=keyboard,
             parse_mode="HTML"
@@ -519,7 +558,7 @@ async def callback_take_test(callback: CallbackQuery, state: FSMContext, session
         log_user_action(callback.from_user.id, "test_selected", f"Выбран тест {test.name}")
 
     except Exception as e:
-        await callback.message.edit_text("Произошла ошибка при открытии теста")
+        await _safe_edit_message(callback.message,"Произошла ошибка при открытии теста")
         log_user_error(callback.from_user.id, "take_test_error", str(e))
 
 
@@ -536,19 +575,19 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await callback.message.edit_text("Пользователь не найден")
+            await _safe_edit_message(callback.message,"Пользователь не найден")
             return
 
         company_id = user.company_id
         trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
-            await callback.message.edit_text("Траектория не найдена")
+            await _safe_edit_message(callback.message,"Траектория не найдена")
             return
 
         from database.db import get_session_with_tests
         selected_session = await get_session_with_tests(session, session_id, company_id=company_id)
         if not selected_session:
-            await callback.message.edit_text("Сессия не найдена")
+            await _safe_edit_message(callback.message,"Сессия не найдена")
             return
 
         tests = selected_session.tests if hasattr(selected_session, 'tests') and selected_session.tests else []
@@ -572,7 +611,7 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
             )
         ])
 
-        await callback.message.edit_text(
+        await _safe_edit_message(callback.message,
             trajectory_text,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
             parse_mode="HTML"
@@ -581,7 +620,7 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
         log_user_action(callback.from_user.id, "back_to_session", f"Возврат к сессии {selected_session.name}")
 
     except Exception as e:
-        await callback.message.edit_text("Произошла ошибка при возврате к сессии")
+        await _safe_edit_message(callback.message,"Произошла ошибка при возврате к сессии")
         log_user_error(callback.from_user.id, "back_to_session_error", str(e))
 
 
@@ -593,7 +632,7 @@ async def callback_show_materials(callback: CallbackQuery, state: FSMContext, se
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+            await _safe_edit_message(callback.message,"❌ Ты не зарегистрирован в системе.")
             return
 
         parts = callback.data.split(":")
@@ -603,11 +642,11 @@ async def callback_show_materials(callback: CallbackQuery, state: FSMContext, se
         from database.db import get_test_by_id
         test = await get_test_by_id(session, test_id, company_id=user.company_id)
         if not test:
-            await callback.message.edit_text("Тест не найден")
+            await _safe_edit_message(callback.message,"Тест не найден")
             return
 
         if not test.material_link:
-            await callback.message.edit_text(
+            await _safe_edit_message(callback.message,
                 "📚 <b>Материалы для изучения</b>\n\n"
                 "К этому тесту не прикреплены материалы.",
                 parse_mode="HTML",
@@ -647,7 +686,7 @@ async def callback_show_materials(callback: CallbackQuery, state: FSMContext, se
                 )
                 await state.update_data(material_text_message_id=sent_text.message_id)
             except Exception as e:
-                await callback.message.edit_text(
+                await _safe_edit_message(callback.message,
                     f"❌ <b>Ошибка загрузки файла</b>\n\n"
                     f"Не удалось загрузить материал.\n\n"
                     f"📌 <b>Тест:</b> {test.name}",
@@ -658,7 +697,7 @@ async def callback_show_materials(callback: CallbackQuery, state: FSMContext, se
                     ])
                 )
         else:
-            await callback.message.edit_text(
+            await _safe_edit_message(callback.message,
                 f"📚 <b>Материалы для изучения</b>\n\n"
                 f"📌 <b>Тест:</b> {test.name}\n\n"
                 f"🔗 <b>Ссылка:</b>\n{test.material_link}\n\n"
@@ -673,7 +712,7 @@ async def callback_show_materials(callback: CallbackQuery, state: FSMContext, se
         log_user_action(callback.from_user.id, "materials_viewed", f"Просмотрены материалы для теста {test.name}")
 
     except Exception as e:
-        await callback.message.edit_text("Произошла ошибка при показе материалов")
+        await _safe_edit_message(callback.message,"Произошла ошибка при показе материалов")
         log_user_error(callback.from_user.id, "show_materials_error", str(e))
 
 
@@ -687,7 +726,7 @@ async def callback_back_to_trajectory(callback: CallbackQuery, state: FSMContext
 
         user = await get_user_by_id(session, user_id)
         if not user:
-            await callback.message.edit_text("Пользователь не найден")
+            await _safe_edit_message(callback.message,"Пользователь не найден")
             return
 
         message = callback.message
@@ -695,7 +734,7 @@ async def callback_back_to_trajectory(callback: CallbackQuery, state: FSMContext
         await cmd_trajectory(message, state, session)
 
     except Exception as e:
-        await callback.message.edit_text("Произошла ошибка при возврате к траектории")
+        await _safe_edit_message(callback.message,"Произошла ошибка при возврате к траектории")
         log_user_error(callback.from_user.id, "back_to_trajectory_error", str(e))
 
 
@@ -709,13 +748,13 @@ async def callback_back_to_stage(callback: CallbackQuery, state: FSMContext, ses
 
         user = await get_user_by_id(session, user_id)
         if not user:
-            await callback.message.edit_text("Пользователь не найден")
+            await _safe_edit_message(callback.message,"Пользователь не найден")
             return
 
         company_id = user.company_id
         trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
-            await callback.message.edit_text("Траектория не найдена")
+            await _safe_edit_message(callback.message,"Траектория не найдена")
             return
 
         stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
@@ -725,10 +764,10 @@ async def callback_back_to_stage(callback: CallbackQuery, state: FSMContext, ses
             callback.data = f"select_stage:{opened_stage.stage_id}"
             await callback_select_stage(callback, state, session)
         else:
-            await callback.message.edit_text("Нет открытых этапов")
+            await _safe_edit_message(callback.message,"Нет открытых этапов")
 
     except Exception as e:
-        await callback.message.edit_text("Произошла ошибка при возврате к этапу")
+        await _safe_edit_message(callback.message,"Произошла ошибка при возврате к этапу")
         log_user_error(callback.from_user.id, "back_to_stage_error", str(e))
 
 
@@ -762,14 +801,14 @@ async def callback_contact_mentor(callback: CallbackQuery, state: FSMContext, se
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+            await _safe_edit_message(callback.message,"❌ Ты не зарегистрирован в системе.")
             return
 
         from database.db import get_user_mentor
         mentor = await get_user_mentor(session, user.id)
 
         if not mentor:
-            await callback.message.edit_text(
+            await _safe_edit_message(callback.message,
                 "❌ <b>Наставник не назначен</b>\n\n"
                 "Тебе еще не назначен наставник.\n"
                 "Обратись к рекрутеру для назначения наставника.",
@@ -791,7 +830,7 @@ async def callback_contact_mentor(callback: CallbackQuery, state: FSMContext, se
 
 💬 <b>Свяжись с наставником для назначения траектории обучения</b>"""
 
-        await callback.message.edit_text(
+        await _safe_edit_message(callback.message,
             mentor_info,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -806,4 +845,4 @@ async def callback_contact_mentor(callback: CallbackQuery, state: FSMContext, se
 
     except Exception as e:
         log_user_error(callback.from_user.id, "contact_mentor_error", str(e))
-        await callback.message.edit_text("❌ Произошла ошибка при получении контактов наставника.")
+        await _safe_edit_message(callback.message,"❌ Произошла ошибка при получении контактов наставника.")
