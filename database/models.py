@@ -3,6 +3,7 @@ from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, F
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
+from utils.timezone import moscow_now
 
 Base = declarative_base()
 
@@ -39,8 +40,8 @@ class User(Base):
     username = Column(String, nullable=True)
     full_name = Column(String, nullable=False)
     phone_number = Column(String, unique=True, nullable=False)
-    registration_date = Column(DateTime, default=datetime.now)
-    role_assigned_date = Column(DateTime, default=datetime.now)  # Дата назначения текущей роли
+    registration_date = Column(DateTime, default=moscow_now)
+    role_assigned_date = Column(DateTime, default=moscow_now)  # Дата назначения текущей роли
     is_active = Column(Boolean, default=True)
     is_activated = Column(Boolean, default=False)  # Активация рекрутером
     internship_object_id = Column(Integer, ForeignKey('objects.id'), nullable=True)  # Объект стажировки
@@ -124,7 +125,7 @@ class Group(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Было: nullable=False
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
     company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания группы
     
@@ -150,7 +151,7 @@ class Object(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Было: nullable=False
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
     company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания объекта
     
@@ -188,7 +189,7 @@ class InternshipStage(Base):
     description = Column(Text, nullable=True)
     order_number = Column(Integer, nullable=False)
     is_active = Column(Boolean, default=True)
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     
     # Связи
     tests = relationship("Test", back_populates="stage")
@@ -212,7 +213,7 @@ class Test(Base):
     material_type = Column(String, nullable=True)  # 'photo' или 'document'
     stage_id = Column(Integer, ForeignKey('internship_stages.id'), nullable=True)
     creator_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Было: nullable=False
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
     company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания теста
     
@@ -253,7 +254,7 @@ class TestQuestion(Base):
     correct_answer = Column(String, nullable=False) # Для multi_choice - JSON-строка
     points = Column(Float, nullable=False, default=1)
     penalty_points = Column(Float, nullable=False, default=0) # Штраф за неправильный ответ
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     
     # Связи
     test = relationship("Test", back_populates="questions")
@@ -278,7 +279,7 @@ class TestResult(Base):
     answers = Column(Text, nullable=True)  # JSON строка с ответами пользователя
     answers_details = Column(JSONB, nullable=True) # Детальная информация по ответам (время, правильность)
     wrong_answers = Column(JSONB, nullable=True) # Сохранение неверных ответов
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     
     # Связи
     user = relationship("User", back_populates="test_results")
@@ -303,7 +304,7 @@ class Mentorship(Base):
     mentor_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     trainee_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     assigned_by_id = Column(Integer, ForeignKey('users.id'), nullable=False)  # Кто назначил (рекрутер)
-    assigned_date = Column(DateTime, default=datetime.now)
+    assigned_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
     company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания наставничества
@@ -333,7 +334,7 @@ class TraineeTestAccess(Base):
     trainee_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     test_id = Column(Integer, ForeignKey('tests.id'), nullable=False)
     granted_by_id = Column(Integer, ForeignKey('users.id'), nullable=False)  # Наставник, который открыл доступ
-    granted_date = Column(DateTime, default=datetime.now)
+    granted_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
     company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания доступа
     
@@ -365,7 +366,7 @@ class LearningPath(Base):
     group_id = Column(Integer, ForeignKey('groups.id'), nullable=False)  # Группа, для которой предназначена
     attestation_id = Column(Integer, ForeignKey('attestations.id'), nullable=True)  # Аттестация траектории
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Рекрутер-создатель, было: nullable=False
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
     company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания траектории
     
@@ -399,7 +400,7 @@ class LearningStage(Base):
     learning_path_id = Column(Integer, ForeignKey('learning_paths.id'), nullable=False)
     order_number = Column(Integer, nullable=False)  # Порядок этапа в траектории
     is_active = Column(Boolean, default=True)
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     
     # Связи
     learning_path = relationship("LearningPath", back_populates="stages")
@@ -420,7 +421,7 @@ class LearningSession(Base):
     stage_id = Column(Integer, ForeignKey('learning_stages.id'), nullable=False)
     order_number = Column(Integer, nullable=False)  # Порядок сессии в этапе
     is_active = Column(Boolean, default=True)
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     
     # Связи
     stage = relationship("LearningStage", back_populates="sessions")
@@ -441,7 +442,7 @@ class Attestation(Base):
     passing_score = Column(Float, nullable=False)  # Проходной балл
     max_score = Column(Float, nullable=False, default=0)  # Максимальный балл (сумма всех вопросов)
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Рекрутер-создатель, было: nullable=False
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
     company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания аттестации
     
@@ -470,7 +471,7 @@ class AttestationQuestion(Base):
     question_number = Column(Integer, nullable=False)  # Порядковый номер вопроса
     question_text = Column(Text, nullable=False)  # Текст вопроса с критериями оценки
     max_points = Column(Float, nullable=False)  # Максимальный балл за вопрос
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
 
     # Связи
     attestation = relationship("Attestation", back_populates="questions")
@@ -493,7 +494,7 @@ class AttestationResult(Base):
     is_passed = Column(Boolean, nullable=False)  # Прошел ли аттестацию по баллам
     manager_decision = Column(Boolean, nullable=True)  # Решение руководителя: переводить ли в сотрудники
     manager_comment = Column(Text, nullable=True)  # Комментарий руководителя
-    completed_date = Column(DateTime, default=datetime.now)
+    completed_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
 
     # Связи
@@ -519,7 +520,7 @@ class TraineeManager(Base):
     trainee_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     manager_id = Column(Integer, ForeignKey('users.id'), nullable=False)  # Руководитель
     assigned_by_id = Column(Integer, ForeignKey('users.id'), nullable=False)  # Наставник, который назначил
-    assigned_date = Column(DateTime, default=datetime.now)
+    assigned_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
 
     # Связи
@@ -541,7 +542,7 @@ class TraineeAttestation(Base):
     manager_id = Column(Integer, ForeignKey('users.id'), nullable=False)  # Руководитель для аттестации
     attestation_id = Column(Integer, ForeignKey('attestations.id'), nullable=False)  # Какая аттестация
     assigned_by_id = Column(Integer, ForeignKey('users.id'), nullable=False)  # Наставник, который назначил
-    assigned_date = Column(DateTime, default=datetime.now)  # Когда назначена
+    assigned_date = Column(DateTime, default=moscow_now)  # Когда назначена
     scheduled_date = Column(String, nullable=True)  # Дата аттестации (строка как в ТЗ "28.08.2025")
     scheduled_time = Column(String, nullable=True)  # Время аттестации (строка как в ТЗ "12:00")
     status = Column(String, nullable=False, default='assigned')  # assigned, in_progress, completed, failed
@@ -575,7 +576,7 @@ class AttestationQuestionResult(Base):
     question_id = Column(Integer, ForeignKey('attestation_questions.id'), nullable=False)
     points_awarded = Column(Float, nullable=False)  # Баллы, которые поставил руководитель
     max_points = Column(Float, nullable=False)  # Максимальные баллы за вопрос
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
 
     # Связи
     attestation_result = relationship("AttestationResult")
@@ -594,7 +595,7 @@ class TraineeLearningPath(Base):
     trainee_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     learning_path_id = Column(Integer, ForeignKey('learning_paths.id'), nullable=False)
     assigned_by_id = Column(Integer, ForeignKey('users.id'), nullable=False)  # Наставник, который назначил
-    assigned_date = Column(DateTime, default=datetime.now)
+    assigned_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
     attestation_completed = Column(Boolean, default=False)  # Прошел ли стажер аттестацию
 
@@ -679,7 +680,7 @@ class KnowledgeFolder(Base):
     name = Column(String, nullable=False)  # Название папки
     description = Column(Text, nullable=True)  # Описание папки
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Рекрутер-создатель, было: nullable=False
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
     company_id = Column(Integer, ForeignKey('companies.id'), nullable=True, index=True)  # Компания папки
     
@@ -712,7 +713,7 @@ class KnowledgeMaterial(Base):
     photos = Column(JSONB, nullable=True)  # Список file_id фотографий (опционально)
     order_number = Column(Integer, nullable=False, default=1)  # Порядок материала в папке
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Рекрутер-создатель, было: nullable=False
-    created_date = Column(DateTime, default=datetime.now)
+    created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
 
     # Связи
@@ -745,7 +746,7 @@ class Company(Base):
     
     # Подписка
     subscribe = Column(Boolean, default=True, nullable=False, index=True)
-    start_date = Column(DateTime, nullable=False, default=datetime.now)
+    start_date = Column(DateTime, nullable=False, default=moscow_now)
     finish_date = Column(DateTime, nullable=False)  # Дата окончания подписки
     trial = Column(Boolean, default=True, nullable=False)
     
@@ -755,7 +756,7 @@ class Company(Base):
     
     # Метаданные
     created_by_id = Column(Integer, ForeignKey('users.id'), nullable=True)  # Первый пользователь (Рекрутер)
-    created_date = Column(DateTime, default=datetime.now, nullable=False)
+    created_date = Column(DateTime, default=moscow_now, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     
     # Связи (будут определены после добавления company_id в User)
