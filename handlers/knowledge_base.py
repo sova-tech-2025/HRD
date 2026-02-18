@@ -20,7 +20,7 @@ from database.db import (
     check_folder_access, get_accessible_knowledge_folders_for_user, ensure_company_id
 )
 from states.states import KnowledgeBaseStates
-from handlers.auth import check_auth
+from handlers.auth import check_auth, ensure_callback_auth, get_current_user
 from keyboards.keyboards import (
     get_knowledge_base_main_keyboard, get_knowledge_folders_keyboard,
     get_folder_created_keyboard, get_material_description_keyboard,
@@ -114,7 +114,7 @@ async def cmd_knowledge_base_universal(message: Message, state: FSMContext, sess
             return
 
         # Получение пользователя
-        user = await get_user_by_tg_id(session, message.from_user.id)
+        user = await get_current_user(message, state, session)
         if not user:
             await message.answer("❌ Ты не зарегистрирован в системе.")
             return
@@ -216,6 +216,8 @@ async def cmd_knowledge_base_universal(message: Message, state: FSMContext, sess
 @router.callback_query(F.data == "trainee_knowledge_base")
 async def callback_trainee_knowledge_base(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик инлайн-кнопки 'База знаний 📒' из меню стажера"""
+    if not await ensure_callback_auth(callback, state, session):
+        return
     try:
         await callback.message.delete()
     except Exception as e:

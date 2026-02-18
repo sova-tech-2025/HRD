@@ -8,7 +8,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import MENTOR_MENU_IMAGE_FILE_ID, MENTOR_MENU_IMAGE_PATH, TRAINEE_MENU_IMAGE_FILE_ID, TRAINEE_MENU_IMAGE_PATH
-from database.db import get_user_by_tg_id, get_user_roles, get_company_by_id
+from database.db import get_user_by_tg_id, get_user_by_id, get_user_roles, get_company_by_id
 from keyboards.keyboards import get_keyboard_by_role, get_welcome_keyboard, get_mentor_inline_menu, get_trainee_inline_menu
 from states.states import AuthStates, RegistrationStates
 from utils.logger import logger, log_user_action, log_user_error
@@ -188,6 +188,48 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
         log_user_error(actor.id, actor.username, "login error", e)
         await message.answer("Произошла ошибка при входе в систему. Пожалуйста, попробуй позже.")
 
+async def get_current_user(message: Message, state: FSMContext, session: AsyncSession):
+    """Получает текущего пользователя по message.from_user.id или из FSM state.
+
+    Нужен потому что callback.message.from_user — это бот, а не пользователь.
+    """
+    user = await get_user_by_tg_id(session, message.from_user.id)
+    if not user:
+        data = await state.get_data()
+        user_id = data.get("user_id")
+        if user_id:
+            user = await get_user_by_id(session, user_id)
+    return user
+
+
+async def ensure_callback_auth(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> bool:
+    """Восстанавливает FSM state для callback-обработчиков.
+
+    callback.message.from_user — бот, поэтому check_auth/get_current_user
+    не найдут пользователя без user_id в FSM. Этот хелпер его восстанавливает.
+    Валидацию (компания, подписка) делает check_auth внутри cmd_* функций.
+    """
+    data = await state.get_data()
+    if data.get("is_authenticated") and data.get("user_id"):
+        return True
+
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user or not user.is_active:
+        await callback.answer("Используй /start для входа", show_alert=True)
+        return False
+
+    roles = await get_user_roles(session, user.id)
+    primary_role = roles[0].name
+    await state.update_data(
+        user_id=user.id,
+        role=primary_role,
+        is_authenticated=True,
+        auth_time=time.time(),
+        company_id=user.company_id
+    )
+    return True
+
+
 async def check_auth(message: Message, state: FSMContext, session: AsyncSession) -> bool:
     try:
         data = await state.get_data()
@@ -206,6 +248,9 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
         
         if is_authenticated:
             user = await get_user_by_tg_id(session, message.from_user.id)
+            # Fallback: callback.message.from_user — бот, берём user_id из FSM
+            if not user and data.get("user_id"):
+                user = await get_user_by_id(session, data["user_id"])
             if not user or not user.is_active:
                 await state.clear()
                 await message.answer("Твой аккаунт деактивирован. Обратись к администратору.")
@@ -242,11 +287,14 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
             return True
         
         user = await get_user_by_tg_id(session, message.from_user.id)
-        
+        # Fallback: callback.message.from_user — бот, берём user_id из FSM
+        if not user and data.get("user_id"):
+            user = await get_user_by_id(session, data["user_id"])
+
         if not user:
             await message.answer("Ты не зарегистрирован в системе. Используй команду /start для регистрации.")
             return False
-        
+
         if not user.is_active:
             await message.answer("Твой аккаунт деактивирован. Обратись к администратору.")
             return False

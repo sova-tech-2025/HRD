@@ -48,7 +48,7 @@ def get_days_word(days: int) -> str:
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import MentorshipStates, AttestationAssignmentStates, TraineeManagementStates
 from utils.logger import logger, log_user_action, log_user_error
-from handlers.auth import check_auth
+from handlers.auth import check_auth, ensure_callback_auth, get_current_user
 
 router = Router()
 
@@ -120,11 +120,11 @@ async def cmd_my_mentor(message: Message, state: FSMContext, session: AsyncSessi
     if not is_auth:
         return
     
-    user = await get_user_by_tg_id(session, message.from_user.id)
+    user = await get_current_user(message, state, session)
     if not user:
         await message.answer("Ты не зарегистрирован в системе.")
         return
-    
+
     mentor = await get_trainee_mentor(session, user.id, company_id=user.company_id)
     
     if not mentor:
@@ -154,6 +154,8 @@ async def cmd_my_mentor(message: Message, state: FSMContext, session: AsyncSessi
 @router.callback_query(F.data == "trainee_my_mentor")
 async def callback_trainee_my_mentor(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик инлайн-кнопки 'Мой наставник 🎓' из меню стажера"""
+    if not await ensure_callback_auth(callback, state, session):
+        return
     try:
         await callback.message.delete()
     except Exception as e:

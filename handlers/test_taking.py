@@ -27,7 +27,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import TestTakingStates
 from utils.logger import log_user_action, log_user_error, logger
 from utils.test_progress_formatters import get_test_status_icon
-from handlers.auth import check_auth
+from handlers.auth import check_auth, ensure_callback_auth, get_current_user
 
 router = Router()
 
@@ -51,16 +51,16 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
     if not is_auth:
         return
     
-    user = await get_user_by_tg_id(session, message.from_user.id)
+    user = await get_current_user(message, state, session)
     if not user:
         await message.answer("Ты не зарегистрирован в системе.")
         return
-    
+
     has_permission = await check_user_permission(session, user.id, "take_tests")
     if not has_permission:
         await message.answer("У тебя нет прав для прохождения тестов.")
         return
-    
+
     # Получаем company_id с fallback на ensure_company_id для безопасности
     company_id = user.company_id
     if company_id is None:
@@ -242,7 +242,7 @@ async def cmd_trainee_broadcast_tests(message: Message, state: FSMContext, sessi
             return
 
         # Получение пользователя
-        user = await get_user_by_tg_id(session, message.from_user.id)
+        user = await get_current_user(message, state, session)
         if not user:
             await message.answer("Ты не зарегистрирован в системе.")
             return
@@ -334,9 +334,12 @@ async def cmd_trainee_broadcast_tests(message: Message, state: FSMContext, sessi
         await message.answer("Произошла ошибка при получении списка тестов")
         log_user_error(message.from_user.id, "my_tests_error", str(e))
 
-async def show_user_test_scores(message: Message, session: AsyncSession, page: int = 0) -> None:
+async def show_user_test_scores(message: Message, session: AsyncSession, page: int = 0, state: FSMContext = None) -> None:
     """Универсальная функция для показа результатов тестирования пользователя с пагинацией"""
-    user = await get_user_by_tg_id(session, message.from_user.id)
+    if state:
+        user = await get_current_user(message, state, session)
+    else:
+        user = await get_user_by_tg_id(session, message.from_user.id)
     if not user:
         await message.answer("Ты не зарегистрирован в системе.")
         return
@@ -634,12 +637,14 @@ async def cmd_view_scores(message: Message, state: FSMContext, session: AsyncSes
     if not is_auth:
         return
     
-    await show_user_test_scores(message, session)
+    await show_user_test_scores(message, session, state=state)
 
 
 @router.callback_query(F.data == "trainee_trajectory_tests")
 async def callback_trainee_trajectory_tests(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик инлайн-кнопки 'Тесты траектории 🗺️' из меню стажера"""
+    if not await ensure_callback_auth(callback, state, session):
+        return
     try:
         await callback.message.delete()
     except Exception as e:
@@ -652,6 +657,8 @@ async def callback_trainee_trajectory_tests(callback: CallbackQuery, state: FSMC
 @router.callback_query(F.data == "trainee_my_tests")
 async def callback_trainee_my_tests(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик инлайн-кнопки 'Мои тесты 📋' из меню стажера"""
+    if not await ensure_callback_auth(callback, state, session):
+        return
     try:
         await callback.message.delete()
     except Exception as e:
@@ -664,12 +671,14 @@ async def callback_trainee_my_tests(callback: CallbackQuery, state: FSMContext, 
 @router.callback_query(F.data == "trainee_scores")
 async def callback_trainee_scores(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик инлайн-кнопки 'Посмотреть баллы 📊' из меню стажера"""
+    if not await ensure_callback_auth(callback, state, session):
+        return
     try:
         await callback.message.delete()
     except Exception as e:
         logger.warning(f"Не удалось удалить сообщение: {e}")
 
-    await show_user_test_scores(callback.message, session)
+    await show_user_test_scores(callback.message, session, state=state)
     await callback.answer()
 
 

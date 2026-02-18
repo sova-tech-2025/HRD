@@ -1,7 +1,6 @@
 """
 Обработчики для прохождения траекторий стажерами.
 Включает просмотр траектории, выбор этапов, сессий и прохождение тестов.
-Дизайн по Figma 17.1-17.5, 18.1.
 """
 
 from aiogram import Router, F
@@ -17,7 +16,7 @@ from database.db import (
     get_user_test_result, get_user_by_tg_id, get_user_by_id, check_user_permission,
     get_trainee_attestation_status
 )
-from handlers.auth import check_auth
+from handlers.auth import check_auth, ensure_callback_auth, get_current_user
 from keyboards.keyboards import get_main_menu_keyboard, get_mentor_contact_keyboard
 from utils.logger import logger, log_user_action, log_user_error
 from utils.test_progress_formatters import get_test_status_icon, format_test_line_figma
@@ -124,7 +123,7 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
         if not is_auth:
             return
 
-        user = await get_user_by_tg_id(session, message.from_user.id)
+        user = await get_current_user(message, state, session)
         if not user:
             await message.answer("Ты не зарегистрирован в системе.")
             return
@@ -193,6 +192,8 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
 @router.callback_query(F.data == "trainee_trajectory")
 async def callback_trainee_trajectory(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик инлайн-кнопки 'Траектория обучения 📖' из меню стажера"""
+    if not await ensure_callback_auth(callback, state, session):
+        return
     try:
         await callback.message.delete()
     except Exception as e:
