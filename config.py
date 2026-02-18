@@ -65,6 +65,7 @@ _DEFAULT_MY_TESTS_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "tests" / "my_t
 _DEFAULT_MENTOR_PANEL_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "mentor_panel" / "mentor_panel.png"
 _DEFAULT_MENTOR_MENU_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "mentor_menu" / "mentor_main_menu.png"
 _DEFAULT_TRAINEE_MENU_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "trainee_menu" / "trainee_main_menu.png"
+_DEFAULT_TRAINEE_TRAJECTORY_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "trainee_trajectory" / "trajectory_banner.png"
 
 MAIN_MENU_IMAGE_FILE_ID = os.getenv("MAIN_MENU_IMAGE_FILE_ID")
 MAIN_MENU_IMAGE_URL = os.getenv("MAIN_MENU_IMAGE_URL")
@@ -106,6 +107,16 @@ elif _DEFAULT_TRAINEE_MENU_IMAGE_PATH.exists():
     TRAINEE_MENU_IMAGE_PATH = str(_DEFAULT_TRAINEE_MENU_IMAGE_PATH)
 else:
     TRAINEE_MENU_IMAGE_PATH = None
+
+TRAINEE_TRAJECTORY_IMAGE_FILE_ID = os.getenv("TRAINEE_TRAJECTORY_IMAGE_FILE_ID")
+
+_env_trainee_trajectory_image_path = os.getenv("TRAINEE_TRAJECTORY_IMAGE_PATH")
+if _env_trainee_trajectory_image_path:
+    TRAINEE_TRAJECTORY_IMAGE_PATH = str(Path(_env_trainee_trajectory_image_path))
+elif _DEFAULT_TRAINEE_TRAJECTORY_IMAGE_PATH.exists():
+    TRAINEE_TRAJECTORY_IMAGE_PATH = str(_DEFAULT_TRAINEE_TRAJECTORY_IMAGE_PATH)
+else:
+    TRAINEE_TRAJECTORY_IMAGE_PATH = None
 
 MENTOR_PANEL_IMAGE_FILE_ID = os.getenv("MENTOR_PANEL_IMAGE_FILE_ID")
 
