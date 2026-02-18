@@ -2858,9 +2858,6 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
             trajectory_text += "❌ Нет открытых этапов для прохождения"
 
         keyboard_buttons.append([
-            InlineKeyboardButton(text="Связаться с наставником 👀", callback_data="contact_mentor")
-        ])
-        keyboard_buttons.append([
             InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
         ])
 

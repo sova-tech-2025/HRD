@@ -170,9 +170,6 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
             trajectory_text += "❌ Нет открытых этапов для прохождения"
 
         keyboard_buttons.append([
-            InlineKeyboardButton(text="Связаться с наставником 👀", callback_data="contact_mentor")
-        ])
-        keyboard_buttons.append([
             InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
         ])
 
@@ -243,9 +240,6 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
         else:
             trajectory_text += "❌ Нет открытых этапов для прохождения"
 
-        keyboard_buttons.append([
-            InlineKeyboardButton(text="Связаться с наставником 👀", callback_data="contact_mentor")
-        ])
         keyboard_buttons.append([
             InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
         ])
@@ -711,7 +705,10 @@ async def callback_contact_mentor(callback: CallbackQuery, state: FSMContext, se
                 "Обратись к рекрутеру для назначения наставника.",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+                    [
+                        InlineKeyboardButton(text="← назад", callback_data="trajectory_command"),
+                        InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
+                    ]
                 ])
             )
             return
@@ -728,7 +725,10 @@ async def callback_contact_mentor(callback: CallbackQuery, state: FSMContext, se
             mentor_info,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+                [
+                    InlineKeyboardButton(text="← назад", callback_data="trajectory_command"),
+                    InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
+                ]
             ])
         )
 

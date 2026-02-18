@@ -2136,10 +2136,12 @@ def get_employee_material_view_keyboard(folder_id: int) -> InlineKeyboardMarkup:
 
 
 def get_mentor_contact_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для связи с наставником при отсутствии траектории (Figma 17.5)"""
+    """Клавиатура для экрана 'траектория не назначена' (Figma 17.5)"""
     keyboard = [
-        [InlineKeyboardButton(text="Связаться с наставником 👀", callback_data="contact_mentor")],
-        [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+        [
+            InlineKeyboardButton(text="← назад", callback_data="main_menu"),
+            InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
+        ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
