@@ -2105,7 +2105,7 @@ async def callback_employee_knowledge_base(callback: CallbackQuery, state: FSMCo
                 "В данный момент для тебя нет доступных материалов.\n"
                 "Обратитесь к рекрутеру для получения доступа к необходимым разделам.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="⬅️ Назад к профилю", callback_data="back_to_employee_profile")]
+                    [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
                 ]),
                 parse_mode="HTML"
             )
@@ -2359,7 +2359,7 @@ async def callback_employee_back_to_folders(callback: CallbackQuery, state: FSMC
                 "В данный момент для тебя нет доступных материалов.\n"
                 "Обратитесь к рекрутеру для получения доступа к необходимым разделам.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="⬅️ Назад к профилю", callback_data="back_to_employee_profile")]
+                    [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
                 ]),
                 parse_mode="HTML"
             )
