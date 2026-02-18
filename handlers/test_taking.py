@@ -409,12 +409,18 @@ async def show_user_test_scores(message: Message, session: AsyncSession, page: i
         status = "пройден" if result.is_passed else "не пройден"
         percentage = (result.score / result.max_possible_score * 100) if result.max_possible_score > 0 else 0
         
+        date_str = result.created_date.strftime('%d.%m.%Y %H:%M') if result.created_date else "Не указана"
+        if result.end_time and result.start_time:
+            time_str = f"{(result.end_time - result.start_time).total_seconds():.0f} сек"
+        else:
+            time_str = "Не указано"
+
         results_list.append(
             f"<b>Тест:</b> {test.name if test else 'Неизвестный тест'}\n"
             f"• Баллы: {result.score:.1f}/{result.max_possible_score:.1f} ({percentage:.1f}%)\n"
             f"• Статус: {status}\n"
-            f"• Дата: {result.created_date.strftime('%d.%m.%Y %H:%M')}\n"
-            f"• Время: {(result.end_time - result.start_time).total_seconds():.0f} сек"
+            f"• Дата: {date_str}\n"
+            f"• Время: {time_str}"
         )
     
     results_text = "\n\n".join(results_list)
@@ -428,7 +434,7 @@ async def show_user_test_scores(message: Message, session: AsyncSession, page: i
             mentor_tg_id = mentor.tg_id
     
     # Формируем контекстную информацию о пользователе
-    days_in_status = (moscow_now() - user.role_assigned_date).days
+    days_in_status = (moscow_now() - user.role_assigned_date).days if user.role_assigned_date else 0
     days_text = get_days_word(days_in_status)
     
     if user_role == "стажер":
@@ -554,12 +560,18 @@ async def callback_test_scores_pagination(callback: CallbackQuery, state: FSMCon
             status = "пройден" if result.is_passed else "не пройден"
             percentage = (result.score / result.max_possible_score * 100) if result.max_possible_score > 0 else 0
             
+            date_str = result.created_date.strftime('%d.%m.%Y %H:%M') if result.created_date else "Не указана"
+            if result.end_time and result.start_time:
+                time_str = f"{(result.end_time - result.start_time).total_seconds():.0f} сек"
+            else:
+                time_str = "Не указано"
+
             results_list.append(
                 f"<b>Тест:</b> {test.name if test else 'Неизвестный тест'}\n"
                 f"• Баллы: {result.score:.1f}/{result.max_possible_score:.1f} ({percentage:.1f}%)\n"
                 f"• Статус: {status}\n"
-                f"• Дата: {result.created_date.strftime('%d.%m.%Y %H:%M')}\n"
-                f"• Время: {(result.end_time - result.start_time).total_seconds():.0f} сек"
+                f"• Дата: {date_str}\n"
+                f"• Время: {time_str}"
             )
         
         results_text = "\n\n".join(results_list)
@@ -573,7 +585,7 @@ async def callback_test_scores_pagination(callback: CallbackQuery, state: FSMCon
                 mentor_tg_id = mentor.tg_id
         
         # Формируем контекстную информацию
-        days_in_status = (moscow_now() - user.role_assigned_date).days
+        days_in_status = (moscow_now() - user.role_assigned_date).days if user.role_assigned_date else 0
         days_text = get_days_word(days_in_status)
         
         if user_role == "стажер":
