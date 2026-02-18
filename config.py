@@ -64,6 +64,7 @@ _DEFAULT_MAIN_MENU_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "main_menu" / 
 _DEFAULT_MY_TESTS_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "tests" / "my_tests_banner.jpg"
 _DEFAULT_MENTOR_PANEL_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "mentor_panel" / "mentor_panel.png"
 _DEFAULT_MENTOR_MENU_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "mentor_menu" / "mentor_main_menu.png"
+_DEFAULT_TRAINEE_MENU_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "trainee_menu" / "trainee_main_menu.png"
 
 MAIN_MENU_IMAGE_FILE_ID = os.getenv("MAIN_MENU_IMAGE_FILE_ID")
 MAIN_MENU_IMAGE_URL = os.getenv("MAIN_MENU_IMAGE_URL")
@@ -95,6 +96,16 @@ elif _DEFAULT_MENTOR_MENU_IMAGE_PATH.exists():
     MENTOR_MENU_IMAGE_PATH = str(_DEFAULT_MENTOR_MENU_IMAGE_PATH)
 else:
     MENTOR_MENU_IMAGE_PATH = None
+
+TRAINEE_MENU_IMAGE_FILE_ID = os.getenv("TRAINEE_MENU_IMAGE_FILE_ID")
+
+_env_trainee_menu_image_path = os.getenv("TRAINEE_MENU_IMAGE_PATH")
+if _env_trainee_menu_image_path:
+    TRAINEE_MENU_IMAGE_PATH = str(Path(_env_trainee_menu_image_path))
+elif _DEFAULT_TRAINEE_MENU_IMAGE_PATH.exists():
+    TRAINEE_MENU_IMAGE_PATH = str(_DEFAULT_TRAINEE_MENU_IMAGE_PATH)
+else:
+    TRAINEE_MENU_IMAGE_PATH = None
 
 MENTOR_PANEL_IMAGE_FILE_ID = os.getenv("MENTOR_PANEL_IMAGE_FILE_ID")
 

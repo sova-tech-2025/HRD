@@ -213,6 +213,18 @@ async def cmd_knowledge_base_universal(message: Message, state: FSMContext, sess
         log_user_error(message.from_user.id, "knowledge_base_universal_error", str(e))
 
 
+@router.callback_query(F.data == "trainee_knowledge_base")
+async def callback_trainee_knowledge_base(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик инлайн-кнопки 'База знаний 📒' из меню стажера"""
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    await cmd_knowledge_base_universal(callback.message, state, session)
+    await callback.answer()
+
+
 @router.callback_query(F.data == "kb_create_folder", StateFilter(KnowledgeBaseStates.main_menu))
 async def callback_create_folder(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Начало создания папки (ТЗ 9-1 шаг 3)"""

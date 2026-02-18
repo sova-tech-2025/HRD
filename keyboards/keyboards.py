@@ -102,20 +102,18 @@ def get_role_selection_keyboard(is_editing: bool = False) -> InlineKeyboardMarku
     return keyboard
 
 
-def get_trainee_keyboard() -> ReplyKeyboardMarkup:
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Мой профиль 🦸🏻‍♂️")],
-            [KeyboardButton(text="Траектория обучения 📖")],
-            [KeyboardButton(text="База знаний 📁️")],
-            [KeyboardButton(text="Мой наставник 🎓")],
-            [KeyboardButton(text="Тесты траектории 🗺️"), KeyboardButton(text="Мои тесты 📋")],
-            [KeyboardButton(text="Посмотреть баллы 📊")],
-            [KeyboardButton(text="Помощь ❓")]
-        ],
-        resize_keyboard=True
-    )
-    return keyboard
+def get_trainee_inline_menu() -> InlineKeyboardMarkup:
+    """Инлайн-клавиатура главного меню стажера"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Мой профиль 🦸🏻‍♂️", callback_data="trainee_profile")],
+        [InlineKeyboardButton(text="Траектория обучения 📖", callback_data="trainee_trajectory")],
+        [InlineKeyboardButton(text="База знаний 📒", callback_data="trainee_knowledge_base")],
+        [InlineKeyboardButton(text="Мой наставник 🎓", callback_data="trainee_my_mentor")],
+        [InlineKeyboardButton(text="Тесты траектории 🗺️", callback_data="trainee_trajectory_tests")],
+        [InlineKeyboardButton(text="Мои тесты 📋", callback_data="trainee_my_tests")],
+        [InlineKeyboardButton(text="Посмотреть баллы 📊", callback_data="trainee_scores")],
+        [InlineKeyboardButton(text="Помощь ❓", callback_data="trainee_help")],
+    ])
 
 
 def get_recruiter_keyboard() -> ReplyKeyboardMarkup:
@@ -268,7 +266,7 @@ def get_keyboard_by_role(roles) -> ReplyKeyboardMarkup:
     elif "Сотрудник" in role_names:
         return get_employee_keyboard()
     elif "Стажер" in role_names:
-        return get_trainee_keyboard()
+        return None
     else:
         return ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="Мой профиль"), KeyboardButton(text="Помощь")]],

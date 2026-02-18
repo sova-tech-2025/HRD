@@ -18,7 +18,7 @@ from database.db import (
 )
 from handlers.auth import check_auth
 from keyboards.keyboards import get_main_menu_keyboard, get_mentor_contact_keyboard
-from utils.logger import log_user_action, log_user_error
+from utils.logger import logger, log_user_action, log_user_error
 from utils.test_progress_formatters import get_test_status_icon, format_test_line
 
 router = Router()
@@ -236,6 +236,18 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
     except Exception as e:
         await message.answer("Произошла ошибка при открытии траектории")
         log_user_error(message.from_user.id, "trajectory_error", str(e))
+
+
+@router.callback_query(F.data == "trainee_trajectory")
+async def callback_trainee_trajectory(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик инлайн-кнопки 'Траектория обучения 📖' из меню стажера"""
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    await cmd_trajectory(callback.message, state, session)
+    await callback.answer()
 
 
 @router.callback_query(F.data == "trajectory_command")

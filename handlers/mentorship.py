@@ -47,7 +47,7 @@ def get_days_word(days: int) -> str:
         return "дней"
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import MentorshipStates, AttestationAssignmentStates, TraineeManagementStates
-from utils.logger import log_user_action, log_user_error
+from utils.logger import logger, log_user_action, log_user_error
 from handlers.auth import check_auth
 
 router = Router()
@@ -149,6 +149,19 @@ async def cmd_my_mentor(message: Message, state: FSMContext, session: AsyncSessi
     )
     
     log_user_action(message.from_user.id, message.from_user.username, "viewed mentor info")
+
+
+@router.callback_query(F.data == "trainee_my_mentor")
+async def callback_trainee_my_mentor(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик инлайн-кнопки 'Мой наставник 🎓' из меню стажера"""
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    await cmd_my_mentor(callback.message, state, session)
+    await callback.answer()
+
 
 @router.message(F.text.in_(["Мои стажеры", "Мои стажеры 👥", "Панель наставника 🎓"]))
 async def cmd_mentor_trainees(message: Message, state: FSMContext, session: AsyncSession):

@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import MAIN_MENU_IMAGE_FILE_ID, MAIN_MENU_IMAGE_URL, MAIN_MENU_IMAGE_PATH, MENTOR_MENU_IMAGE_FILE_ID, MENTOR_MENU_IMAGE_PATH
+from config import MAIN_MENU_IMAGE_FILE_ID, MAIN_MENU_IMAGE_URL, MAIN_MENU_IMAGE_PATH, MENTOR_MENU_IMAGE_FILE_ID, MENTOR_MENU_IMAGE_PATH, TRAINEE_MENU_IMAGE_FILE_ID, TRAINEE_MENU_IMAGE_PATH
 from database.db import get_user_by_tg_id, get_user_roles, check_user_permission
 from handlers.auth import check_auth
 from keyboards.keyboards import format_help_message
@@ -22,6 +22,18 @@ def _get_mentor_menu_photo():
             return FSInputFile(MENTOR_MENU_IMAGE_PATH)
         except Exception:
             pass
+    return None
+
+
+def _get_trainee_menu_photo():
+    """Получает источник фото для меню стажера"""
+    if TRAINEE_MENU_IMAGE_FILE_ID:
+        return TRAINEE_MENU_IMAGE_FILE_ID
+    if TRAINEE_MENU_IMAGE_PATH:
+        try:
+            return FSInputFile(TRAINEE_MENU_IMAGE_PATH)
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить изображение меню стажера: {e}")
     return None
 
 
@@ -147,8 +159,8 @@ async def button_help(message: Message, state: FSMContext, session: AsyncSession
     await cmd_help(message, state, session)
 
 @router.message(F.text == "☰ Главное меню")
-async def cmd_mentor_main_menu(message: Message, state: FSMContext, session: AsyncSession):
-    """Обработчик reply-кнопки 'Главное меню' для наставника"""
+async def cmd_inline_main_menu(message: Message, state: FSMContext, session: AsyncSession):
+    """Обработчик reply-кнопки 'Главное меню' для наставника и стажера"""
     is_auth = await check_auth(message, state, session)
     if not is_auth:
         return
@@ -157,15 +169,24 @@ async def cmd_mentor_main_menu(message: Message, state: FSMContext, session: Asy
     if not user:
         return
 
-    from keyboards.keyboards import get_mentor_inline_menu
+    from keyboards.keyboards import get_mentor_inline_menu, get_trainee_inline_menu
+
+    roles = await get_user_roles(session, user.id)
+    role_priority = {"Руководитель": 5, "Рекрутер": 4, "Наставник": 3, "Сотрудник": 2, "Стажер": 1}
+    primary_role = max(roles, key=lambda r: role_priority.get(r.name, 0))
 
     main_menu_text = (
         "☰ <b>Главное меню</b>\n\n"
         "Используй команды бота или кнопки клавиатуры для навигации по системе"
     )
-    keyboard = get_mentor_inline_menu()
 
-    photo_source = _get_mentor_menu_photo()
+    if primary_role.name == "Стажер":
+        keyboard = get_trainee_inline_menu()
+        photo_source = _get_trainee_menu_photo()
+    if primary_role.name == "Наставник":
+        keyboard = get_mentor_inline_menu()
+        photo_source = _get_mentor_menu_photo()
+
     if photo_source:
         try:
             await message.answer_photo(
@@ -174,13 +195,14 @@ async def cmd_mentor_main_menu(message: Message, state: FSMContext, session: Asy
                 parse_mode="HTML",
                 reply_markup=keyboard
             )
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Не удалось отправить фото меню: {e}")
             await message.answer(main_menu_text, parse_mode="HTML", reply_markup=keyboard)
     else:
         await message.answer(main_menu_text, parse_mode="HTML", reply_markup=keyboard)
 
     await state.clear()
-    log_user_action(message.from_user.id, message.from_user.username, "opened_mentor_main_menu")
+    log_user_action(message.from_user.id, message.from_user.username, "opened_inline_main_menu")
 
 
 @router.callback_query(F.data == "main_menu")
@@ -214,20 +236,25 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext, session:
         
         primary_role = max(roles, key=lambda r: role_priority.get(r.name, 0))
 
-        # Специальная обработка для Наставника — инлайн-меню с баннером (по Figma 7.1-7.4)
-        if primary_role.name == "Наставник":
-            from keyboards.keyboards import get_mentor_inline_menu
+        # Специальная обработка для Наставника и Стажера — инлайн-меню с баннером
+        if primary_role.name in ("Наставник", "Стажер"):
+            from keyboards.keyboards import get_mentor_inline_menu, get_trainee_inline_menu
 
             main_menu_text = (
                 "☰ <b>Главное меню</b>\n\n"
                 "Используй команды бота или кнопки клавиатуры для навигации по системе"
             )
-            keyboard = get_mentor_inline_menu()
 
-            photo_source = _get_mentor_menu_photo()
+            if primary_role.name == "Стажер":
+                keyboard = get_trainee_inline_menu()
+                photo_source = _get_trainee_menu_photo()
+            if primary_role.name == "Наставник":
+                keyboard = get_mentor_inline_menu()
+                photo_source = _get_mentor_menu_photo()
+
             try:
                 await callback.message.delete()
-            except:
+            except Exception:
                 pass
 
             if photo_source:
@@ -238,7 +265,8 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext, session:
                         parse_mode="HTML",
                         reply_markup=keyboard
                     )
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Не удалось отправить фото меню: {e}")
                     await callback.message.answer(main_menu_text, parse_mode="HTML", reply_markup=keyboard)
             else:
                 await callback.message.answer(main_menu_text, parse_mode="HTML", reply_markup=keyboard)
@@ -339,10 +367,34 @@ async def process_reload_menu(callback: CallbackQuery, state: FSMContext, sessio
         
         primary_role = max(roles, key=lambda r: role_priority.get(r.name, 0))
         
+        # Для стажера и наставника — инлайн-меню
+        if primary_role.name in ("Наставник", "Стажер"):
+            from keyboards.keyboards import get_mentor_inline_menu, get_trainee_inline_menu
+            if primary_role.name == "Стажер":
+                keyboard = get_trainee_inline_menu()
+            if primary_role.name == "Наставник":
+                keyboard = get_mentor_inline_menu()
+
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+
+            await callback.message.answer(
+                "☰ <b>Главное меню</b>\n\n"
+                "Используй кнопки для навигации по системе",
+                parse_mode="HTML",
+                reply_markup=keyboard
+            )
+            await state.clear()
+            await callback.answer()
+            log_user_action(callback.from_user.id, callback.from_user.username, "reloaded_menu")
+            return
+
         # Получаем клавиатуру согласно роли
         from keyboards.keyboards import get_keyboard_by_role
         keyboard = get_keyboard_by_role(primary_role.name)
-        
+
         # Отправляем новое сообщение с правильной клавиатурой
         await callback.message.answer(
             "🔄 <b>Клавиатура обновлена</b>\n\n"
@@ -350,20 +402,75 @@ async def process_reload_menu(callback: CallbackQuery, state: FSMContext, sessio
             parse_mode="HTML",
             reply_markup=keyboard
         )
-        
+
         # Удаляем старое inline сообщение
         try:
             await callback.message.delete()
-        except:
+        except Exception:
             pass
-        
+
         # Очищаем состояние
         await state.clear()
         await callback.answer()
-        
+
         # Логируем действие
         log_user_action(callback.from_user.id, callback.from_user.username, "reloaded_menu")
         
     except Exception as e:
         logger.error(f"Ошибка в process_reload_menu: {e}")
         await callback.answer("❌ Ошибка при обновлении клавиатуры", show_alert=True)
+
+
+@router.callback_query(F.data == "trainee_profile")
+async def callback_trainee_profile(callback: CallbackQuery, session: AsyncSession):
+    """Обработчик 'Мой профиль' из инлайн-меню стажера"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Не зарегистрирован", show_alert=True)
+        return
+
+    profile_text = await format_profile_text(user, session)
+
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    await callback.message.answer(
+        profile_text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+        ])
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "trainee_help")
+async def callback_trainee_help(callback: CallbackQuery, session: AsyncSession):
+    """Обработчик 'Помощь' из инлайн-меню стажера"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.answer("❌ Не зарегистрирован", show_alert=True)
+        return
+
+    roles = await get_user_roles(session, user.id)
+    role_name = "Стажер"
+    if roles:
+        role_name = roles[0].name
+
+    help_text = format_help_message(role_name)
+
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    await callback.message.answer(
+        help_text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+        ])
+    )
+    await callback.answer()

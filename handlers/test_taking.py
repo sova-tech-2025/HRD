@@ -636,6 +636,43 @@ async def cmd_view_scores(message: Message, state: FSMContext, session: AsyncSes
     
     await show_user_test_scores(message, session)
 
+
+@router.callback_query(F.data == "trainee_trajectory_tests")
+async def callback_trainee_trajectory_tests(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик инлайн-кнопки 'Тесты траектории 🗺️' из меню стажера"""
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    await cmd_trajectory_tests(callback.message, state, session)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "trainee_my_tests")
+async def callback_trainee_my_tests(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик инлайн-кнопки 'Мои тесты 📋' из меню стажера"""
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    await cmd_trainee_broadcast_tests(callback.message, state, session)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "trainee_scores")
+async def callback_trainee_scores(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик инлайн-кнопки 'Посмотреть баллы 📊' из меню стажера"""
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    await show_user_test_scores(callback.message, session)
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("my_tests_page:"))
 async def callback_my_tests_pagination(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик пагинации для "Мои тесты" """
