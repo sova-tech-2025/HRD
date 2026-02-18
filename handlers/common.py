@@ -440,10 +440,7 @@ async def callback_trainee_profile(callback: CallbackQuery, session: AsyncSessio
         profile_text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="← назад", callback_data="main_menu"),
-                InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
-            ]
+            [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
         ])
     )
     await callback.answer()
@@ -473,10 +470,7 @@ async def callback_trainee_help(callback: CallbackQuery, session: AsyncSession):
         help_text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="← назад", callback_data="main_menu"),
-                InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
-            ]
+            [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
         ])
     )
     await callback.answer()

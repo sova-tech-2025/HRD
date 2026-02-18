@@ -182,7 +182,10 @@ async def cmd_knowledge_base_universal(message: Message, state: FSMContext, sess
                     "📚 <b>База знаний</b>\n\n"
                     "В данный момент для тебя нет доступных материалов.\n"
                     "Обратись к рекрутеру для получения доступа к необходимым разделам.",
-                    parse_mode="HTML"
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+                    ])
                 )
             else:
                 await message.answer(

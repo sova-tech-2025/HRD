@@ -133,7 +133,10 @@ async def cmd_my_mentor(message: Message, state: FSMContext, session: AsyncSessi
             "👨‍🏫 <b>Информация о наставнике</b>\n\n"
             "У тебя пока не назначен наставник.\n"
             "Обратись к рекрутеру для назначения наставника.",
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+            ])
         )
         return
     

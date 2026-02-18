@@ -377,7 +377,10 @@ async def show_user_test_scores(message: Message, session: AsyncSession, page: i
             f"📊 <b>Твои результаты</b>\n\n"
             f"Ты пока не проходил тестов.\n"
             f"Используй кнопку 'Мои тесты 📋' для прохождения доступных тестов.",
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+            ])
         )
         return
     
