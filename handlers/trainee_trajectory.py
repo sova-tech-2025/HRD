@@ -4,7 +4,7 @@
 """
 
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,7 @@ from database.db import (
     get_user_test_result, get_user_by_tg_id, get_user_by_id, check_user_permission,
     get_trainee_attestation_status
 )
+from config import TRAINEE_TRAJECTORY_IMAGE_FILE_ID, TRAINEE_TRAJECTORY_IMAGE_PATH
 from handlers.auth import check_auth, ensure_callback_auth, get_current_user
 from keyboards.keyboards import get_main_menu_keyboard, get_mentor_contact_keyboard
 from utils.logger import logger, log_user_action, log_user_error
@@ -105,6 +106,18 @@ def get_no_trajectory_text() -> str:
     )
 
 
+def _get_trajectory_photo():
+    """Получает источник фото для баннера траектории"""
+    if TRAINEE_TRAJECTORY_IMAGE_FILE_ID:
+        return TRAINEE_TRAJECTORY_IMAGE_FILE_ID
+    if TRAINEE_TRAJECTORY_IMAGE_PATH:
+        try:
+            return FSInputFile(TRAINEE_TRAJECTORY_IMAGE_PATH)
+        except Exception:
+            pass
+    return None
+
+
 # ==============================
 # Обработчики команд
 # ==============================
@@ -144,11 +157,22 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
         trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
 
         if not trainee_path:
-            await message.answer(
-                get_no_trajectory_text(),
-                parse_mode="HTML",
-                reply_markup=get_mentor_contact_keyboard()
-            )
+            photo_source = _get_trajectory_photo()
+            no_traj_text = get_no_trajectory_text()
+            no_traj_keyboard = get_mentor_contact_keyboard()
+            if photo_source:
+                try:
+                    await message.answer_photo(
+                        photo=photo_source,
+                        caption=no_traj_text,
+                        reply_markup=no_traj_keyboard,
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logger.warning(f"Не удалось отправить фото траектории: {e}")
+                    await message.answer(no_traj_text, parse_mode="HTML", reply_markup=no_traj_keyboard)
+            else:
+                await message.answer(no_traj_text, parse_mode="HTML", reply_markup=no_traj_keyboard)
             log_user_action(user.tg_id, "trajectory_not_assigned", "Стажер попытался открыть траекторию, но она не назначена")
             return
 
@@ -173,11 +197,21 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
             InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
         ])
 
-        await message.answer(
-            trajectory_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
-            parse_mode="HTML"
-        )
+        photo_source = _get_trajectory_photo()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        if photo_source:
+            try:
+                await message.answer_photo(
+                    photo=photo_source,
+                    caption=trajectory_text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось отправить фото траектории: {e}")
+                await message.answer(trajectory_text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            await message.answer(trajectory_text, reply_markup=keyboard, parse_mode="HTML")
 
         log_user_action(user.tg_id, "trajectory_opened", f"Открыта траектория {trainee_path.learning_path.name}")
 
@@ -215,11 +249,26 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
         trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
 
         if not trainee_path:
-            await callback.message.edit_text(
-                get_no_trajectory_text(),
-                parse_mode="HTML",
-                reply_markup=get_mentor_contact_keyboard()
-            )
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            photo_source = _get_trajectory_photo()
+            no_traj_text = get_no_trajectory_text()
+            no_traj_keyboard = get_mentor_contact_keyboard()
+            if photo_source:
+                try:
+                    await callback.message.answer_photo(
+                        photo=photo_source,
+                        caption=no_traj_text,
+                        reply_markup=no_traj_keyboard,
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logger.warning(f"Не удалось отправить фото траектории: {e}")
+                    await callback.message.answer(no_traj_text, parse_mode="HTML", reply_markup=no_traj_keyboard)
+            else:
+                await callback.message.answer(no_traj_text, parse_mode="HTML", reply_markup=no_traj_keyboard)
             log_user_action(user.tg_id, "trajectory_not_assigned", "Стажер попытался открыть траектории, но она не назначена")
             return
 
@@ -244,11 +293,32 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
             InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
         ])
 
-        await callback.message.edit_text(
-            trajectory_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
-            parse_mode="HTML"
-        )
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        photo_source = _get_trajectory_photo()
+        if photo_source:
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            try:
+                await callback.message.answer_photo(
+                    photo=photo_source,
+                    caption=trajectory_text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.warning(f"Не удалось отправить фото траектории: {e}")
+                await callback.message.answer(trajectory_text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            try:
+                await callback.message.edit_text(
+                    trajectory_text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+            except Exception:
+                await callback.message.answer(trajectory_text, reply_markup=keyboard, parse_mode="HTML")
 
         log_user_action(user.tg_id, "trajectory_opened", f"Открыта траектория {trainee_path.learning_path.name}")
 
