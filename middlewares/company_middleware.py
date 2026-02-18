@@ -1,6 +1,7 @@
 from typing import Callable, Dict, Any, Awaitable
 from datetime import datetime
 from aiogram import BaseMiddleware
+from utils.timezone import moscow_now
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -109,7 +110,7 @@ class CompanyMiddleware(BaseMiddleware):
                 return
             
             # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
-            if company.finish_date and company.finish_date < datetime.now():
+            if company.finish_date and company.finish_date < moscow_now():
                 error_msg = (
                     "❌ Подписка компании истекла (заморожена).\n\n"
                     "Обратись к администратору компании для продления подписки."

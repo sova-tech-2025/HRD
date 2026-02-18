@@ -5,6 +5,7 @@ from typing import AsyncGenerator, Optional, List
 import asyncio
 from datetime import datetime
 from aiogram.fsm.context import FSMContext
+from utils.timezone import moscow_now
 
 from config import DATABASE_URL
 from database.models import (
@@ -768,12 +769,11 @@ async def activate_user(session: AsyncSession, user_id: int, role_name: str,
         await session.execute(stmt)
         
         # Обновляем объекты, статус активации и company_id (КРИТИЧЕСКИ ВАЖНО!)
-        from datetime import datetime
         update_values = {
             'is_activated': True,
             'internship_object_id': internship_object_id,
             'work_object_id': work_object_id,
-            'role_assigned_date': datetime.now()
+            'role_assigned_date': moscow_now()
         }
         if final_company_id is not None:
             update_values['company_id'] = final_company_id
@@ -4273,8 +4273,7 @@ async def update_user_role(session: AsyncSession, user_id: int, new_role_name: s
         await session.execute(insert_stmt)
         
         # Обновляем дату назначения роли
-        from datetime import datetime
-        update_role_date_stmt = update(User).where(User.id == user_id).values(role_assigned_date=datetime.now())
+        update_role_date_stmt = update(User).where(User.id == user_id).values(role_assigned_date=moscow_now())
         await session.execute(update_role_date_stmt)
         
         # Управление объектом стажировки
@@ -6150,7 +6149,7 @@ async def open_stage_for_trainee(session: AsyncSession, trainee_id: int, stage_i
                 TraineeStageProgress.stage_id == stage_id
             ).values(
                 is_opened=True,
-                opened_date=datetime.now()
+                opened_date=moscow_now()
             )
         )
 
@@ -6169,7 +6168,7 @@ async def open_stage_for_trainee(session: AsyncSession, trainee_id: int, stage_i
                     TraineeSessionProgress.stage_progress_id == stage_progress.id
                 ).values(
                     is_opened=True,
-                    opened_date=datetime.now()
+                    opened_date=moscow_now()
                 )
             )
 
@@ -6517,7 +6516,7 @@ async def complete_stage_for_trainee(session: AsyncSession, trainee_id: int, sta
                 TraineeStageProgress.stage_id == stage_id
             ).values(
                 is_completed=True,
-                completed_date=datetime.now()
+                completed_date=moscow_now()
             )
         )
 
@@ -6572,7 +6571,7 @@ async def complete_session_for_trainee(session: AsyncSession, trainee_id: int, s
                 TraineeSessionProgress.session_id == session_id
             ).values(
                 is_completed=True,
-                completed_date=datetime.now()
+                completed_date=moscow_now()
             )
         )
 
@@ -8450,7 +8449,7 @@ async def broadcast_test_to_groups(session: AsyncSession, test_id: int, group_id
                                 'trainee_id': user.id,
                                 'test_id': test_id,
                                 'granted_by_id': sent_by_id,
-                                'granted_date': datetime.now(),  # Явно указываем дату
+                                'granted_date': moscow_now(),  # Явно указываем дату
                                 'is_active': True,
                                 'company_id': user.company_id  # КРИТИЧНО для изоляции!
                             })
@@ -9627,7 +9626,7 @@ async def create_company(session: AsyncSession, company_data: dict, creator_user
         from datetime import timedelta
         
         trial_days = company_data.get('trial_period_days', 14)
-        now = datetime.now()
+        now = moscow_now()
         
         # Нормализуем код приглашения в верхний регистр для консистентности
         invite_code = company_data['invite_code'].strip().upper()
@@ -9727,7 +9726,7 @@ async def check_company_access(session: AsyncSession, company_id: int) -> dict:
             }
         
         # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
-        if company.finish_date and company.finish_date < datetime.now():
+        if company.finish_date and company.finish_date < moscow_now():
             return {
                 'accessible': False,
                 'reason': 'subscription_expired',
@@ -9788,7 +9787,7 @@ async def get_companies_with_expired_subscription(session: AsyncSession) -> List
             select(Company).where(
                 and_(
                     Company.subscribe == True,
-                    Company.finish_date <= datetime.now(),
+                    Company.finish_date <= moscow_now(),
                     Company.is_active == True
                 )
             )
@@ -9877,7 +9876,7 @@ async def create_user_with_company(session: AsyncSession, user_data: dict, compa
             company_id=company_id,
             is_active=True,
             is_activated=is_activated,
-            registration_date=datetime.now()
+            registration_date=moscow_now()
         )
         
         session.add(user)
@@ -10188,7 +10187,7 @@ async def create_default_company(session: AsyncSession) -> Optional[Company]:
             return existing_company
         
         # Создаем компанию по умолчанию
-        now = datetime.now()
+        now = moscow_now()
         # Нормализуем код приглашения в верхний регистр для консистентности
         default_invite_code = "keksbakery".strip().upper()  # KEKSBAKERY
         default_company = Company(

@@ -2,6 +2,7 @@ import os
 import time
 from datetime import datetime
 from aiogram import Router, F
+from utils.timezone import moscow_now
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -63,7 +64,7 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
             return
         
         # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
-        if company and company.finish_date and company.finish_date < datetime.now():
+        if company and company.finish_date and company.finish_date < moscow_now():
             await message.answer(
                 "❌ Подписка компании истекла (заморожена).\n\n"
                 "Обратись к администратору компании для продления подписки."
@@ -151,7 +152,7 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
                 return False
             
             # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
-            if company and company.finish_date and company.finish_date < datetime.now():
+            if company and company.finish_date and company.finish_date < moscow_now():
                 await state.clear()
                 await message.answer(
                     "❌ Подписка компании истекла (заморожена).\n\n"
@@ -189,7 +190,7 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
             return False
         
         # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
-        if company and company.finish_date and company.finish_date < datetime.now():
+        if company and company.finish_date and company.finish_date < moscow_now():
             await message.answer(
                 "❌ Подписка компании истекла (заморожена).\n\n"
                 "Обратись к администратору компании для продления подписки."
@@ -290,7 +291,7 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession, 
             return
         
         # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
-        if company and company.finish_date and company.finish_date < datetime.now():
+        if company and company.finish_date and company.finish_date < moscow_now():
             await message.answer(
                 "❌ Подписка компании истекла (заморожена).\n\n"
                 "Обратись к администратору компании для продления подписки."

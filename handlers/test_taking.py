@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import json
 import random
 from datetime import datetime
+from utils.timezone import moscow_now
 
 
 
@@ -421,7 +422,7 @@ async def show_user_test_scores(message: Message, session: AsyncSession, page: i
             mentor_tg_id = mentor.tg_id
     
     # Формируем контекстную информацию о пользователе
-    days_in_status = (datetime.now() - user.role_assigned_date).days
+    days_in_status = (moscow_now() - user.role_assigned_date).days
     days_text = get_days_word(days_in_status)
     
     if user_role == "стажер":
@@ -566,7 +567,7 @@ async def callback_test_scores_pagination(callback: CallbackQuery, state: FSMCon
                 mentor_tg_id = mentor.tg_id
         
         # Формируем контекстную информацию
-        days_in_status = (datetime.now() - user.role_assigned_date).days
+        days_in_status = (moscow_now() - user.role_assigned_date).days
         days_text = get_days_word(days_in_status)
         
         if user_role == "стажер":
@@ -1081,7 +1082,7 @@ async def process_start_test(callback: CallbackQuery, state: FSMContext, session
         current_question_index=0,
         user_answers={},
         answers_details=[],
-        start_time=datetime.now(),
+        start_time=moscow_now(),
         shuffle_enabled=test.shuffle_questions,
         user_id=callback.from_user.id  # Сохраняем Telegram ID пользователя
     )
@@ -1099,7 +1100,7 @@ async def show_question(message: Message, state: FSMContext):
     question = questions[index]
     
     # Засекаем время начала показа вопроса
-    await state.update_data(question_start_time=datetime.now())
+    await state.update_data(question_start_time=moscow_now())
     
     # Подготавливаем варианты ответов для текущего вопроса
     current_options = None
@@ -1178,8 +1179,8 @@ async def process_text_answer(message: Message, state: FSMContext, session: Asyn
     question = questions[index]
 
     # Рассчитываем время ответа
-    start_time = data.get('question_start_time', datetime.now())
-    time_spent = (datetime.now() - start_time).total_seconds()
+    start_time = data.get('question_start_time', moscow_now())
+    time_spent = (moscow_now() - start_time).total_seconds()
 
     user_answers = data.get('user_answers', {})
     answers_details = data.get('answers_details', [])
@@ -1274,8 +1275,8 @@ async def process_answer_selection(callback: CallbackQuery, state: FSMContext, s
     question = questions[index]
     
     # Рассчитываем время ответа
-    start_time = data.get('question_start_time', datetime.now())
-    time_spent = (datetime.now() - start_time).total_seconds()
+    start_time = data.get('question_start_time', moscow_now())
+    time_spent = (moscow_now() - start_time).total_seconds()
     
     # Сохраняем ответ
     user_answers = data.get('user_answers', {})
@@ -1420,7 +1421,7 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
         'max_possible_score': test.max_score,
         'is_passed': is_passed,
         'start_time': data['start_time'],
-        'end_time': datetime.now(),
+        'end_time': moscow_now(),
         'answers_details': data.get('answers_details', []),
         'wrong_answers': wrong_answers_data
     }

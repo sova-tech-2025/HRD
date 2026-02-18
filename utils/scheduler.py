@@ -1,14 +1,11 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta
 from sqlalchemy import select, and_, update
-import pytz
 
 from database.db import get_companies_with_expired_subscription, get_company_recruiters, async_session
 from database.models import Company
 from utils.logger import logger
-
-# Часовой пояс для scheduler (UTC+3)
-MOSCOW_TZ = pytz.timezone('Europe/Moscow')
+from utils.timezone import MOSCOW_TZ, moscow_now
 
 # Глобальная переменная для бота
 bot = None
@@ -20,8 +17,7 @@ async def check_expired_subscriptions():
     
     try:
         async with async_session() as session:
-            # Получаем текущее время в часовом поясе Москвы
-            now_moscow = datetime.now(MOSCOW_TZ).replace(tzinfo=None)
+            now_moscow = moscow_now()
             
             # Получаем компании с истекшими подписками
             result = await session.execute(
@@ -87,8 +83,7 @@ async def notify_subscription_expiring():
     
     try:
         async with async_session() as session:
-            # Получаем текущее время в часовом поясе Москвы
-            now = datetime.now(MOSCOW_TZ).replace(tzinfo=None)
+            now = moscow_now()
             warning_periods = [3, 7, 14]  # дни до окончания
             
             total_notifications = 0

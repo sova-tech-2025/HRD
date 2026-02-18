@@ -5,6 +5,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from datetime import datetime
+from utils.timezone import moscow_now
 
 from database.db import (
     get_unassigned_trainees, get_available_mentors, assign_mentor,
@@ -182,7 +183,7 @@ async def cmd_mentor_trainees(message: Message, state: FSMContext, session: Asyn
         trajectory_name = trainee_path.learning_path.name if trainee_path else "не выбрано"
 
         # Подсчитываем количество дней в статусе стажера
-        days_as_trainee = (datetime.now() - trainee.role_assigned_date).days
+        days_as_trainee = (moscow_now() - trainee.role_assigned_date).days
         days_word = get_days_word(days_as_trainee)
 
         # Добавляем информацию о стажере согласно ТЗ
@@ -3343,7 +3344,7 @@ async def update_stages_management_interface(callback: CallbackQuery, session: A
         trainee = await get_user_by_id(session, trainee_id)
         
         # Вычисляем количество дней в статусе стажера
-        days_as_trainee = (datetime.now() - trainee.role_assigned_date).days
+        days_as_trainee = (moscow_now() - trainee.role_assigned_date).days
         days_word = get_days_word(days_as_trainee)
         
         # Получаем результаты тестов для правильной индикации
