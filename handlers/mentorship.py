@@ -2348,10 +2348,9 @@ async def generate_trajectory_progress_with_attestation_status(session, trainee_
 
 
 @router.callback_query(F.data == "my_trainees")
-async def process_my_trainees_callback(callback: CallbackQuery, session: AsyncSession):
-    """Обработчик кнопки 'Мои стажёры' — обратная совместимость, перенаправляет к mentor_panel"""
-    callback.data = "mentor_panel"
-    await callback_mentor_panel(callback, None, session)
+async def process_my_trainees_callback(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик кнопки 'Мои стажёры' — обратная совместимость, перенаправляет к списку стажеров"""
+    await callback_mentor_my_trainees(callback, state, session)
 
 @router.callback_query(F.data.startswith("open_first_stage:"))
 async def callback_open_first_stage(callback: CallbackQuery, session: AsyncSession, bot):
