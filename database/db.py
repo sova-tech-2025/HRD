@@ -2772,159 +2772,96 @@ async def check_test_access(session: AsyncSession, user_id: int, test_id: int, c
         user_roles = await get_user_roles(session, user_id)
         role_names = [role.name for role in user_roles]
         
-        # Для стажеров - проверяем доступ через TraineeTestAccess И открытость этапов
+        # Для стажеров - проверяем доступ через TraineeTestAccess ИЛИ структуру траектории
         if "Стажер" in role_names:
-            # Сначала проверяем базовый доступ через TraineeTestAccess
+            if company_id is None:
+                logger.warning(f"Не удалось определить company_id для проверки доступа пользователя {user_id} к тесту {test_id}")
+                return False
+
+            # 1. Проверяем доступ через TraineeTestAccess
             query = select(TraineeTestAccess).where(
                 TraineeTestAccess.trainee_id == user_id,
                 TraineeTestAccess.test_id == test_id,
-                TraineeTestAccess.is_active == True
+                TraineeTestAccess.is_active == True,
+                (TraineeTestAccess.company_id == company_id) |
+                (TraineeTestAccess.company_id.is_(None))
             )
-            
-            # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-            # Если company_id не передан, получаем из пользователя для безопасности
-            if company_id is None:
-                user = await get_user_by_id(session, user_id)
-                if user:
-                    company_id = user.company_id
-            
-            # Применяем фильтр: либо company_id совпадает, либо NULL (старые записи)
-            # Но только если пользователь из той же компании
-            if company_id is not None:
-                # Ищем записи с company_id = переданный ИЛИ NULL (для совместимости со старыми данными)
-                query = query.where(
-                    (TraineeTestAccess.company_id == company_id) |
-                    (TraineeTestAccess.company_id.is_(None))
-                )
-            # Если company_id все еще None - это ошибка, запрещаем доступ для безопасности
-            else:
-                logger.warning(f"Не удалось определить company_id для проверки доступа пользователя {user_id} к тесту {test_id}")
-                return False
-            
+
             result = await session.execute(query)
             access = result.scalar_one_or_none()
-            if not access:
-                return False
-            
-            # КРИТИЧЕСКАЯ ПРОВЕРКА БЕЗОПАСНОСТИ: Если найдена NULL запись, проверяем принадлежность теста компании пользователя
-            # Это предотвращает доступ к тестам других компаний через старые NULL записи
-            if access.company_id is None:
-                test = await get_test_by_id(session, test_id, company_id=company_id)
-                if not test or test.company_id != company_id:
-                    logger.warning(
-                        f"Безопасность: NULL запись TraineeTestAccess найдена, но тест {test_id} "
-                        f"не принадлежит компании {company_id} пользователя {user_id}. Доступ запрещен."
-                    )
-                    return False
-            
-            # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Если тест из траектории, проверяем открытость этапа
-            from database.models import LearningSession, TraineeSessionProgress, TraineeStageProgress, TraineeLearningPath, session_tests, User, LearningPath
-            
-            # Проверяем, входит ли тест в траекторию С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
+
+            if access:
+                # Проверяем принадлежность теста компании для NULL записей
+                if access.company_id is None:
+                    test = await get_test_by_id(session, test_id, company_id=company_id)
+                    if not test or test.company_id != company_id:
+                        logger.warning(
+                            f"Безопасность: NULL запись TraineeTestAccess найдена, но тест {test_id} "
+                            f"не принадлежит компании {company_id} пользователя {user_id}. Доступ запрещен."
+                        )
+                        return False
+                return True
+
+            # 2. TraineeTestAccess не найден — проверяем структуру траектории (fallback)
+            # Тест может быть в открытом этапе, но TraineeTestAccess не создан
             trainee_path_query = (
                 select(TraineeLearningPath)
                 .join(User, TraineeLearningPath.trainee_id == User.id)
                 .join(LearningPath, TraineeLearningPath.learning_path_id == LearningPath.id)
                 .where(
                     TraineeLearningPath.trainee_id == user_id,
-                    TraineeLearningPath.is_active == True
-                )
-            )
-            
-            # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-            if company_id is not None:
-                trainee_path_query = trainee_path_query.where(
+                    TraineeLearningPath.is_active == True,
                     User.company_id == company_id,
                     LearningPath.company_id == company_id
                 )
-            
+            )
+
             trainee_path_result = await session.execute(trainee_path_query)
             trainee_path = trainee_path_result.scalar_one_or_none()
-            
+
             if trainee_path:
-                # Проверяем, входит ли тест в сессии траектории И этап открыт С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
-                trajectory_test_query = (
+                # Проверяем, есть ли тест в открытом этапе траектории
+                trajectory_check = (
                     select(session_tests.c.test_id)
                     .join(LearningSession, LearningSession.id == session_tests.c.session_id)
                     .join(TraineeSessionProgress, TraineeSessionProgress.session_id == LearningSession.id)
                     .join(TraineeStageProgress, TraineeSessionProgress.stage_progress_id == TraineeStageProgress.id)
-                    .join(LearningPath, TraineeStageProgress.trainee_path_id == trainee_path.id)
                     .where(
                         TraineeStageProgress.trainee_path_id == trainee_path.id,
-                        TraineeStageProgress.is_opened == True,  # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: только открытые этапы
+                        TraineeStageProgress.is_opened == True,
                         session_tests.c.test_id == test_id
                     )
                 )
-                
-                # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-                if company_id is not None:
-                    trajectory_test_query = trajectory_test_query.where(LearningPath.company_id == company_id)
-                
-                trajectory_test_result = await session.execute(trajectory_test_query)
-                trajectory_test = trajectory_test_result.first()
-                
-                # Если тест из траектории, но этап закрыт - проверяем источник доступа
-                if trajectory_test is None:
-                    # Проверяем, входит ли тест в траекторию вообще (для диагностики) С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
-                    all_trajectory_test_query = (
-                        select(session_tests.c.test_id)
-                        .join(LearningSession, LearningSession.id == session_tests.c.session_id)
-                        .join(TraineeSessionProgress, TraineeSessionProgress.session_id == LearningSession.id)
-                        .join(TraineeStageProgress, TraineeSessionProgress.stage_progress_id == TraineeStageProgress.id)
-                        .join(LearningPath, TraineeStageProgress.trainee_path_id == trainee_path.id)
-                        .where(
-                            TraineeStageProgress.trainee_path_id == trainee_path.id,
-                            session_tests.c.test_id == test_id
-                        )
-                    )
-                    
-                    # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-                    if company_id is not None:
-                        all_trajectory_test_query = all_trajectory_test_query.where(LearningPath.company_id == company_id)
-                    
-                    all_trajectory_test_result = await session.execute(all_trajectory_test_query)
-                    all_trajectory_test = all_trajectory_test_result.first()
-                    
-                    if all_trajectory_test is not None:
-                        # Тест из траектории, но этап закрыт
-                        # Проверяем источник доступа: если доступ через рассылку - разрешаем
-                        if access.granted_by_id:  # Доступ через рассылку от рекрутера
-                            logger.info(f"Доступ к траекторному тесту {test_id} разрешен через рассылку для стажера {user_id}")
-                            return True
-                        else:
-                            # Доступ через наставника, но этап закрыт - запрещаем
-                            logger.warning(f"Доступ к тесту {test_id} запрещен: этап закрыт для стажера {user_id}")
-                            return False
-            
-            return True
-        
-        # Для сотрудников - проверяем доступ через тесты от рекрутера
+                result = await session.execute(trajectory_check)
+                if result.first():
+                    logger.info(f"Доступ к тесту {test_id} разрешен через структуру траектории для стажера {user_id}")
+                    return True
+
+            return False
+
+        # Для сотрудников - проверяем доступ через TraineeTestAccess
         elif "Сотрудник" in role_names:
-            # Проверяем, что тест создан рекрутером С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
+            # Проверяем, что тест принадлежит той же компании
             test = await get_test_by_id(session, test_id, company_id=company_id)
             if not test:
                 return False
-            
-            # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: тест должен принадлежать той же компании
             if company_id is not None and test.company_id != company_id:
                 logger.warning(f"Попытка доступа сотрудника {user_id} к тесту {test_id} другой компании")
                 return False
-                
-            # Получаем создателя теста
-            creator = await get_user_by_id(session, test.creator_id)
-            if not creator:
-                return False
-            
-            # Проверяем, что создатель из той же компании
-            if company_id is not None and creator.company_id != company_id:
-                logger.warning(f"Создатель теста {test_id} из другой компании")
-                return False
-                
-            creator_roles = await get_user_roles(session, creator.id)
-            creator_role_names = [role.name for role in creator_roles]
-            
-            # Доступ есть, если тест создан рекрутером
-            return "Рекрутер" in creator_role_names
+
+            # Проверяем наличие активного доступа через TraineeTestAccess
+            access_query = select(TraineeTestAccess).where(
+                TraineeTestAccess.trainee_id == user_id,
+                TraineeTestAccess.test_id == test_id,
+                TraineeTestAccess.is_active == True
+            )
+            if company_id is not None:
+                access_query = access_query.where(
+                    (TraineeTestAccess.company_id == company_id) |
+                    (TraineeTestAccess.company_id.is_(None))
+                )
+            result = await session.execute(access_query)
+            return result.scalar_one_or_none() is not None
         
         # Для других ролей (наставники, рекрутеры, руководители) - проверяем изоляцию по компании
         else:
