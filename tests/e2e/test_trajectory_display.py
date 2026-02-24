@@ -103,7 +103,7 @@ class TestScenario3_TrajectoryReassignment:
             if same_traj_btn:
                 resp = await mentor.click_and_wait(
                     resp, data=same_traj_btn,
-                    wait_pattern="назначена|успешно|[Тт]раектори"
+                    wait_pattern="Какой этап|открыть стажеру"
                 )
         else:
             pytest.skip("Trajectory assignment button not found — UI may differ")

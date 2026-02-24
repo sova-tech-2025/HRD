@@ -226,7 +226,7 @@ async def close_mentor_stage(
     )
 
     resp = await mentor.click_and_wait(
-        resp, data=close_btn, wait_pattern="закрыт|Закрыт|успешно"
+        resp, data=close_btn, wait_pattern="Название траектории|Какой этап"
     )
 
     return resp
