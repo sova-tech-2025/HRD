@@ -1,8 +1,9 @@
 """
-E2E Сценарий 3: Переназначение траектории — сохранение результатов.
+E2E Сценарий 3: Переназначение траектории — полный сброс прогресса.
 
-Проверяет, что TestResult не удаляются при повторном назначении траектории.
-UI стажёра и наставника должны показывать одинаковый статус ✅ для пройденных тестов.
+Проверяет, что при переназначении той же траектории все TestResult, StageProgress,
+SessionProgress и TestAccess удаляются и создаются заново.
+Стажёр должен увидеть все тесты как непройденные после переназначения.
 
 Зависит от test_setup.py и test_check_test_access.py (Стажёр 1 уже прошёл тест 1).
 """
@@ -26,15 +27,15 @@ pytestmark = [
 class TestScenario3_TrajectoryReassignment:
     """
     Проблема 3 из oc.md: при переназначении траектории результаты тестов
-    удаляются.
+    должны быть сброшены (полное пересоздание прогресса).
 
-    Ожидание: ✅ для пройденных тестов сохраняется после переназначения.
+    Ожидание: после переназначения ✅ исчезают, все тесты становятся непройденными.
     """
 
     async def test_step1_verify_trainee1_sees_passed_test(
         self, trainee1: BotClient, shared_state: dict
     ):
-        """Стажёр 1 видит пройденный тест как ✅ в траектории."""
+        """Стажёр 1 видит пройденный тест как ✅ в траектории (до переназначения)."""
         await wait_between_actions()
 
         resp = await trainee1.send_and_wait(
@@ -56,9 +57,9 @@ class TestScenario3_TrajectoryReassignment:
         self, mentor: BotClient, shared_state: dict
     ):
         """
-        Наставник (или рекрутер) переназначает ту же траекторию Стажёру 1.
+        Наставник переназначает ту же траекторию Стажёру 1.
 
-        Назначение должно быть идемпотентным — не удалять существующие результаты.
+        Теперь это полное пересоздание — все результаты и прогресс обнуляются.
         """
         await wait_between_actions()
 
@@ -92,7 +93,7 @@ class TestScenario3_TrajectoryReassignment:
         if traj_btn:
             resp = await mentor.click_and_wait(
                 resp, data=traj_btn,
-                wait_pattern="[Тт]раектори|[Вв]ыбери|назначена|уже назначена"
+                wait_pattern="[Тт]раектори|[Вв]ыбери|назначена"
             )
 
             # Выбираем ту же траекторию
@@ -102,17 +103,18 @@ class TestScenario3_TrajectoryReassignment:
             if same_traj_btn:
                 resp = await mentor.click_and_wait(
                     resp, data=same_traj_btn,
-                    wait_pattern="назначена|уже|успешно|[Тт]раектори"
+                    wait_pattern="назначена|успешно|[Тт]раектори"
                 )
         else:
-            # Траектория уже назначена — это нормально
-            pass
+            pytest.skip("Trajectory assignment button not found — UI may differ")
 
-    async def test_step3_trainee1_still_sees_passed_test(
+    async def test_step3_trainee1_sees_reset_progress(
         self, trainee1: BotClient, shared_state: dict
     ):
         """
-        КРИТИЧЕСКАЯ ПРОВЕРКА: После переназначения тест всё ещё показывается как ✅.
+        КРИТИЧЕСКАЯ ПРОВЕРКА: После переназначения все тесты сброшены.
+
+        Прогресс пересоздан с нуля — все этапы закрыты (⛔), тесты непройдены.
         """
         await wait_between_actions()
 
@@ -122,16 +124,16 @@ class TestScenario3_TrajectoryReassignment:
 
         text = resp.text or ""
 
-        # Тест 1 должен быть по-прежнему пройден
-        assert "✅" in text, (
-            f"BUG REPRODUCED: Passed test lost ✅ after trajectory reassignment! "
+        # После полного сброса не должно быть ✅ (все тесты не пройдены)
+        assert "✅" not in text, (
+            f"After reassignment, all progress should be reset (no ✅). "
             f"Got: {text[:500]}"
         )
 
-    async def test_step4_mentor_sees_same_status(
+    async def test_step4_mentor_sees_reset_status(
         self, mentor: BotClient, shared_state: dict
     ):
-        """Наставник видит тот же ✅ статус в прогрессе стажёра."""
+        """Наставник видит сброшенный прогресс стажёра (нет ✅)."""
         await wait_between_actions()
 
         resp = await mentor.send_and_wait(
@@ -154,7 +156,8 @@ class TestScenario3_TrajectoryReassignment:
 
         text = resp.text or ""
 
-        # Наставник должен видеть ✅ для пройденного теста
-        assert "✅" in text, (
-            f"Mentor's view should show ✅ for passed test. Got: {text[:500]}"
+        # Наставник тоже должен видеть сброшенный прогресс
+        # Все этапы закрыты (⛔) или пустые (нет ✅)
+        assert "✅" not in text, (
+            f"Mentor's view should show reset progress (no ✅). Got: {text[:500]}"
         )
