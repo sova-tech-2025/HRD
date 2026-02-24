@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  postgres_e2e:
+    image: postgres:17
+    container_name: hrbot_postgres_e2e
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${E2E_POSTGRES_DB:-hrd_e2e_test}
+      POSTGRES_USER: ${E2E_POSTGRES_USER:-hrd_test}
+      POSTGRES_PASSWORD: ${E2E_POSTGRES_PASSWORD:-hrd_test_password}
+    volumes:
+      - postgres_e2e_data:/var/lib/postgresql/data
+    ports:
+      - "${E2E_POSTGRES_PORT:-5434}:5432"
+    networks:
+      - hrbot_e2e_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${E2E_POSTGRES_USER:-hrd_test} -d ${E2E_POSTGRES_DB:-hrd_e2e_test}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  bot_e2e:
+    build: .
+    container_name: hrbot_app_e2e
+    restart: unless-stopped
+    depends_on:
+      postgres_e2e:
+        condition: service_healthy
+    environment:
+      - BOT_TOKEN=${E2E_BOT_TOKEN}
+      - POSTGRES_USER=${E2E_POSTGRES_USER:-hrd_test}
+      - POSTGRES_PASSWORD=${E2E_POSTGRES_PASSWORD:-hrd_test_password}
+      - POSTGRES_DB=${E2E_POSTGRES_DB:-hrd_e2e_test}
+      - POSTGRES_HOST=postgres_e2e
+      - POSTGRES_PORT=5432
+      - ADMIN_INIT_TOKEN=${ADMIN_INIT_TOKEN:-}
+      - ADMIN_INIT_TOKENS=${ADMIN_INIT_TOKENS:-}
+      - MAX_ADMINS=${MAX_ADMINS:-5}
+      - ALLOW_AUTO_AUTH=${ALLOW_AUTO_AUTH:-true}
+      - ALLOW_AUTO_ROLE_ASSIGNMENT=${ALLOW_AUTO_ROLE_ASSIGNMENT:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+      - DEFAULT_ROLE=${DEFAULT_ROLE:-Стажер}
+      - MANAGER_IDS=${MANAGER_IDS:-}
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - hrbot_e2e_network
+
+volumes:
+  postgres_e2e_data:
+
+networks:
+  hrbot_e2e_network:
+    driver: bridge
