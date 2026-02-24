@@ -1173,9 +1173,10 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
         await callback.answer()
         return
 
-    # Назначаем траекторию
     data = await state.get_data()
     company_id = data.get('company_id')
+
+    # Назначаем траекторию
     success = await assign_learning_path_to_trainee(session, trainee_id, learning_path_id, mentor.id, bot, company_id=company_id)
 
     if success:
