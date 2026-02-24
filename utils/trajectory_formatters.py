@@ -1,7 +1,89 @@
-"""Утилиты для форматирования информации о траекториях обучения в редакторе"""
+"""Утилиты для форматирования информации о траекториях обучения"""
 
 from typing import Optional, List
 from database.models import LearningPath, LearningStage, LearningSession, Test, Group, Attestation
+from utils.test_progress_formatters import get_test_status_icon, format_test_with_percentage
+
+
+async def generate_trajectory_progress_with_attestation_status(session, trainee_path, stages_progress, test_results=None):
+    """Генерация прогресса траектории с правильным статусом аттестации"""
+    from database.db import get_user_by_id, get_trainee_attestation_status
+
+    if not trainee_path:
+        return "🗺️<b>Траектория:</b> не выбрано"
+
+    progress = f"📚<b>Название траектории:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
+
+    # Создаем словарь результатов тестов для быстрого поиска
+    test_results_dict = {}
+    if test_results:
+        for result in test_results:
+            test_results_dict[result.test_id] = result
+
+    for stage_progress in stages_progress:
+        sessions_progress = stage_progress.session_progress
+
+        # Проверяем, все ли тесты в сессиях пройдены (только если этап открыт)
+        all_sessions_completed = False
+        if sessions_progress and stage_progress.is_opened:
+            all_sessions_completed = all(
+                all(test.id in test_results_dict and test_results_dict[test.id].is_passed
+                    for test in sp.session.tests)
+                for sp in sessions_progress if hasattr(sp.session, 'tests') and sp.session.tests
+            )
+
+        if all_sessions_completed and sessions_progress:
+            stage_status_icon = "✅"
+        elif stage_progress.is_opened:
+            stage_status_icon = "🟡"
+        else:
+            stage_status_icon = "⛔️"
+
+        progress += f"{stage_status_icon}<b>Этап {stage_progress.stage.order_number}:</b> {stage_progress.stage.name}\n"
+
+        for session_progress in sessions_progress:
+            if hasattr(session_progress.session, 'tests') and session_progress.session.tests:
+                all_tests_passed = False
+                if stage_progress.is_opened:
+                    all_tests_passed = all(
+                        test.id in test_results_dict and test_results_dict[test.id].is_passed
+                        for test in session_progress.session.tests
+                    )
+
+                if all_tests_passed and stage_progress.is_opened:
+                    session_status_icon = "✅"
+                elif stage_progress.is_opened:
+                    session_status_icon = "🟡"
+                else:
+                    session_status_icon = "⛔️"
+            else:
+                session_status_icon = "🟡" if stage_progress.is_opened else "⛔️"
+
+            progress += f"{session_status_icon}<b>Сессия {session_progress.session.order_number}:</b> {session_progress.session.name}\n"
+
+            for test_num, test in enumerate(session_progress.session.tests, 1):
+                result = test_results_dict.get(test.id)
+                is_passed = bool(result and result.is_passed)
+                icon = get_test_status_icon(is_passed, stage_progress.is_opened)
+                score = result.score if result and is_passed else None
+                max_score = result.max_possible_score if result and is_passed else None
+                progress += format_test_with_percentage(test_num, test.name, icon, score, max_score)
+
+        progress += "\n"
+
+    # Аттестация с правильным статусом
+    if trainee_path.learning_path.attestation:
+        trainee = await get_user_by_id(session, trainee_path.trainee_id)
+        company_id = trainee.company_id if trainee else None
+
+        attestation_status = await get_trainee_attestation_status(
+            session, trainee_path.trainee_id, trainee_path.learning_path.attestation.id, company_id=company_id
+        )
+        progress += f"🏁<b>Аттестация:</b> {trainee_path.learning_path.attestation.name} {attestation_status}\n"
+    else:
+        progress += "🏁<b>Аттестация:</b> Не указана ⛔️\n"
+
+    return progress
 
 
 def format_trajectory_for_editor(learning_path: LearningPath) -> str:

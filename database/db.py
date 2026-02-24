@@ -19,6 +19,7 @@ from database.models import (
     Company
 )
 from utils.logger import logger
+from utils.trajectory_formatters import generate_trajectory_progress_with_attestation_status
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import json
 import os
@@ -6337,9 +6338,8 @@ async def send_stage_completion_notification_to_trainee(session: AsyncSession, t
         # Получаем этапы траектории
         stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
         
-        # Формируем прогресс траектории согласно ТЗ (используем функцию из mentorship.py)
-        from handlers.mentorship import generate_trajectory_progress_for_mentor
-        trajectory_progress = generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_results)
+        # Формируем прогресс траектории с правильным статусом аттестации
+        trajectory_progress = await generate_trajectory_progress_with_attestation_status(session, trainee_path, stages_progress, test_results)
         
         # Уведомление стажеру согласно ТЗ
         message = f"""🏆<b>Твой прогресс</b>
