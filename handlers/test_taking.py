@@ -2027,11 +2027,10 @@ async def process_take_test_from_notification(callback: CallbackQuery, state: FS
     
     # Поддерживаем два формата:
     # take_test:{test_id} - из уведомлений
-    # take_test:{session_id}:{test_id} - из траектории (обрабатывается в trainee_trajectory.py)
+    # take_test:{session_id}:{test_id} - из траектории
     if len(parts) == 2:
         test_id = int(parts[1])
     elif len(parts) == 3:
-        # Этот формат должен обрабатываться в trainee_trajectory.py, но на всякий случай
         test_id = int(parts[2])
     else:
         await callback.answer("Неверный формат данных", show_alert=True)
