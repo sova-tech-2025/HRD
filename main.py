@@ -16,14 +16,15 @@ from middlewares.bot_middleware import BotMiddleware
 from middlewares.company_middleware import CompanyMiddleware
 from utils.errors import router as error_router
 from utils.config_validator import validate_env_vars
-from utils.logger import logger
+from utils.logger import logger, log_format
 from utils.bot_commands import set_bot_commands
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    stream=sys.stdout
-)
+# Настраиваем root logger с московским временем (для aiogram и других библиотек)
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_handler = logging.StreamHandler(sys.stdout)
+root_handler.setFormatter(log_format)
+root_logger.addHandler(root_handler)
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 storage = MemoryStorage()
