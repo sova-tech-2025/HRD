@@ -39,10 +39,12 @@ venv.bak/
 .env.staging
 .env.production
 .env.backup
+.env.e2e
 
 # Исключения: разрешаем примеры
 !.env.example
 !.env.template
+!.env.e2e.example
 
 # === ЛОГИ И ОТЛАДКА ===
 logs/
@@ -211,3 +213,6 @@ sample_data/
 AGENTS.md
 CLAUDE.md
 docs
+.mcp.json
+.figma_screens
+.ruff_cache

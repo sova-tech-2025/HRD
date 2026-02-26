@@ -1,0 +1,58 @@
+services:
+  postgres_e2e:
+    image: postgres:17
+    container_name: hrbot_postgres_e2e
+    restart: unless-stopped
+    env_file:
+      - tests/e2e/.env.e2e
+    environment:
+      POSTGRES_DB: hrd_e2e_test
+      POSTGRES_USER: hrd_test
+      POSTGRES_PASSWORD: hrd_test_password
+    volumes:
+      - postgres_e2e_data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    networks:
+      - hrbot_e2e_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hrd_test -d hrd_e2e_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  bot_e2e:
+    build: .
+    container_name: hrbot_app_e2e
+    restart: unless-stopped
+    env_file:
+      - tests/e2e/.env.e2e
+    depends_on:
+      postgres_e2e:
+        condition: service_healthy
+    environment:
+      - POSTGRES_HOST=postgres_e2e
+      - POSTGRES_PORT=5432
+      - ALLOW_AUTO_AUTH=true
+      - ALLOW_AUTO_ROLE_ASSIGNMENT=true
+      - LOG_LEVEL=DEBUG
+      - DEFAULT_ROLE=Стажер
+    command: >
+      sh -c '
+        export BOT_TOKEN="$$E2E_BOT_TOKEN"
+        export POSTGRES_USER="$$E2E_POSTGRES_USER"
+        export POSTGRES_PASSWORD="$$E2E_POSTGRES_PASSWORD"
+        export POSTGRES_DB="$$E2E_POSTGRES_DB"
+        python main.py
+      '
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - hrbot_e2e_network
+
+volumes:
+  postgres_e2e_data:
+
+networks:
+  hrbot_e2e_network:
+    driver: bridge

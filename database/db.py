@@ -5,6 +5,7 @@ from typing import AsyncGenerator, Optional, List
 import asyncio
 from datetime import datetime
 from aiogram.fsm.context import FSMContext
+from utils.timezone import moscow_now
 
 from config import DATABASE_URL
 from database.models import (
@@ -19,6 +20,7 @@ from database.models import (
     Company
 )
 from utils.logger import logger
+from utils.trajectory_formatters import generate_trajectory_progress_with_attestation_status
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import json
 import os
@@ -767,12 +769,11 @@ async def activate_user(session: AsyncSession, user_id: int, role_name: str,
         await session.execute(stmt)
         
         # Обновляем объекты, статус активации и company_id (КРИТИЧЕСКИ ВАЖНО!)
-        from datetime import datetime
         update_values = {
             'is_activated': True,
             'internship_object_id': internship_object_id,
             'work_object_id': work_object_id,
-            'role_assigned_date': datetime.now()
+            'role_assigned_date': moscow_now()
         }
         if final_company_id is not None:
             update_values['company_id'] = final_company_id
@@ -2772,159 +2773,96 @@ async def check_test_access(session: AsyncSession, user_id: int, test_id: int, c
         user_roles = await get_user_roles(session, user_id)
         role_names = [role.name for role in user_roles]
         
-        # Для стажеров - проверяем доступ через TraineeTestAccess И открытость этапов
+        # Для стажеров - проверяем доступ через TraineeTestAccess ИЛИ структуру траектории
         if "Стажер" in role_names:
-            # Сначала проверяем базовый доступ через TraineeTestAccess
+            if company_id is None:
+                logger.warning(f"Не удалось определить company_id для проверки доступа пользователя {user_id} к тесту {test_id}")
+                return False
+
+            # 1. Проверяем доступ через TraineeTestAccess
             query = select(TraineeTestAccess).where(
                 TraineeTestAccess.trainee_id == user_id,
                 TraineeTestAccess.test_id == test_id,
-                TraineeTestAccess.is_active == True
+                TraineeTestAccess.is_active == True,
+                (TraineeTestAccess.company_id == company_id) |
+                (TraineeTestAccess.company_id.is_(None))
             )
-            
-            # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-            # Если company_id не передан, получаем из пользователя для безопасности
-            if company_id is None:
-                user = await get_user_by_id(session, user_id)
-                if user:
-                    company_id = user.company_id
-            
-            # Применяем фильтр: либо company_id совпадает, либо NULL (старые записи)
-            # Но только если пользователь из той же компании
-            if company_id is not None:
-                # Ищем записи с company_id = переданный ИЛИ NULL (для совместимости со старыми данными)
-                query = query.where(
-                    (TraineeTestAccess.company_id == company_id) |
-                    (TraineeTestAccess.company_id.is_(None))
-                )
-            # Если company_id все еще None - это ошибка, запрещаем доступ для безопасности
-            else:
-                logger.warning(f"Не удалось определить company_id для проверки доступа пользователя {user_id} к тесту {test_id}")
-                return False
-            
+
             result = await session.execute(query)
             access = result.scalar_one_or_none()
-            if not access:
-                return False
-            
-            # КРИТИЧЕСКАЯ ПРОВЕРКА БЕЗОПАСНОСТИ: Если найдена NULL запись, проверяем принадлежность теста компании пользователя
-            # Это предотвращает доступ к тестам других компаний через старые NULL записи
-            if access.company_id is None:
-                test = await get_test_by_id(session, test_id, company_id=company_id)
-                if not test or test.company_id != company_id:
-                    logger.warning(
-                        f"Безопасность: NULL запись TraineeTestAccess найдена, но тест {test_id} "
-                        f"не принадлежит компании {company_id} пользователя {user_id}. Доступ запрещен."
-                    )
-                    return False
-            
-            # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Если тест из траектории, проверяем открытость этапа
-            from database.models import LearningSession, TraineeSessionProgress, TraineeStageProgress, TraineeLearningPath, session_tests, User, LearningPath
-            
-            # Проверяем, входит ли тест в траекторию С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
+
+            if access:
+                # Проверяем принадлежность теста компании для NULL записей
+                if access.company_id is None:
+                    test = await get_test_by_id(session, test_id, company_id=company_id)
+                    if not test or test.company_id != company_id:
+                        logger.warning(
+                            f"Безопасность: NULL запись TraineeTestAccess найдена, но тест {test_id} "
+                            f"не принадлежит компании {company_id} пользователя {user_id}. Доступ запрещен."
+                        )
+                        return False
+                return True
+
+            # 2. TraineeTestAccess не найден — проверяем структуру траектории (fallback)
+            # Тест может быть в открытом этапе, но TraineeTestAccess не создан
             trainee_path_query = (
                 select(TraineeLearningPath)
                 .join(User, TraineeLearningPath.trainee_id == User.id)
                 .join(LearningPath, TraineeLearningPath.learning_path_id == LearningPath.id)
                 .where(
                     TraineeLearningPath.trainee_id == user_id,
-                    TraineeLearningPath.is_active == True
-                )
-            )
-            
-            # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-            if company_id is not None:
-                trainee_path_query = trainee_path_query.where(
+                    TraineeLearningPath.is_active == True,
                     User.company_id == company_id,
                     LearningPath.company_id == company_id
                 )
-            
+            )
+
             trainee_path_result = await session.execute(trainee_path_query)
             trainee_path = trainee_path_result.scalar_one_or_none()
-            
+
             if trainee_path:
-                # Проверяем, входит ли тест в сессии траектории И этап открыт С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
-                trajectory_test_query = (
+                # Проверяем, есть ли тест в открытом этапе траектории
+                trajectory_check = (
                     select(session_tests.c.test_id)
                     .join(LearningSession, LearningSession.id == session_tests.c.session_id)
                     .join(TraineeSessionProgress, TraineeSessionProgress.session_id == LearningSession.id)
                     .join(TraineeStageProgress, TraineeSessionProgress.stage_progress_id == TraineeStageProgress.id)
-                    .join(LearningPath, TraineeStageProgress.trainee_path_id == trainee_path.id)
                     .where(
                         TraineeStageProgress.trainee_path_id == trainee_path.id,
-                        TraineeStageProgress.is_opened == True,  # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: только открытые этапы
+                        TraineeStageProgress.is_opened == True,
                         session_tests.c.test_id == test_id
                     )
                 )
-                
-                # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-                if company_id is not None:
-                    trajectory_test_query = trajectory_test_query.where(LearningPath.company_id == company_id)
-                
-                trajectory_test_result = await session.execute(trajectory_test_query)
-                trajectory_test = trajectory_test_result.first()
-                
-                # Если тест из траектории, но этап закрыт - проверяем источник доступа
-                if trajectory_test is None:
-                    # Проверяем, входит ли тест в траекторию вообще (для диагностики) С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
-                    all_trajectory_test_query = (
-                        select(session_tests.c.test_id)
-                        .join(LearningSession, LearningSession.id == session_tests.c.session_id)
-                        .join(TraineeSessionProgress, TraineeSessionProgress.session_id == LearningSession.id)
-                        .join(TraineeStageProgress, TraineeSessionProgress.stage_progress_id == TraineeStageProgress.id)
-                        .join(LearningPath, TraineeStageProgress.trainee_path_id == trainee_path.id)
-                        .where(
-                            TraineeStageProgress.trainee_path_id == trainee_path.id,
-                            session_tests.c.test_id == test_id
-                        )
-                    )
-                    
-                    # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-                    if company_id is not None:
-                        all_trajectory_test_query = all_trajectory_test_query.where(LearningPath.company_id == company_id)
-                    
-                    all_trajectory_test_result = await session.execute(all_trajectory_test_query)
-                    all_trajectory_test = all_trajectory_test_result.first()
-                    
-                    if all_trajectory_test is not None:
-                        # Тест из траектории, но этап закрыт
-                        # Проверяем источник доступа: если доступ через рассылку - разрешаем
-                        if access.granted_by_id:  # Доступ через рассылку от рекрутера
-                            logger.info(f"Доступ к траекторному тесту {test_id} разрешен через рассылку для стажера {user_id}")
-                            return True
-                        else:
-                            # Доступ через наставника, но этап закрыт - запрещаем
-                            logger.warning(f"Доступ к тесту {test_id} запрещен: этап закрыт для стажера {user_id}")
-                            return False
-            
-            return True
-        
-        # Для сотрудников - проверяем доступ через тесты от рекрутера
+                result = await session.execute(trajectory_check)
+                if result.first():
+                    logger.info(f"Доступ к тесту {test_id} разрешен через структуру траектории для стажера {user_id}")
+                    return True
+
+            return False
+
+        # Для сотрудников - проверяем доступ через TraineeTestAccess
         elif "Сотрудник" in role_names:
-            # Проверяем, что тест создан рекрутером С ИЗОЛЯЦИЕЙ ПО КОМПАНИИ
+            # Проверяем, что тест принадлежит той же компании
             test = await get_test_by_id(session, test_id, company_id=company_id)
             if not test:
                 return False
-            
-            # ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: тест должен принадлежать той же компании
             if company_id is not None and test.company_id != company_id:
                 logger.warning(f"Попытка доступа сотрудника {user_id} к тесту {test_id} другой компании")
                 return False
-                
-            # Получаем создателя теста
-            creator = await get_user_by_id(session, test.creator_id)
-            if not creator:
-                return False
-            
-            # Проверяем, что создатель из той же компании
-            if company_id is not None and creator.company_id != company_id:
-                logger.warning(f"Создатель теста {test_id} из другой компании")
-                return False
-                
-            creator_roles = await get_user_roles(session, creator.id)
-            creator_role_names = [role.name for role in creator_roles]
-            
-            # Доступ есть, если тест создан рекрутером
-            return "Рекрутер" in creator_role_names
+
+            # Проверяем наличие активного доступа через TraineeTestAccess
+            access_query = select(TraineeTestAccess).where(
+                TraineeTestAccess.trainee_id == user_id,
+                TraineeTestAccess.test_id == test_id,
+                TraineeTestAccess.is_active == True
+            )
+            if company_id is not None:
+                access_query = access_query.where(
+                    (TraineeTestAccess.company_id == company_id) |
+                    (TraineeTestAccess.company_id.is_(None))
+                )
+            result = await session.execute(access_query)
+            return result.scalar_one_or_none() is not None
         
         # Для других ролей (наставники, рекрутеры, руководители) - проверяем изоляцию по компании
         else:
@@ -4335,8 +4273,7 @@ async def update_user_role(session: AsyncSession, user_id: int, new_role_name: s
         await session.execute(insert_stmt)
         
         # Обновляем дату назначения роли
-        from datetime import datetime
-        update_role_date_stmt = update(User).where(User.id == user_id).values(role_assigned_date=datetime.now())
+        update_role_date_stmt = update(User).where(User.id == user_id).values(role_assigned_date=moscow_now())
         await session.execute(update_role_date_stmt)
         
         # Управление объектом стажировки
@@ -5979,7 +5916,7 @@ async def send_mentor_assigned_notification(session: AsyncSession, trainee_id: i
 async def assign_learning_path_to_trainee(session: AsyncSession, trainee_id: int, learning_path_id: int, mentor_id: int, bot=None, company_id: int = None) -> bool:
     """Назначение траектории обучения стажеру (с изоляцией по компании)"""
     try:
-        from database.models import TraineeLearningPath, LearningPath, LearningStage, TraineeStageProgress, TraineeSessionProgress
+        from database.models import TraineeLearningPath, LearningPath, LearningStage, LearningSession, TraineeStageProgress, TraineeSessionProgress
 
         # Проверяем существование стажера и траектории с изоляцией
         trainee_query = select(User).where(User.id == trainee_id)
@@ -5999,6 +5936,60 @@ async def assign_learning_path_to_trainee(session: AsyncSession, trainee_id: int
             logger.error(f"Стажер {trainee_id} или траектория {learning_path_id} не найдены")
             return False
 
+        # --- Полная очистка прогресса перед переназначением ---
+        from database.models import TraineeTestAccess, session_tests
+
+        # 1. Находим все активные назначения траекторий для этого стажера
+        active_paths_result = await session.execute(
+            select(TraineeLearningPath.id).where(
+                TraineeLearningPath.trainee_id == trainee_id,
+                TraineeLearningPath.is_active == True
+            )
+        )
+        active_path_ids = [row[0] for row in active_paths_result.all()]
+
+        if active_path_ids:
+            # 2. Получаем все TraineeStageProgress.id для этих назначений
+            stage_progress_result = await session.execute(
+                select(TraineeStageProgress.id).where(
+                    TraineeStageProgress.trainee_path_id.in_(active_path_ids)
+                )
+            )
+            stage_progress_ids = [row[0] for row in stage_progress_result.all()]
+
+            if stage_progress_ids:
+                # 3. Удаляем TraineeSessionProgress по stage_progress_id
+                await session.execute(
+                    delete(TraineeSessionProgress).where(
+                        TraineeSessionProgress.stage_progress_id.in_(stage_progress_ids)
+                    )
+                )
+                # 4. Удаляем TraineeStageProgress
+                await session.execute(
+                    delete(TraineeStageProgress).where(
+                        TraineeStageProgress.id.in_(stage_progress_ids)
+                    )
+                )
+
+        # 5. Удаляем TraineeTestAccess для тестов из назначаемой траектории
+        # Собираем test_id из всех сессий всех этапов траектории
+        trajectory_test_ids_result = await session.execute(
+            select(session_tests.c.test_id)
+            .join(LearningSession, LearningSession.id == session_tests.c.session_id)
+            .join(LearningStage, LearningStage.id == LearningSession.stage_id)
+            .where(LearningStage.learning_path_id == learning_path_id)
+        )
+        trajectory_test_ids = [row[0] for row in trajectory_test_ids_result.all()]
+
+        if trajectory_test_ids:
+            await session.execute(
+                delete(TraineeTestAccess).where(
+                    TraineeTestAccess.trainee_id == trainee_id,
+                    TraineeTestAccess.test_id.in_(trajectory_test_ids)
+                )
+            )
+
+        logger.info(f"Очищен прогресс стажера {trainee_id} перед назначением траектории {learning_path_id}")
         # Деактивируем существующие назначения траекторий стажеру
         await session.execute(
             update(TraineeLearningPath).where(
@@ -6158,7 +6149,7 @@ async def open_stage_for_trainee(session: AsyncSession, trainee_id: int, stage_i
                 TraineeStageProgress.stage_id == stage_id
             ).values(
                 is_opened=True,
-                opened_date=datetime.now()
+                opened_date=moscow_now()
             )
         )
 
@@ -6177,7 +6168,7 @@ async def open_stage_for_trainee(session: AsyncSession, trainee_id: int, stage_i
                     TraineeSessionProgress.stage_progress_id == stage_progress.id
                 ).values(
                     is_opened=True,
-                    opened_date=datetime.now()
+                    opened_date=moscow_now()
                 )
             )
 
@@ -6346,9 +6337,8 @@ async def send_stage_completion_notification_to_trainee(session: AsyncSession, t
         # Получаем этапы траектории
         stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
         
-        # Формируем прогресс траектории согласно ТЗ (используем функцию из mentorship.py)
-        from handlers.mentorship import generate_trajectory_progress_for_mentor
-        trajectory_progress = generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_results)
+        # Формируем прогресс траектории с правильным статусом аттестации
+        trajectory_progress = await generate_trajectory_progress_with_attestation_status(session, trainee_path, stages_progress, test_results)
         
         # Уведомление стажеру согласно ТЗ
         message = f"""🏆<b>Твой прогресс</b>
@@ -6526,7 +6516,7 @@ async def complete_stage_for_trainee(session: AsyncSession, trainee_id: int, sta
                 TraineeStageProgress.stage_id == stage_id
             ).values(
                 is_completed=True,
-                completed_date=datetime.now()
+                completed_date=moscow_now()
             )
         )
 
@@ -6581,7 +6571,7 @@ async def complete_session_for_trainee(session: AsyncSession, trainee_id: int, s
                 TraineeSessionProgress.session_id == session_id
             ).values(
                 is_completed=True,
-                completed_date=datetime.now()
+                completed_date=moscow_now()
             )
         )
 
@@ -8095,7 +8085,9 @@ async def update_attestation_schedule(session: AsyncSession, attestation_id: int
                 scheduled_time=scheduled_time
             )
         )
-        
+
+        await session.commit()
+
         if result.rowcount > 0:
             logger.info(f"Обновлены дата и время для аттестации {attestation_id}: {scheduled_date} {scheduled_time}")
             return True
@@ -8120,7 +8112,9 @@ async def start_attestation_session(session: AsyncSession, attestation_id: int, 
             .where(TraineeAttestation.id == attestation_id)
             .values(status='in_progress')
         )
-        
+
+        await session.commit()
+
         if result.rowcount > 0:
             logger.info(f"Начата сессия аттестации {attestation_id}")
             return True
@@ -8455,7 +8449,7 @@ async def broadcast_test_to_groups(session: AsyncSession, test_id: int, group_id
                                 'trainee_id': user.id,
                                 'test_id': test_id,
                                 'granted_by_id': sent_by_id,
-                                'granted_date': datetime.now(),  # Явно указываем дату
+                                'granted_date': moscow_now(),  # Явно указываем дату
                                 'is_active': True,
                                 'company_id': user.company_id  # КРИТИЧНО для изоляции!
                             })
@@ -9632,7 +9626,7 @@ async def create_company(session: AsyncSession, company_data: dict, creator_user
         from datetime import timedelta
         
         trial_days = company_data.get('trial_period_days', 14)
-        now = datetime.now()
+        now = moscow_now()
         
         # Нормализуем код приглашения в верхний регистр для консистентности
         invite_code = company_data['invite_code'].strip().upper()
@@ -9732,7 +9726,7 @@ async def check_company_access(session: AsyncSession, company_id: int) -> dict:
             }
         
         # Проверка даты окончания подписки (по ТЗ: если finish_date прошла - доступ блокируется)
-        if company.finish_date and company.finish_date < datetime.now():
+        if company.finish_date and company.finish_date < moscow_now():
             return {
                 'accessible': False,
                 'reason': 'subscription_expired',
@@ -9793,7 +9787,7 @@ async def get_companies_with_expired_subscription(session: AsyncSession) -> List
             select(Company).where(
                 and_(
                     Company.subscribe == True,
-                    Company.finish_date <= datetime.now(),
+                    Company.finish_date <= moscow_now(),
                     Company.is_active == True
                 )
             )
@@ -9882,7 +9876,7 @@ async def create_user_with_company(session: AsyncSession, user_data: dict, compa
             company_id=company_id,
             is_active=True,
             is_activated=is_activated,
-            registration_date=datetime.now()
+            registration_date=moscow_now()
         )
         
         session.add(user)
@@ -10193,7 +10187,7 @@ async def create_default_company(session: AsyncSession) -> Optional[Company]:
             return existing_company
         
         # Создаем компанию по умолчанию
-        now = datetime.now()
+        now = moscow_now()
         # Нормализуем код приглашения в верхний регистр для консистентности
         default_invite_code = "keksbakery".strip().upper()  # KEKSBAKERY
         default_company = Company(

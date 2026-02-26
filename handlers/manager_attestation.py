@@ -4,6 +4,7 @@
 """
 
 from datetime import datetime
+from utils.timezone import moscow_now
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -856,7 +857,7 @@ async def callback_make_employee_anyway(callback: CallbackQuery, state: FSMConte
             text=(
                 "🎉 <b>Поздравляем! Ты стал сотрудником!</b>\n\n"
                 f"👨‍💼 <b>Руководитель:</b> {manager.full_name}\n"
-                f"📅 <b>Дата перевода:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
+                f"📅 <b>Дата перевода:</b> {moscow_now().strftime('%d.%m.%Y %H:%M')}\n\n"
                 "<i>Ты переведён в сотрудники по решению руководителя.</i>\n\n"
                 "🚀 <b>Используй /start чтобы обновить меню</b>"
             ),

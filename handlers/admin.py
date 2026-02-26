@@ -5,6 +5,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
+from utils.timezone import moscow_now
 from database.db import (
     get_all_users, get_user_by_id, get_all_roles,
     add_user_role, remove_user_role, get_user_roles, get_all_trainees,
@@ -606,7 +607,7 @@ async def show_trainee_progress(callback: CallbackQuery, session: AsyncSession, 
     test_results = await get_user_test_results(session, trainee_id, company_id=company_id)
     
     # Рассчитываем количество дней в статусе стажера
-    days_as_trainee = (datetime.now() - trainee.role_assigned_date).days
+    days_as_trainee = (moscow_now() - trainee.role_assigned_date).days
     
     # Формируем сообщение согласно ТЗ
     message_text = f"🦸🏻‍♂️<b>Стажер:</b> {trainee.full_name}\n\n"

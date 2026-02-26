@@ -3,17 +3,21 @@ import sys
 import os
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+_MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 logs_dir = os.path.join(os.getcwd(), 'logs')
 os.makedirs(logs_dir, exist_ok=True)
 
-current_date = datetime.now().strftime("%Y-%m-%d")
+current_date = datetime.now(_MOSCOW_TZ).strftime("%Y-%m-%d")
 log_file = os.path.join(logs_dir, f'bot_{current_date}.log')
 
 log_format = logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
+log_format.converter = lambda *args: datetime.now(_MOSCOW_TZ).timetuple()
 
 file_handler = RotatingFileHandler(
     log_file,
@@ -55,4 +59,4 @@ def log_user_error(user_id, username, error_message, exception=None):
     if exception:
         logger.error(f"{user_info} ошибка: {error_message}. Исключение: {str(exception)}")
     else:
-        logger.error(f"{user_info} ошибка: {error_message}") 
+        logger.error(f"{user_info} ошибка: {error_message}")
