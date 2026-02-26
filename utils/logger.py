@@ -28,10 +28,6 @@ file_handler = RotatingFileHandler(
 file_handler.setFormatter(log_format)
 file_handler.setLevel(logging.INFO)
 
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(log_format)
-console_handler.setLevel(logging.INFO)
-
 # Настройка кодировки для консоли Windows
 if sys.platform == "win32":
     import codecs
@@ -40,7 +36,7 @@ if sys.platform == "win32":
 logger = logging.getLogger('telegram_bot')
 logger.setLevel(logging.INFO)
 logger.addHandler(file_handler)
-logger.addHandler(console_handler)
+# console вывод идёт через root logger (настроен в main.py с МСК-временем)
 
 def log_user_action(user_id, username, action, extra_data=None):
     """Логирует действия пользователя"""
