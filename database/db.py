@@ -8086,7 +8086,9 @@ async def update_attestation_schedule(session: AsyncSession, attestation_id: int
                 scheduled_time=scheduled_time
             )
         )
-        
+
+        await session.commit()
+
         if result.rowcount > 0:
             logger.info(f"Обновлены дата и время для аттестации {attestation_id}: {scheduled_date} {scheduled_time}")
             return True
@@ -8111,7 +8113,9 @@ async def start_attestation_session(session: AsyncSession, attestation_id: int, 
             .where(TraineeAttestation.id == attestation_id)
             .values(status='in_progress')
         )
-        
+
+        await session.commit()
+
         if result.rowcount > 0:
             logger.info(f"Начата сессия аттестации {attestation_id}")
             return True
