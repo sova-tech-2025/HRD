@@ -155,24 +155,12 @@ async def open_mentor_stage(
         text_contains=f"Открыть этап {stage_number}",
         data_prefix="toggle_stage:",
     )
-    if not open_btn:
-        open_btn = mentor.find_button_data(
-            resp,
-            text_contains=f"Этап {stage_number}",
-            data_prefix="open_stage:",
-        )
-    if not open_btn:
-        # Этап может уже быть открыт
-        open_btn = mentor.find_button_data(
-            resp,
-            text_contains=f"этап {stage_number}",
-            data_prefix="toggle_stage:",
-        )
 
     if open_btn:
         resp = await mentor.click_and_wait(
             resp, data=open_btn, wait_pattern="открыт|Открыт|успешно"
         )
+    # Если кнопки нет — этап уже открыт (🔒 Закрыть) или завершён (✅)
 
     return resp
 
@@ -215,10 +203,11 @@ async def close_mentor_stage(
         data_prefix="toggle_stage:",
     )
     if not close_btn:
-        # Этап может быть уже завершён (✅) — пропускаем
+        # Этап может быть уже завершён (✅) или уже закрыт (🔓 Открыть)
         buttons = mentor.get_button_texts(resp)
         completed = any(f"Этап {stage_number} завершен" in b for b in buttons)
-        if completed:
+        already_closed = any(f"Открыть этап {stage_number}" in b for b in buttons)
+        if completed or already_closed:
             return resp
     assert close_btn, (
         f"Close button for stage {stage_number} not found. "
@@ -398,9 +387,9 @@ class TestScenario2_EmployeeAccess:
             resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка|Аттестация"
         )
 
-        # Нажимаем "Аттестация"
+        # Нажимаем "Назначить аттестацию"
         att_btn = mentor.find_button_data(
-            resp, text_contains="Аттестация", data_prefix="view_trainee_attestation:"
+            resp, data_prefix="view_trainee_attestation:"
         )
         assert att_btn, f"Attestation button not found. Buttons: {mentor.get_button_texts(resp)}"
 

@@ -851,7 +851,7 @@ async def callback_mentor_my_tests(callback: CallbackQuery, state: FSMContext, s
         return
 
     # Используем format_my_tests_display из test_taking
-    from handlers.test_taking import format_my_tests_display
+    from handlers.tests.test_taking import format_my_tests_display
     from states.states import TestTakingStates
 
     message_text, keyboard = await format_my_tests_display(session, user, available_tests, page=0)
@@ -1894,22 +1894,10 @@ async def callback_assign_trajectory(callback: CallbackQuery, state: FSMContext,
         await callback.answer()
         return
 
-    # Проверяем, не назначена ли уже эта же траектория
-    company_id = trainee.company_id
-    existing_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
-    if existing_path and existing_path.learning_path_id == learning_path_id:
-        # Та же траектория уже активна — показываем как успешное назначение (Figma 11.4)
-        await callback.message.edit_text(
-            "Стажеру назначена новая траектория✅",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="К стажеру", callback_data=f"select_trainee_for_trajectory:{trainee_id}")],
-            ])
-        )
-        await callback.answer()
-        return
+    data = await state.get_data()
+    company_id = data.get('company_id') or trainee.company_id
 
-    # Назначаем траекторию
+    # Назначаем траекторию (в т.ч. переназначение той же — с полным сбросом прогресса)
     success = await assign_learning_path_to_trainee(session, trainee_id, learning_path_id, mentor.id, bot, company_id=company_id)
 
     if success:

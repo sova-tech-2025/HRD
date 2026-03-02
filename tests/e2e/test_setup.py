@@ -760,7 +760,8 @@ async def _assign_trajectory_to_trainee(
     """
     Наставник назначает траекторию стажёру.
 
-    Флоу: Мои стажеры → выбрать стажёра → Выбрать траекторию → выбрать → назначено.
+    Флоу: Мои стажеры → выбрать стажёра → выбрать траекторию → назначено.
+    Траектории показываются сразу на карточке стажёра без промежуточного экрана.
     """
     await wait_between_actions()
 
@@ -789,24 +790,10 @@ async def _assign_trajectory_to_trainee(
 
     resp = await mentor.click_and_wait(
         resp, data=trainee_btn,
-        wait_pattern="[Тт]раектори|[Ээ]тап|карточка|Выбрать"
+        wait_pattern="[Тт]раектори|[Ээ]тап|карточка|Выбрать|траектории"
     )
 
-    # Нажимаем "Выбрать траекторию"
-    select_traj_btn = mentor.find_button_data(
-        resp, data_prefix="select_trajectory_for_trainee:"
-    )
-    assert select_traj_btn, (
-        f"'Выбрать траекторию' button not found. "
-        f"Buttons: {mentor.get_button_texts(resp)}"
-    )
-
-    resp = await mentor.click_and_wait(
-        resp, data=select_traj_btn,
-        wait_pattern="траекторию|обучения|Выбери"
-    )
-
-    # Выбираем траекторию
+    # Траектории показываются сразу на карточке стажёра (assign_trajectory:)
     traj_btn = mentor.find_button_data(
         resp, text_contains=trajectory_name, data_prefix="assign_trajectory:"
     )
