@@ -20,6 +20,7 @@ from database.models import (
     Company
 )
 from utils.logger import logger
+from utils.trajectory_formatters import generate_trajectory_progress_with_attestation_status
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import json
 import os
@@ -5915,7 +5916,7 @@ async def send_mentor_assigned_notification(session: AsyncSession, trainee_id: i
 async def assign_learning_path_to_trainee(session: AsyncSession, trainee_id: int, learning_path_id: int, mentor_id: int, bot=None, company_id: int = None) -> bool:
     """Назначение траектории обучения стажеру (с изоляцией по компании)"""
     try:
-        from database.models import TraineeLearningPath, LearningPath, LearningStage, TraineeStageProgress, TraineeSessionProgress
+        from database.models import TraineeLearningPath, LearningPath, LearningStage, LearningSession, TraineeStageProgress, TraineeSessionProgress
 
         # Проверяем существование стажера и траектории с изоляцией
         trainee_query = select(User).where(User.id == trainee_id)
@@ -5935,18 +5936,60 @@ async def assign_learning_path_to_trainee(session: AsyncSession, trainee_id: int
             logger.error(f"Стажер {trainee_id} или траектория {learning_path_id} не найдены")
             return False
 
-        # Проверяем, не назначена ли уже эта же траектория
-        existing_result = await session.execute(
-            select(TraineeLearningPath).where(
+        # --- Полная очистка прогресса перед переназначением ---
+        from database.models import TraineeTestAccess, session_tests
+
+        # 1. Находим все активные назначения траекторий для этого стажера
+        active_paths_result = await session.execute(
+            select(TraineeLearningPath.id).where(
                 TraineeLearningPath.trainee_id == trainee_id,
-                TraineeLearningPath.learning_path_id == learning_path_id,
                 TraineeLearningPath.is_active == True
             )
         )
-        if existing_result.scalar_one_or_none():
-            logger.info(f"Траектория {learning_path_id} уже назначена стажеру {trainee_id}, пропускаем переназначение")
-            return True  # Уже назначена, ничего не делаем
+        active_path_ids = [row[0] for row in active_paths_result.all()]
 
+        if active_path_ids:
+            # 2. Получаем все TraineeStageProgress.id для этих назначений
+            stage_progress_result = await session.execute(
+                select(TraineeStageProgress.id).where(
+                    TraineeStageProgress.trainee_path_id.in_(active_path_ids)
+                )
+            )
+            stage_progress_ids = [row[0] for row in stage_progress_result.all()]
+
+            if stage_progress_ids:
+                # 3. Удаляем TraineeSessionProgress по stage_progress_id
+                await session.execute(
+                    delete(TraineeSessionProgress).where(
+                        TraineeSessionProgress.stage_progress_id.in_(stage_progress_ids)
+                    )
+                )
+                # 4. Удаляем TraineeStageProgress
+                await session.execute(
+                    delete(TraineeStageProgress).where(
+                        TraineeStageProgress.id.in_(stage_progress_ids)
+                    )
+                )
+
+        # 5. Удаляем TraineeTestAccess для тестов из назначаемой траектории
+        # Собираем test_id из всех сессий всех этапов траектории
+        trajectory_test_ids_result = await session.execute(
+            select(session_tests.c.test_id)
+            .join(LearningSession, LearningSession.id == session_tests.c.session_id)
+            .join(LearningStage, LearningStage.id == LearningSession.stage_id)
+            .where(LearningStage.learning_path_id == learning_path_id)
+        )
+        trajectory_test_ids = [row[0] for row in trajectory_test_ids_result.all()]
+
+        if trajectory_test_ids:
+            await session.execute(
+                delete(TraineeTestAccess).where(
+                    TraineeTestAccess.trainee_id == trainee_id,
+                    TraineeTestAccess.test_id.in_(trajectory_test_ids)
+                )
+            )
+
+        logger.info(f"Очищен прогресс стажера {trainee_id} перед назначением траектории {learning_path_id}")
         # Деактивируем существующие назначения траекторий стажеру
         await session.execute(
             update(TraineeLearningPath).where(
@@ -6294,9 +6337,8 @@ async def send_stage_completion_notification_to_trainee(session: AsyncSession, t
         # Получаем этапы траектории
         stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
         
-        # Формируем прогресс траектории согласно ТЗ (используем функцию из mentorship.py)
-        from handlers.mentorship import generate_trajectory_progress_for_mentor
-        trajectory_progress = generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_results)
+        # Формируем прогресс траектории с правильным статусом аттестации
+        trajectory_progress = await generate_trajectory_progress_with_attestation_status(session, trainee_path, stages_progress, test_results)
         
         # Уведомление стажеру согласно ТЗ
         message = f"""🏆<b>Твой прогресс</b>
@@ -8043,7 +8085,9 @@ async def update_attestation_schedule(session: AsyncSession, attestation_id: int
                 scheduled_time=scheduled_time
             )
         )
-        
+
+        await session.commit()
+
         if result.rowcount > 0:
             logger.info(f"Обновлены дата и время для аттестации {attestation_id}: {scheduled_date} {scheduled_time}")
             return True
@@ -8068,7 +8112,9 @@ async def start_attestation_session(session: AsyncSession, attestation_id: int, 
             .where(TraineeAttestation.id == attestation_id)
             .values(status='in_progress')
         )
-        
+
+        await session.commit()
+
         if result.rowcount > 0:
             logger.info(f"Начата сессия аттестации {attestation_id}")
             return True
