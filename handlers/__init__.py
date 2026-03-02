@@ -1,1 +1,0 @@
-from handlers import auth, registration, common, admin, role_permissions 

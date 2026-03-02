@@ -8,7 +8,7 @@ from database.db import (
     update_group_name, get_group_users, get_user_roles,
     check_user_permission, get_user_by_tg_id, delete_group, ensure_company_id
 )
-from handlers.auth import check_auth
+from handlers.core.auth import check_auth
 from states.states import GroupManagementStates
 from keyboards.keyboards import (
     get_group_management_keyboard, get_group_selection_keyboard,

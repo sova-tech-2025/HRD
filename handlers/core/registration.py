@@ -492,7 +492,7 @@ async def process_cancel_registration(callback: CallbackQuery, state: FSMContext
     
     if company_id:
         # Пользователь присоединяется к компании - возвращаем к выбору типа регистрации
-        from handlers.company import callback_back_to_company_join_welcome
+        from handlers.company.company import callback_back_to_company_join_welcome
         callback.data = "back_to_company_join_welcome"
         await callback_back_to_company_join_welcome(callback, state)
         return
@@ -521,7 +521,7 @@ async def cmd_cancel(message: Message, state: FSMContext):
     
     if company_id:
         # Пользователь присоединяется к компании - возвращаем к выбору типа регистрации
-        from handlers.company import callback_back_to_company_join_welcome
+        from handlers.company.company import callback_back_to_company_join_welcome
         from aiogram.types import CallbackQuery
         # Создаем временный callback для вызова обработчика
         class TempCallback:
@@ -687,7 +687,7 @@ async def callback_cancel_admin_role_selection(callback: CallbackQuery, state: F
     
     if company_id:
         # Пользователь присоединяется к компании - возвращаем к выбору типа регистрации
-        from handlers.company import callback_back_to_company_join_welcome
+        from handlers.company.company import callback_back_to_company_join_welcome
         callback.data = "back_to_company_join_welcome"
         await callback_back_to_company_join_welcome(callback, state)
         return

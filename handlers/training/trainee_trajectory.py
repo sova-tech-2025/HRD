@@ -16,7 +16,7 @@ from database.db import (
     get_user_test_result, get_user_by_tg_id, get_user_by_id, check_user_permission,
     get_trainee_attestation_status
 )
-from handlers.auth import check_auth
+from handlers.core.auth import check_auth
 from keyboards.keyboards import get_main_menu_keyboard, get_mentor_contact_keyboard
 from utils.logger import log_user_action, log_user_error
 from utils.test_progress_formatters import get_test_status_icon, format_test_line

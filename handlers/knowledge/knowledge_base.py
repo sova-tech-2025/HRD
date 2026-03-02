@@ -20,7 +20,7 @@ from database.db import (
     check_folder_access, get_accessible_knowledge_folders_for_user, ensure_company_id
 )
 from states.states import KnowledgeBaseStates
-from handlers.auth import check_auth
+from handlers.core.auth import check_auth
 from keyboards.keyboards import (
     get_knowledge_base_main_keyboard, get_knowledge_folders_keyboard,
     get_folder_created_keyboard, get_material_description_keyboard,

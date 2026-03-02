@@ -12,7 +12,7 @@ from database.db import (
     get_user_by_tg_id, change_trainee_to_employee, check_user_permission,
     get_employee_tests_from_recruiter, get_user_test_result
 )
-from handlers.auth import check_auth
+from handlers.core.auth import check_auth
 from keyboards.keyboards import get_keyboard_by_role
 from utils.logger import log_user_action, log_user_error
 
@@ -75,7 +75,7 @@ async def show_employee_profile(callback: CallbackQuery, session: AsyncSession, 
             return
         
         # Используем универсальную функцию формирования профиля
-        from handlers.common import format_profile_text
+        from handlers.core.common import format_profile_text
         profile_text = await format_profile_text(user, session)
         
         # Клавиатура для ЛК сотрудника согласно ТЗ
@@ -127,7 +127,7 @@ async def callback_back_to_employee_profile(callback: CallbackQuery, session: As
 async def cmd_employee_profile(message: Message, state: FSMContext, session: AsyncSession):
     """Обработчик команды 'Мой профиль' для сотрудника - использует общую функцию"""
     # Используем общую функцию профиля из common.py
-    from handlers.common import cmd_profile
+    from handlers.core.common import cmd_profile
     await cmd_profile(message, state, session)
 
 

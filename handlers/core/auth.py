@@ -397,7 +397,7 @@ async def callback_back_to_welcome(callback: CallbackQuery, state: FSMContext):
     if company_id:
         # Пользователь присоединяется к компании - используем правильный обработчик
         # Имитируем callback_data для back_to_company_join_welcome
-        from handlers.company import callback_back_to_company_join_welcome
+        from handlers.company.company import callback_back_to_company_join_welcome
         # Создаем временный callback с правильными данными
         callback.data = "back_to_company_join_welcome"
         await callback_back_to_company_join_welcome(callback, state)

@@ -19,8 +19,8 @@ from database.db import (
     get_trainee_attestation_status, get_user_roles, get_employee_tests_from_recruiter,
     get_user_broadcast_tests, get_user_mentor, ensure_company_id
 )
-from handlers.mentorship import get_days_word
-from handlers.trainee_trajectory import format_trajectory_info
+from handlers.training.mentorship import get_days_word
+from handlers.training.trainee_trajectory import format_trajectory_info
 from database.models import InternshipStage, TestResult
 from sqlalchemy import select
 from keyboards.keyboards import get_simple_test_selection_keyboard, get_test_start_keyboard, get_test_selection_for_taking_keyboard, get_mentor_contact_keyboard, get_test_results_keyboard
@@ -28,7 +28,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import TestTakingStates
 from utils.logger import log_user_action, log_user_error, logger
 from utils.test_progress_formatters import get_test_status_icon, format_test_line
-from handlers.auth import check_auth
+from handlers.core.auth import check_auth
 
 router = Router()
 
@@ -42,7 +42,7 @@ async def cmd_all_tests_command(message: Message, state: FSMContext, session: As
     """Обработчик команды /all_tests"""
     # Для команды all_tests используем функцию cmd_list_tests из tests.py
     # Но импортируем её туда, где она нужна
-    from handlers.tests import cmd_list_tests
+    from handlers.tests.tests import cmd_list_tests
     await cmd_list_tests(message, state, session)
 
 @router.message(F.text.in_(["Доступные тесты", "Тесты траектории 🗺️"]))
