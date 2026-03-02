@@ -208,11 +208,11 @@ test_data/
 sample_data/
 .memory-base
 .claude
+.mcp.json
 .task
 .env
 AGENTS.md
 CLAUDE.md
 docs
-.mcp.json
 .figma_screens
 .ruff_cache

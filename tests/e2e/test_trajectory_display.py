@@ -81,32 +81,43 @@ class TestScenario3_TrajectoryReassignment:
             resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка"
         )
 
-        # Ищем кнопку выбора/назначения траектории
-        traj_btn = mentor.find_button_data(
-            resp, text_contains="траектори", data_prefix="assign_trajectory:"
+        # Нажимаем "Поменять траекторию" (change_trajectory:)
+        change_btn = mentor.find_button_data(
+            resp, data_prefix="change_trajectory:"
         )
-        if not traj_btn:
-            traj_btn = mentor.find_button_data(
-                resp, text_contains="Выбрать", data_prefix="select_trajectory_for_trainee:"
-            )
-
-        if traj_btn:
-            resp = await mentor.click_and_wait(
-                resp, data=traj_btn,
-                wait_pattern="[Тт]раектори|[Вв]ыбери|назначена"
-            )
-
-            # Выбираем ту же траекторию
-            same_traj_btn = mentor.find_button_data(
+        if not change_btn:
+            # Fallback: стажёр без траектории — кнопки assign_trajectory: напрямую
+            change_btn = mentor.find_button_data(
                 resp, text_contains="E2E Траектория", data_prefix="assign_trajectory:"
             )
-            if same_traj_btn:
-                resp = await mentor.click_and_wait(
-                    resp, data=same_traj_btn,
-                    wait_pattern="Какой этап|открыть стажеру"
-                )
-        else:
-            pytest.skip("Trajectory assignment button not found — UI may differ")
+
+        if not change_btn:
+            pytest.skip("Trajectory change button not found — UI may differ")
+
+        resp = await mentor.click_and_wait(
+            resp, data=change_btn,
+            wait_pattern="[Уу]верен|[Зз]амен|[Тт]раектори|назначена"
+        )
+
+        # Подтверждаем замену (confirm_change_trajectory:)
+        confirm_btn = mentor.find_button_data(
+            resp, data_prefix="confirm_change_trajectory:"
+        )
+        if confirm_btn:
+            resp = await mentor.click_and_wait(
+                resp, data=confirm_btn,
+                wait_pattern="[Тт]раектори|[Вв]ыбери"
+            )
+
+        # Выбираем ту же траекторию (assign_trajectory:)
+        same_traj_btn = mentor.find_button_data(
+            resp, text_contains="E2E Траектория", data_prefix="assign_trajectory:"
+        )
+        if same_traj_btn:
+            resp = await mentor.click_and_wait(
+                resp, data=same_traj_btn,
+                wait_pattern="назначена|Какой этап|открыть стажеру"
+            )
 
     async def test_step3_trainee1_sees_reset_progress(
         self, trainee1: BotClient, shared_state: dict
@@ -114,7 +125,7 @@ class TestScenario3_TrajectoryReassignment:
         """
         КРИТИЧЕСКАЯ ПРОВЕРКА: После переназначения все тесты сброшены.
 
-        Прогресс пересоздан с нуля — все этапы закрыты (⛔), тесты непройдены.
+        Прогресс пересоздан с нуля — все этапы закрыты (❌), тесты непройдены.
         """
         await wait_between_actions()
 
@@ -157,7 +168,7 @@ class TestScenario3_TrajectoryReassignment:
         text = resp.text or ""
 
         # Наставник тоже должен видеть сброшенный прогресс
-        # Все этапы закрыты (⛔) или пустые (нет ✅)
+        # Все этапы закрыты (❌) или пустые (нет ✅)
         assert "✅" not in text, (
             f"Mentor's view should show reset progress (no ✅). Got: {text[:500]}"
         )

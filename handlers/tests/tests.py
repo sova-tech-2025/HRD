@@ -29,7 +29,7 @@ from keyboards.keyboards import (
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import TestCreationStates, TestTakingStates
 from utils.logger import log_user_action, log_user_error, logger
-from handlers.auth import check_auth
+from handlers.core.auth import check_auth
 
 router = Router()
 

@@ -8,8 +8,13 @@ from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN, LOG_LEVEL
 from database.db import init_db
-from handlers import auth, common, admin, role_permissions, tests, mentorship, test_taking, groups, objects, user_activation, user_edit, learning_paths, trajectory_editor, mentor_assignment, trainee_trajectory, manager_attestation, manager_menu, employee_transition, broadcast, knowledge_base, fallback, company, registration
-# registration - используется для флоу регистрации при присоединении к компании
+from handlers.core import auth, common, fallback, registration
+from handlers.company import company, groups, objects
+from handlers.users import admin, user_activation, user_edit, role_permissions
+from handlers.tests import tests, test_taking, broadcast
+from handlers.training import learning_paths, trajectory_editor, trainee_trajectory, mentorship, mentor_assignment
+from handlers.management import manager_attestation, manager_menu, employee_transition
+from handlers.knowledge import knowledge_base
 from middlewares.db_middleware import DatabaseMiddleware
 from middlewares.role_middleware import RoleMiddleware
 from middlewares.bot_middleware import BotMiddleware

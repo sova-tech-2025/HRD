@@ -13,7 +13,7 @@ from database.db import (
     get_all_groups, check_user_permission, get_user_by_tg_id, get_user_roles,
     get_trajectories_using_attestation, get_trajectory_usage_info, ensure_company_id
 )
-from handlers.auth import check_auth
+from handlers.core.auth import check_auth
 from states.states import LearningPathStates, AttestationStates
 from keyboards.keyboards import (
     get_learning_paths_main_keyboard, get_trajectory_creation_start_keyboard,
@@ -1771,7 +1771,7 @@ async def callback_edit_specific_trajectory(callback: CallbackQuery, state: FSMC
         path_id = int(callback.data.split(":")[1])
         
         # Перенаправляем в редактор траекторий
-        from handlers.trajectory_editor import _show_editor_main_menu
+        from handlers.training.trajectory_editor import _show_editor_main_menu
         
         await _show_editor_main_menu(callback.message, state, session, path_id, callback.from_user.id)
         

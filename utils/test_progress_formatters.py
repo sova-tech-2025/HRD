@@ -19,8 +19,8 @@ from typing import Optional
 
 # Константы для иконок статуса теста
 TEST_ICON_PASSED = "✅"
-TEST_ICON_AVAILABLE = "🟡"
-TEST_ICON_CLOSED = "⛔️"
+TEST_ICON_AVAILABLE = "♻️"
+TEST_ICON_CLOSED = "❌"
 
 
 def get_test_status_icon(is_passed: bool, is_stage_opened: bool) -> str:
@@ -36,8 +36,8 @@ def get_test_status_icon(is_passed: bool, is_stage_opened: bool) -> str:
 
     Логика (единая для всего приложения):
         - Пройден И этап открыт: ✅
-        - Не пройден И этап открыт: 🟡
-        - Этап закрыт: ⛔️
+        - Не пройден И этап открыт: ♻️
+        - Этап закрыт: ❌
     """
     if is_passed and is_stage_opened:
         return TEST_ICON_PASSED
@@ -87,3 +87,8 @@ def format_test_with_percentage(
         return f"{icon}<b>Тест {test_num}:</b> {test_name} - {percentage:.0f}%\n"
     else:
         return format_test_line(test_num, test_name, icon)
+
+
+def format_test_line_figma(test_name: str, icon: str) -> str:
+    """Форматирует строку теста в стиле Figma (без номера)."""
+    return f"{icon} Тест: {test_name}\n"

@@ -19,16 +19,16 @@ from database.db import (
     get_trainee_attestation_status, get_user_roles, get_employee_tests_from_recruiter,
     get_user_broadcast_tests, get_user_mentor, ensure_company_id
 )
-from handlers.mentorship import get_days_word
-from handlers.trainee_trajectory import format_trajectory_info
+from handlers.training.mentorship import get_days_word
+from handlers.training.trainee_trajectory import build_trajectory_text, get_no_trajectory_text
 from database.models import InternshipStage, TestResult
 from sqlalchemy import select
 from keyboards.keyboards import get_simple_test_selection_keyboard, get_test_start_keyboard, get_test_selection_for_taking_keyboard, get_mentor_contact_keyboard, get_test_results_keyboard
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import TestTakingStates
 from utils.logger import log_user_action, log_user_error, logger
-from utils.test_progress_formatters import get_test_status_icon, format_test_line
-from handlers.auth import check_auth
+from utils.test_progress_formatters import get_test_status_icon
+from handlers.core.auth import check_auth, ensure_callback_auth, get_current_user
 
 router = Router()
 
@@ -42,7 +42,7 @@ async def cmd_all_tests_command(message: Message, state: FSMContext, session: As
     """Обработчик команды /all_tests"""
     # Для команды all_tests используем функцию cmd_list_tests из tests.py
     # Но импортируем её туда, где она нужна
-    from handlers.tests import cmd_list_tests
+    from handlers.tests.tests import cmd_list_tests
     await cmd_list_tests(message, state, session)
 
 @router.message(F.text.in_(["Доступные тесты", "Тесты траектории 🗺️"]))
@@ -52,16 +52,16 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
     if not is_auth:
         return
     
-    user = await get_user_by_tg_id(session, message.from_user.id)
+    user = await get_current_user(message, state, session)
     if not user:
         await message.answer("Ты не зарегистрирован в системе.")
         return
-    
+
     has_permission = await check_user_permission(session, user.id, "take_tests")
     if not has_permission:
         await message.answer("У тебя нет прав для прохождения тестов.")
         return
-    
+
     # Получаем company_id с fallback на ensure_company_id для безопасности
     company_id = user.company_id
     if company_id is None:
@@ -243,7 +243,7 @@ async def cmd_trainee_broadcast_tests(message: Message, state: FSMContext, sessi
             return
 
         # Получение пользователя
-        user = await get_user_by_tg_id(session, message.from_user.id)
+        user = await get_current_user(message, state, session)
         if not user:
             await message.answer("Ты не зарегистрирован в системе.")
             return
@@ -335,9 +335,12 @@ async def cmd_trainee_broadcast_tests(message: Message, state: FSMContext, sessi
         await message.answer("Произошла ошибка при получении списка тестов")
         log_user_error(message.from_user.id, "my_tests_error", str(e))
 
-async def show_user_test_scores(message: Message, session: AsyncSession, page: int = 0) -> None:
+async def show_user_test_scores(message: Message, session: AsyncSession, page: int = 0, state: FSMContext = None) -> None:
     """Универсальная функция для показа результатов тестирования пользователя с пагинацией"""
-    user = await get_user_by_tg_id(session, message.from_user.id)
+    if state:
+        user = await get_current_user(message, state, session)
+    else:
+        user = await get_user_by_tg_id(session, message.from_user.id)
     if not user:
         await message.answer("Ты не зарегистрирован в системе.")
         return
@@ -374,7 +377,10 @@ async def show_user_test_scores(message: Message, session: AsyncSession, page: i
             f"📊 <b>Твои результаты</b>\n\n"
             f"Ты пока не проходил тестов.\n"
             f"Используй кнопку 'Мои тесты 📋' для прохождения доступных тестов.",
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
+            ])
         )
         return
     
@@ -403,12 +409,18 @@ async def show_user_test_scores(message: Message, session: AsyncSession, page: i
         status = "пройден" if result.is_passed else "не пройден"
         percentage = (result.score / result.max_possible_score * 100) if result.max_possible_score > 0 else 0
         
+        date_str = result.created_date.strftime('%d.%m.%Y %H:%M') if result.created_date else "Не указана"
+        if result.end_time and result.start_time:
+            time_str = f"{(result.end_time - result.start_time).total_seconds():.0f} сек"
+        else:
+            time_str = "Не указано"
+
         results_list.append(
             f"<b>Тест:</b> {test.name if test else 'Неизвестный тест'}\n"
             f"• Баллы: {result.score:.1f}/{result.max_possible_score:.1f} ({percentage:.1f}%)\n"
             f"• Статус: {status}\n"
-            f"• Дата: {result.created_date.strftime('%d.%m.%Y %H:%M')}\n"
-            f"• Время: {(result.end_time - result.start_time).total_seconds():.0f} сек"
+            f"• Дата: {date_str}\n"
+            f"• Время: {time_str}"
         )
     
     results_text = "\n\n".join(results_list)
@@ -422,7 +434,7 @@ async def show_user_test_scores(message: Message, session: AsyncSession, page: i
             mentor_tg_id = mentor.tg_id
     
     # Формируем контекстную информацию о пользователе
-    days_in_status = (moscow_now() - user.role_assigned_date).days
+    days_in_status = (moscow_now() - user.role_assigned_date).days if user.role_assigned_date else 0
     days_text = get_days_word(days_in_status)
     
     if user_role == "стажер":
@@ -548,12 +560,18 @@ async def callback_test_scores_pagination(callback: CallbackQuery, state: FSMCon
             status = "пройден" if result.is_passed else "не пройден"
             percentage = (result.score / result.max_possible_score * 100) if result.max_possible_score > 0 else 0
             
+            date_str = result.created_date.strftime('%d.%m.%Y %H:%M') if result.created_date else "Не указана"
+            if result.end_time and result.start_time:
+                time_str = f"{(result.end_time - result.start_time).total_seconds():.0f} сек"
+            else:
+                time_str = "Не указано"
+
             results_list.append(
                 f"<b>Тест:</b> {test.name if test else 'Неизвестный тест'}\n"
                 f"• Баллы: {result.score:.1f}/{result.max_possible_score:.1f} ({percentage:.1f}%)\n"
                 f"• Статус: {status}\n"
-                f"• Дата: {result.created_date.strftime('%d.%m.%Y %H:%M')}\n"
-                f"• Время: {(result.end_time - result.start_time).total_seconds():.0f} сек"
+                f"• Дата: {date_str}\n"
+                f"• Время: {time_str}"
             )
         
         results_text = "\n\n".join(results_list)
@@ -567,7 +585,7 @@ async def callback_test_scores_pagination(callback: CallbackQuery, state: FSMCon
                 mentor_tg_id = mentor.tg_id
         
         # Формируем контекстную информацию
-        days_in_status = (moscow_now() - user.role_assigned_date).days
+        days_in_status = (moscow_now() - user.role_assigned_date).days if user.role_assigned_date else 0
         days_text = get_days_word(days_in_status)
         
         if user_role == "стажер":
@@ -635,7 +653,50 @@ async def cmd_view_scores(message: Message, state: FSMContext, session: AsyncSes
     if not is_auth:
         return
     
-    await show_user_test_scores(message, session)
+    await show_user_test_scores(message, session, state=state)
+
+
+@router.callback_query(F.data == "trainee_trajectory_tests")
+async def callback_trainee_trajectory_tests(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик инлайн-кнопки 'Тесты траектории 🗺️' из меню стажера"""
+    if not await ensure_callback_auth(callback, state, session):
+        return
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    await cmd_trajectory_tests(callback.message, state, session)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "trainee_my_tests")
+async def callback_trainee_my_tests(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик инлайн-кнопки 'Мои тесты 📋' из меню стажера"""
+    if not await ensure_callback_auth(callback, state, session):
+        return
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    await cmd_trainee_broadcast_tests(callback.message, state, session)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "trainee_scores")
+async def callback_trainee_scores(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик инлайн-кнопки 'Посмотреть баллы 📊' из меню стажера"""
+    if not await ensure_callback_auth(callback, state, session):
+        return
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение: {e}")
+
+    await show_user_test_scores(callback.message, session, state=state)
+    await callback.answer()
+
 
 @router.callback_query(F.data.startswith("my_tests_page:"))
 async def callback_my_tests_pagination(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
@@ -2787,59 +2848,19 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
 
         if not trainee_path:
             await callback.message.edit_text(
-                "🗺️ <b>ТРАЕКТОРИЯ ОБУЧЕНИЯ</b> 🗺️\n\n"
-                "❌ <b>Траектория не назначена</b>\n\n"
-                "Обратись к своему наставнику для назначения траектории, пока курс не выбран",
+                get_no_trajectory_text(),
                 parse_mode="HTML",
                 reply_markup=get_mentor_contact_keyboard()
             )
             return
 
-        # Получаем этапы траектории
-        stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
-
-        # Формируем информацию о траектории
-        trajectory_info = await format_trajectory_info(user, trainee_path)
-
-        # Формируем информацию об этапах
-        stages_info = ""
-        for stage_progress in stages_progress:
-            stage = stage_progress.stage
-            status_icon = "✅" if stage_progress.is_completed else ("🟡" if stage_progress.is_opened else "⛔️")
-            stages_info += f"{status_icon}<b>Этап {stage.order_number}:</b> {stage.name}\n"
-
-            # Получаем информацию о сессиях
-            sessions_progress = await get_stage_session_progress(session, stage_progress.id)
-            for session_progress in sessions_progress:
-                session_status_icon = "✅" if session_progress.is_completed else ("🟡" if session_progress.is_opened else "⛔️")
-                stages_info += f"{session_status_icon}<b>Сессия {session_progress.session.order_number}:</b> {session_progress.session.name}\n"
-
-                # Показываем тесты в сессии
-                for test_num, test in enumerate(session_progress.session.tests, 1):
-                    test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
-                    is_passed = bool(test_result and test_result.is_passed)
-                    icon = get_test_status_icon(is_passed, stage_progress.is_opened)
-                    stages_info += format_test_line(test_num, test.name, icon)
-            
-            # Добавляем пустую строку после этапа
-            stages_info += "\n"
-
-        # Добавляем информацию об аттестации с правильным статусом
-        if trainee_path.learning_path.attestation:
-            attestation_status = await get_trainee_attestation_status(
-                session, user.id, trainee_path.learning_path.attestation.id, company_id=company_id
-            )
-            stages_info += f"🏁<b>Аттестация:</b> {trainee_path.learning_path.attestation.name} {attestation_status}\n\n"
-        else:
-            stages_info += f"🏁<b>Аттестация:</b> Не указана ⛔️\n\n"
+        trajectory_text, stages_progress = await build_trajectory_text(session, user, trainee_path, company_id)
 
         available_stages = [sp for sp in stages_progress if sp.is_opened and not sp.is_completed]
 
-        # Создаем клавиатуру с доступными этапами
         keyboard_buttons = []
-
         if available_stages:
-            stages_info += "Выбери этап траектории👇"
+            trajectory_text += "Выбери этап траектории 👇"
             for stage_progress in available_stages:
                 keyboard_buttons.append([
                     InlineKeyboardButton(
@@ -2848,13 +2869,15 @@ async def callback_trajectory_from_test(callback: CallbackQuery, state: FSMConte
                     )
                 ])
         else:
-            stages_info += "❌ Нет открытых этапов для прохождения"
+            trajectory_text += "❌ Нет открытых этапов для прохождения"
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
+        ])
 
         await callback.message.edit_text(
-            trajectory_info + stages_info,
-            reply_markup=keyboard,
+            trajectory_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
             parse_mode="HTML"
         )
 

@@ -12,7 +12,7 @@ from database.db import (
     get_user_by_tg_id, get_manager_trainees, get_attestation_results,
     check_user_permission
 )
-from handlers.auth import check_auth
+from handlers.core.auth import check_auth
 from keyboards.keyboards import get_main_menu_keyboard
 from utils.logger import log_user_action, log_user_error
 

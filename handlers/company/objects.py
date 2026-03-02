@@ -13,7 +13,7 @@ from database.db import (
     update_object_name, get_object_users, get_user_roles,
     check_user_permission, get_user_by_tg_id, delete_object, ensure_company_id
 )
-from handlers.auth import check_auth
+from handlers.core.auth import check_auth
 from states.states import ObjectManagementStates
 from keyboards.keyboards import (
     get_object_management_keyboard, get_object_selection_keyboard,

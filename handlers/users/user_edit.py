@@ -12,7 +12,7 @@ from database.db import (
     get_all_groups, get_all_objects, get_object_by_id, get_group_by_id, get_user_roles,
     get_role_change_warnings, delete_user, search_activated_users_by_name, ensure_company_id
 )
-from handlers.auth import check_auth
+from handlers.core.auth import check_auth
 from states.states import UserEditStates
 from keyboards.keyboards import (
     get_user_editor_keyboard, get_edit_confirmation_keyboard,

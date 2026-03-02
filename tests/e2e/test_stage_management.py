@@ -2,9 +2,9 @@
 E2E Сценарий 4: Закрытие этапа — согласованность UI и access.
 
 Проверяет, что:
-- Открытие этапа → стажёр видит 🟡
+- Открытие этапа → стажёр видит ♻️
 - Прохождение теста → стажёр видит ✅
-- Закрытие этапа → стажёр видит ⛔️, но данные не потеряны
+- Закрытие этапа → стажёр видит ❌, но данные не потеряны
 - Наставник видит тест как пройденный даже в закрытом этапе
 
 Зависит от предыдущих тестов (Стажёр 1: этап 1 закрыт, тест 1 пройден).
@@ -43,7 +43,7 @@ class TestScenario4_StageOpenCloseConsistency:
     async def test_step2_trainee_sees_open_stage(
         self, trainee1: BotClient, shared_state: dict
     ):
-        """Стажёр 1 видит этап 1 как открытый (🟡 или ✅)."""
+        """Стажёр 1 видит этап 1 как открытый (♻️ или ✅)."""
         await wait_between_actions()
 
         resp = await trainee1.send_and_wait(
@@ -52,11 +52,11 @@ class TestScenario4_StageOpenCloseConsistency:
 
         text = resp.text or ""
 
-        # Этап 1 должен быть открыт (🟡) или пройден (✅), но НЕ закрыт (⛔️)
+        # Этап 1 должен быть открыт (♻️) или пройден (✅), но НЕ закрыт (❌)
         # Тест 1 уже пройден, поэтому может быть ✅
-        has_open_or_passed = "🟡" in text or "✅" in text
+        has_open_or_passed = "♻️" in text or "✅" in text
         assert has_open_or_passed, (
-            f"Stage 1 should be open (🟡) or passed (✅) after reopening. Got: {text[:500]}"
+            f"Stage 1 should be open (♻️) or passed (✅) after reopening. Got: {text[:500]}"
         )
 
         shared_state["stage1_open_text"] = text
@@ -70,7 +70,7 @@ class TestScenario4_StageOpenCloseConsistency:
     async def test_step4_trainee_sees_closed_stage(
         self, trainee1: BotClient, shared_state: dict
     ):
-        """Стажёр 1 видит этап 1 как закрытый (⛔️)."""
+        """Стажёр 1 видит этап 1 как закрытый (❌)."""
         await wait_between_actions()
 
         resp = await trainee1.send_and_wait(
@@ -79,17 +79,17 @@ class TestScenario4_StageOpenCloseConsistency:
 
         text = resp.text or ""
 
-        # Этап 1 должен быть ⛔️ (закрыт) в UI стажёра — это by design
-        assert "⛔" in text, (
-            f"Stage 1 should show ⛔️ after closing. Got: {text[:500]}"
+        # Этап 1 должен быть ❌ (закрыт) в UI стажёра — это by design
+        assert "❌" in text, (
+            f"Stage 1 should show ❌ after closing. Got: {text[:500]}"
         )
 
     async def test_step5_mentor_progress_shows_closed_stage(
         self, mentor: BotClient, shared_state: dict
     ):
         """
-        Наставник видит закрытый этап 1 как ⛔️ (by design: закрытые этапы
-        показывают ⛔️ для всех тестов, независимо от прохождения).
+        Наставник видит закрытый этап 1 как ❌ (by design: закрытые этапы
+        показывают ❌ для всех тестов, независимо от прохождения).
         """
         await wait_between_actions()
 
@@ -114,10 +114,10 @@ class TestScenario4_StageOpenCloseConsistency:
 
         text = resp.text or ""
 
-        # Закрытый этап 1 показывает ⛔️ (by design: get_test_status_icon
-        # возвращает ⛔️ для всех тестов в закрытом этапе)
-        assert "⛔" in text, (
-            f"Closed stage should show ⛔️ icons. Got: {text[:500]}"
+        # Закрытый этап 1 показывает ❌ (by design: get_test_status_icon
+        # возвращает ❌ для всех тестов в закрытом этапе)
+        assert "❌" in text, (
+            f"Closed stage should show ❌ icons. Got: {text[:500]}"
         )
 
     async def test_step6_mentor_stage_management_shows_correct_toggle(

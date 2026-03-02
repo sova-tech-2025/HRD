@@ -8,9 +8,11 @@ MAIN_MENU_TEXTS = {
     # Общие для всех
     "Мой профиль 🦸🏻‍♂️",
     "Помощь ❓",
+    "Помощь❓",
     "База знаний 📁️",
     "База знаний 📁",
     "Мои тесты 📋",
+    "Мои тесты 🗒",
     "Мои тесты 📁",  # старая версия или опечатка
     "Посмотреть баллы 📊",
     # Стажер
@@ -30,8 +32,8 @@ MAIN_MENU_TEXTS = {
     "Новые пользователи ➕",
     "Компания 🏢",
     # Наставник
-    "Мои стажеры 👥",
-    "Тесты стажеров 📝",
+    "Панель наставника 🎓",
+    "☰ Главное меню",
     # Руководитель
     "Аттестация ✔️",
     # Главное меню (текст)
@@ -100,20 +102,18 @@ def get_role_selection_keyboard(is_editing: bool = False) -> InlineKeyboardMarku
     return keyboard
 
 
-def get_trainee_keyboard() -> ReplyKeyboardMarkup:
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Мой профиль 🦸🏻‍♂️")],
-            [KeyboardButton(text="Траектория обучения 📖")],
-            [KeyboardButton(text="База знаний 📁️")],
-            [KeyboardButton(text="Мой наставник 🎓")],
-            [KeyboardButton(text="Тесты траектории 🗺️"), KeyboardButton(text="Мои тесты 📋")],
-            [KeyboardButton(text="Посмотреть баллы 📊")],
-            [KeyboardButton(text="Помощь ❓")]
-        ],
-        resize_keyboard=True
-    )
-    return keyboard
+def get_trainee_inline_menu() -> InlineKeyboardMarkup:
+    """Инлайн-клавиатура главного меню стажера"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Мой профиль 🦸🏻‍♂️", callback_data="trainee_profile")],
+        [InlineKeyboardButton(text="Траектория обучения 📖", callback_data="trainee_trajectory")],
+        [InlineKeyboardButton(text="База знаний 📒", callback_data="trainee_knowledge_base")],
+        [InlineKeyboardButton(text="Мой наставник 🎓", callback_data="trainee_my_mentor")],
+        [InlineKeyboardButton(text="Тесты траектории 🗺️", callback_data="trainee_trajectory_tests")],
+        [InlineKeyboardButton(text="Мои тесты 📋", callback_data="trainee_my_tests")],
+        [InlineKeyboardButton(text="Посмотреть баллы 📊", callback_data="trainee_scores")],
+        [InlineKeyboardButton(text="Помощь ❓", callback_data="trainee_help")],
+    ])
 
 
 def get_recruiter_keyboard() -> ReplyKeyboardMarkup:
@@ -140,19 +140,25 @@ def get_recruiter_keyboard() -> ReplyKeyboardMarkup:
 
 
 def get_mentor_keyboard() -> ReplyKeyboardMarkup:
-    """Клавиатура для роли Наставник - Updated with emojis and mentor tests"""
+    """Минимальная reply-клавиатура для наставника (fallback)"""
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Мой профиль 🦸🏻‍♂️")],
-            [KeyboardButton(text="Мои стажеры 👥")],
-            [KeyboardButton(text="Тесты стажеров 📝"), KeyboardButton(text="Мои тесты 📋")],
-            [KeyboardButton(text="База знаний 📁️")],
-            [KeyboardButton(text="Посмотреть баллы 📊")],
-            [KeyboardButton(text="Помощь ❓")]
+            [KeyboardButton(text="☰ Главное меню")]
         ],
         resize_keyboard=True
     )
     return keyboard
+
+
+def get_mentor_inline_menu() -> InlineKeyboardMarkup:
+    """Инлайн-клавиатура главного меню наставника (по Figma)"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Мой профиль 🦸🏻‍♂️", callback_data="mentor_profile")],
+        [InlineKeyboardButton(text="База знаний 📁", callback_data="mentor_knowledge_base")],
+        [InlineKeyboardButton(text="Мои тесты 🗒", callback_data="mentor_my_tests")],
+        [InlineKeyboardButton(text="Панель наставника 🎓", callback_data="mentor_panel")],
+        [InlineKeyboardButton(text="Помощь ❓", callback_data="mentor_help")],
+    ])
 
 
 def get_employee_keyboard() -> ReplyKeyboardMarkup:
@@ -260,7 +266,7 @@ def get_keyboard_by_role(roles) -> ReplyKeyboardMarkup:
     elif "Сотрудник" in role_names:
         return get_employee_keyboard()
     elif "Стажер" in role_names:
-        return get_trainee_keyboard()
+        return None
     else:
         return ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="Мой профиль"), KeyboardButton(text="Помощь")]],
@@ -1098,20 +1104,16 @@ def format_help_message(role_name: str) -> str:
 Твоя задача — курировать назначенных тебе стажеров и управлять их прогрессом.
 
 <b>Основные функции:</b>
-• <b>Мой профиль 🦸🏻‍♂️</b> — посмотреть информацию о себе
-• <b>Мои стажеры 👥</b> — посмотреть список твоих стажеров и управлять ими
-• <b>Тесты стажеров 📝</b> — посмотреть тесты, доступные для назначения стажерам
-• <b>Мои тесты 📋</b> — пройти тесты, назначенные рекрутером через рассылку
-• <b>База знаний 📁️</b> — получить доступ к корпоративным материалам
-• <b>Посмотреть баллы 📊</b> — посмотреть результаты пройденных тестов
+• <b>Панель наставника 🎓</b> — список стажеров, управление траекториями и этапами
+• <b>Мои тесты 🗒</b> — пройти тесты, назначенные рекрутером через рассылку
+• <b>База знаний 📁</b> — корпоративные материалы
 
 <b>Возможности:</b>
 • Назначение траекторий обучения своим стажерам
 • Открытие этапов траекторий по мере прогресса стажеров
+• Назначение дополнительных тестов стажерам
 • Мониторинг прогресса стажеров
-• Предоставление доступа к тестам стажерам
 • Назначение аттестаций стажерам через руководителей
-• Прохождение тестов от рекрутера
 
 <b>Команды:</b>
 • <code>/start</code> — запуск/перезапуск бота
@@ -1327,7 +1329,7 @@ def get_group_delete_confirmation_keyboard(group_id: int) -> InlineKeyboardMarku
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Простая клавиатура с кнопкой 'Главное меню'"""
     keyboard = [
-        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -2134,10 +2136,12 @@ def get_employee_material_view_keyboard(folder_id: int) -> InlineKeyboardMarkup:
 
 
 def get_mentor_contact_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для связи с наставником при отсутствии траектории"""
+    """Клавиатура для экрана 'траектория не назначена' (Figma 17.5)"""
     keyboard = [
-        [InlineKeyboardButton(text="👨‍🏫 Связь с наставником", callback_data="contact_mentor")],
-        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
+        [
+            InlineKeyboardButton(text="← назад", callback_data="main_menu"),
+            InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
+        ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

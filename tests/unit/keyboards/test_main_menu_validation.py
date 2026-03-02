@@ -22,8 +22,8 @@ class TestIsMainMenuText:
 
     def test_returns_true_for_mentor_menu_buttons(self):
         """Возвращает True для кнопок меню наставника"""
-        assert is_main_menu_text("Мои стажеры 👥") is True
-        assert is_main_menu_text("Тесты стажеров 📝") is True
+        assert is_main_menu_text("Панель наставника 🎓") is True
+        assert is_main_menu_text("☰ Главное меню") is True
 
     def test_returns_false_for_regular_text(self):
         """Возвращает False для обычного текста"""

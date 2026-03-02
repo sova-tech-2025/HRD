@@ -326,7 +326,7 @@ async def callback_back_to_trajectory_list_from_editor(callback: CallbackQuery, 
         await callback.answer()
         
         # Переиспользуем логику из handlers/learning_paths.py
-        from handlers.learning_paths import callback_edit_trajectory
+        from handlers.training.learning_paths import callback_edit_trajectory
         await callback_edit_trajectory(callback, state, session)
         
         log_user_action(callback.from_user.id, "back_to_trajectory_list_from_editor", "Возврат к списку траекторий")

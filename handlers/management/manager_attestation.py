@@ -16,7 +16,7 @@ from database.db import (
     get_trainee_attestation_by_id, save_attestation_question_result, complete_attestation_session,
     get_attestation_by_id, change_trainee_to_employee, create_attestation_result
 )
-from handlers.auth import check_auth
+from handlers.core.auth import check_auth
 from keyboards.keyboards import get_main_menu_keyboard, get_keyboard_by_role
 from states.states import ManagerAttestationStates
 from utils.logger import log_user_action, log_user_error, logger
