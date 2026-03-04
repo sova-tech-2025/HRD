@@ -75,10 +75,13 @@ async def cmd_trajectory_tests(message: Message, state: FSMContext, session: Asy
     
     if not available_tests:
         await message.answer(
-            "🗺️ <b>Тесты траектории</b>\n\n"
-            "У тебя пока нет доступных тестов для прохождения.\n"
-            "Обратись к наставнику для получения доступа к тестам.",
-            parse_mode="HTML"
+            "Твой наставник пока не назначил тебе тесты 🥹\n\n"
+            "Как только он это сделает, ты сможешь приступить к ним. "
+            "Если хочешь ускорить процесс — свяжись с наставником напрямую",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
+            ])
         )
         return
     
@@ -838,10 +841,13 @@ async def callback_trajectory_tests_pagination(callback: CallbackQuery, state: F
             available_tests = await get_trainee_available_tests(session, user.id, company_id=company_id)
             if not available_tests:
                 await callback.message.edit_text(
-                    "🗺️ <b>Тесты траектории</b>\n\n"
-                    "У тебя пока нет доступных тестов для прохождения.\n"
-                    "Обратись к наставнику для получения доступа к тестам.",
-                    parse_mode="HTML"
+                    "Твой наставник пока не назначил тебе тесты 🥹\n\n"
+                    "Как только он это сделает, ты сможешь приступить к ним. "
+                    "Если хочешь ускорить процесс — свяжись с наставником напрямую",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
+                    ])
                 )
                 return
             # Сохраняем загруженные тесты в state
@@ -1655,7 +1661,7 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
                 for i, test_item in enumerate(current_session.tests, 1):
                     test_keyboard.append([
                         InlineKeyboardButton(
-                            text=f"Тест {i}",
+                            text=test_item.name,
                             callback_data=f"take_test:{current_session.id}:{test_item.id}"
                         )
                     ])
@@ -1823,13 +1829,16 @@ async def process_back_to_test_list(callback: CallbackQuery, state: FSMContext, 
     if is_from_trajectory:
         # ТЕСТЫ ТРАЕКТОРИИ
         available_tests = await get_trainee_available_tests(session, user.id, company_id=company_id)
-        
+
         if not available_tests:
             await callback.message.edit_text(
-                "🗺️ <b>Тесты траектории</b>\n\n"
-                "У тебя пока нет доступных тестов для прохождения.\n"
-                "Обратись к наставнику для получения доступа к тестам.",
-                parse_mode="HTML"
+                "Твой наставник пока не назначил тебе тесты 🥹\n\n"
+                "Как только он это сделает, ты сможешь приступить к ним. "
+                "Если хочешь ускорить процесс — свяжись с наставником напрямую",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
+                ])
             )
             await callback.answer()
             return
@@ -2296,13 +2305,16 @@ async def process_trajectory_tests_shortcut(callback: CallbackQuery, state: FSMC
         return
     
     available_tests = await get_trainee_available_tests(session, user.id, company_id=company_id)
-    
+
     if not available_tests:
         await callback.message.edit_text(
-            "🗺️ <b>Тесты траектории</b>\n\n"
-            "У тебя пока нет доступных тестов для прохождения.\n"
-            "Обратись к наставнику для получения доступа к тестам.",
-            parse_mode="HTML"
+            "Твой наставник пока не назначил тебе тесты 🥹\n\n"
+            "Как только он это сделает, ты сможешь приступить к ним. "
+            "Если хочешь ускорить процесс — свяжись с наставником напрямую",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
+            ])
         )
         await callback.answer()
         return
