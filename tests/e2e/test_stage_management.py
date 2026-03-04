@@ -2,7 +2,7 @@
 E2E Сценарий 4: Закрытие этапа — согласованность UI и access.
 
 Проверяет, что:
-- Открытие этапа → стажёр видит ♻️
+- Открытие этапа → стажёр видит ⏳
 - Прохождение теста → стажёр видит ✅
 - Закрытие этапа → стажёр видит ❌, но данные не потеряны
 - Наставник видит тест как пройденный даже в закрытом этапе
@@ -43,7 +43,7 @@ class TestScenario4_StageOpenCloseConsistency:
     async def test_step2_trainee_sees_open_stage(
         self, trainee1: BotClient, shared_state: dict
     ):
-        """Стажёр 1 видит этап 1 как открытый (♻️ или ✅)."""
+        """Стажёр 1 видит этап 1 как открытый (⏳ или ✅)."""
         await wait_between_actions()
 
         resp = await trainee1.send_and_wait(
@@ -52,11 +52,11 @@ class TestScenario4_StageOpenCloseConsistency:
 
         text = resp.text or ""
 
-        # Этап 1 должен быть открыт (♻️) или пройден (✅), но НЕ закрыт (❌)
+        # Этап 1 должен быть открыт (⏳) или пройден (✅), но НЕ закрыт (❌)
         # Тест 1 уже пройден, поэтому может быть ✅
-        has_open_or_passed = "♻️" in text or "✅" in text
+        has_open_or_passed = "⏳" in text or "✅" in text
         assert has_open_or_passed, (
-            f"Stage 1 should be open (♻️) or passed (✅) after reopening. Got: {text[:500]}"
+            f"Stage 1 should be open (⏳) or passed (✅) after reopening. Got: {text[:500]}"
         )
 
         shared_state["stage1_open_text"] = text

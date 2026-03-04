@@ -241,39 +241,22 @@ async def cmd_mentor_trainees(message: Message, state: FSMContext, session: Asyn
 
 @router.callback_query(F.data == "mentor_panel")
 async def callback_mentor_panel(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
-    """Обработчик инлайн-кнопки 'Панель наставника 🎓' — инструкция + навигация (по Figma 11.1-11.6)"""
+    """Обработчик инлайн-кнопки 'Панель наставника 🎓' — навигация (по Figma 11.1-11.6)"""
     user = await get_user_by_tg_id(session, callback.from_user.id)
     if not user:
         await callback.answer("❌ Не зарегистрирован", show_alert=True)
         return
 
-    instruction_text = (
-        "<b>Инструкция для наставника</b>\n\n"
-        "<b>Напиши новому стажеру:</b>\n"
-        "👋 При появлении нового стажера у тебя есть возможность "
-        "сразу посмотреть его контактные данные для связи\n\n"
-        "<b>Назначение траектории:</b>\n"
-        "📖 Обязательно назначь обучающую траекторию — это пошаговый "
-        "маршрут с закреплёнными материалами и тестами, чтобы обучение "
-        "было последовательным\n\n"
-        "<b>Управление доступом:</b>\n"
-        "🔓 Открывай доступ к этапам траектории постепенно. Так стажер "
-        "не перегрузится сразу, будет идти по шагам и лучше усваивать материал\n\n"
-        "<b>Отслеживание прогресса:</b>\n"
-        "📈 Следи за прогрессом: выбирая стажера, можешь видеть, "
-        "на каком он этапе и как успешно проходит каждый тест\n\n"
-        "<b>Аттестация:</b>\n"
-        "🎓 Для завершения стажировки стажеру нужно сдать аттестацию. "
-        "Ты можешь назначить ее только после успешного прохождения всех тестов."
-    )
+    panel_text = "<b>Панель наставника 🎓</b>"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Мои стажеры", callback_data="mentor_my_trainees")],
         [InlineKeyboardButton(text="Назначить тест", callback_data="mentor_assign_test")],
+        [InlineKeyboardButton(text="Что делать?", callback_data="mentor_what_to_do")],
         [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
     ])
 
-    # Отправляем фото-баннер + инструкцию (по Figma 11.1-11.2)
+    # Отправляем фото-баннер (по Figma 11.1-11.2)
     photo_source = None
     if MENTOR_PANEL_IMAGE_FILE_ID:
         photo_source = MENTOR_PANEL_IMAGE_FILE_ID
@@ -283,38 +266,77 @@ async def callback_mentor_panel(callback: CallbackQuery, state: FSMContext, sess
         except Exception:
             pass
 
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
     if photo_source:
-        try:
-            await callback.message.delete()
-        except:
-            pass
         try:
             await callback.message.answer_photo(
                 photo=photo_source,
-                caption=instruction_text,
+                caption=panel_text,
                 parse_mode="HTML",
                 reply_markup=keyboard
             )
         except Exception:
-            # Фоллбэк — текст без фото
             await callback.message.answer(
-                instruction_text,
+                panel_text,
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
     else:
-        try:
-            await callback.message.delete()
-        except Exception:
-            pass
         await callback.message.answer(
-            instruction_text,
+            panel_text,
             reply_markup=keyboard,
             parse_mode="HTML"
         )
 
     await callback.answer()
     log_user_action(callback.from_user.id, callback.from_user.username, "opened_mentor_panel")
+
+
+@router.callback_query(F.data == "mentor_what_to_do")
+async def callback_mentor_what_to_do(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработчик кнопки 'Что делать?' — инструкция для наставника"""
+    instruction_text = (
+        "<b>Инструкция для наставника</b>\n\n"
+        "<b>1. Напиши новому стажеру:</b>\n"
+        "👋 При появлении нового стажера у тебя есть возможность "
+        "сразу посмотреть его контактные данные для связи\n\n"
+        "<b>2. Назначение траектории:</b>\n"
+        "📖 Обязательно назначь обучающую траекторию — это пошаговый "
+        "маршрут с закреплёнными материалами и тестами, чтобы обучение "
+        "было последовательным\n\n"
+        "<b>3. Управление доступом:</b>\n"
+        "🔓 Открывай доступ к этапам траектории постепенно. Так стажер "
+        "не перегрузится сразу, будет идти по шагам и лучше усваивать материал\n\n"
+        "<b>4. Отслеживание прогресса:</b>\n"
+        "📈 Следи за прогрессом: выбирая стажера, можешь видеть, "
+        "на каком он этапе и как успешно проходит каждый тест\n\n"
+        "<b>5. Аттестация:</b>\n"
+        "🎓 Для завершения стажировки стажеру нужно сдать аттестацию. "
+        "Ты можешь назначить ее только после успешного прохождения всех тестов."
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="← назад", callback_data="mentor_panel")],
+        [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
+    ])
+
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    await callback.message.answer(
+        instruction_text,
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+
+    await callback.answer()
+    log_user_action(callback.from_user.id, callback.from_user.username, "opened_mentor_instructions")
 
 
 @router.callback_query(F.data == "mentor_my_trainees")
@@ -2205,7 +2227,7 @@ def generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_
     if not trainee_path:
         return "📖 <b>Траектория:</b> не выбрано"
 
-    progress = f"______________________________\n\n📖 <b>Траектория:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
+    progress = f"📖 <b>Траектория:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
 
     test_results_dict = {}
     if test_results:
@@ -2255,8 +2277,6 @@ def generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_
             progress += "\n👉 <b>Этап завершен!</b>\n"
         elif stage_progress.is_opened and total_tests > 0:
             progress += f"\n👉 <b>Пройдено:</b> {passed_tests}/{total_tests} тестов\n"
-
-        progress += "______________________________\n\n"
 
     # Аттестация
     if trainee_path.learning_path.attestation:
@@ -2270,7 +2290,7 @@ async def generate_trajectory_progress_with_attestation_status(session, trainee_
     if not trainee_path:
         return "📖 <b>Траектория:</b> не выбрано"
 
-    progress = f"______________________________\n\n📖 <b>Траектория:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
+    progress = f"📖 <b>Траектория:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
 
     test_results_dict = {}
     if test_results:
@@ -2320,8 +2340,6 @@ async def generate_trajectory_progress_with_attestation_status(session, trainee_
             progress += "\n👉 <b>Этап завершен!</b>\n"
         elif stage_progress.is_opened and total_tests > 0:
             progress += f"\n👉 <b>Пройдено:</b> {passed_tests}/{total_tests} тестов\n"
-
-        progress += "______________________________\n\n"
 
     # Аттестация с правильным статусом
     if trainee_path.learning_path.attestation:
@@ -4355,27 +4373,13 @@ async def update_stages_management_interface(callback: CallbackQuery, session: A
                 ])
 
         trainee = await get_user_by_id(session, trainee_id)
-        
-        # Вычисляем количество дней в статусе стажера
-        days_as_trainee = (moscow_now() - trainee.role_assigned_date).days
-        days_word = get_days_word(days_as_trainee)
-        
+
         # Получаем результаты тестов для правильной индикации
         test_results = await get_user_test_results(session, trainee_id, company_id=trainee.company_id)
-        
-        # Формируем полную информацию согласно ТЗ шаг 6
-        header_info = (
-            f"🦸🏻‍♂️<b>Стажер:</b> {trainee.full_name}\n\n"
-            f"<b>Телефон:</b> {trainee.phone_number}\n"
-            f"<b>В статусе стажера:</b> {days_as_trainee} {days_word}\n"
-            f"<b>Объект стажировки:</b> {trainee.internship_object.name if trainee.internship_object else 'Не указан'}\n"
-            f"<b>Объект работы:</b> {trainee.work_object.name if trainee.work_object else 'Не указан'}\n\n"
-            "━━━━━━━━━━━━\n\n"
-        )
-        
-        # Добавляем полную траекторию согласно ТЗ
+
+        # Формируем сообщение — сразу траектория без блока данных стажёра
         trajectory_progress = await generate_trajectory_progress_with_attestation_status(session, trainee_path, stages_progress, test_results)
-        header_info += trajectory_progress + "\n"
+        header_info = trajectory_progress + "\n"
         header_info += "🟡 <b>Какой этап необходимо открыть стажеру?</b>"
 
         # Добавляем кнопку "Назад" к выбору траектории

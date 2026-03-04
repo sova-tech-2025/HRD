@@ -3338,20 +3338,22 @@ async def send_mentor_assignment_notification(session: AsyncSession, bot, traine
             if mentor_work_object:
                 objects_info += f"📍<b>Объект работы наставника:</b> {mentor_work_object}"
 
-        notification_text = f"""🎯 <b>Тебе назначен наставник!</b>
+        notification_text = f"""🎯 <b>Тебе назначили наставника!</b>
 
 👨‍🏫 <b>Твой наставник:</b> {mentor_name}
 
 📋 <b>Контактная информация:</b>
 {contact_info}{assigned_info}{objects_info}
 
-💡 <b>Что дальше?</b>
-• Свяжитесь с наставником для знакомства
-• Обсудите план обучения и цели стажировки
-• Задавайте вопросы и просите помощь при необходимости
-• Наставник поможет тебе с тестами и заданиями
+________________
 
-🎯 <b>Удачи в обучении!</b>"""
+💡 <b>Что дальше?</b>
+
+• Напиши наставнику и познакомьтесь!
+• Обсуждайте план обучения
+• Задавай вопросы, проси помощь
+
+❤️ Удачи!"""
 
         # Создаем клавиатуру с полезными кнопками
         keyboard_buttons = []
@@ -3365,7 +3367,6 @@ async def send_mentor_assignment_notification(session: AsyncSession, bot, traine
         ])
         
         keyboard_buttons.extend([
-            [InlineKeyboardButton(text="🗺️ Тесты траектории", callback_data="trajectory_tests_shortcut")],
             [InlineKeyboardButton(text="👨‍🏫 Информация о наставнике", callback_data="my_mentor_info")]
         ])
         
@@ -6015,8 +6016,8 @@ async def assign_learning_path_to_trainee(session: AsyncSession, trainee_id: int
         # Создаем прогресс по этапам и сессиям
         await _create_trainee_progress(session, trainee_path.id, learning_path_id)
 
-        # Отправляем уведомление стажеру
-        await send_learning_path_assigned_notification(session, trainee_id, learning_path_id, bot, company_id)
+        # Уведомление о назначении траектории убрано — стажёр сразу получает
+        # уведомление об открытии этапа 1 с кнопкой к прохождению
 
         logger.info(f"Траектория {learning_path_id} назначена стажеру {trainee_id} наставником {mentor_id}")
         return True

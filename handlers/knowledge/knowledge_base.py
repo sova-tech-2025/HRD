@@ -104,7 +104,7 @@ async def start_material_addition(callback: CallbackQuery, state: FSMContext, se
         return False
 
 
-@router.message(F.text.in_(["База знаний", "База знаний 📂", "База знаний 📁", "База знаний 📁️"]))
+@router.message(F.text.in_(["База знаний", "База знаний 📁️", "База знаний 📒"]))
 async def cmd_knowledge_base_universal(message: Message, state: FSMContext, session: AsyncSession):
     """Универсальный обработчик кнопки 'База знаний' для рекрутера, сотрудника и стажера (ТЗ 9-1 шаг 1)"""
     try:

@@ -10,7 +10,7 @@ MAIN_MENU_TEXTS = {
     "Помощь ❓",
     "Помощь❓",
     "База знаний 📁️",
-    "База знаний 📁",
+    "База знаний 📒",
     "Мои тесты 📋",
     "Мои тесты 🗒",
     "Мои тесты 📁",  # старая версия или опечатка
@@ -154,7 +154,7 @@ def get_mentor_inline_menu() -> InlineKeyboardMarkup:
     """Инлайн-клавиатура главного меню наставника (по Figma)"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Мой профиль 🦸🏻‍♂️", callback_data="mentor_profile")],
-        [InlineKeyboardButton(text="База знаний 📁", callback_data="mentor_knowledge_base")],
+        [InlineKeyboardButton(text="База знаний 📒", callback_data="mentor_knowledge_base")],
         [InlineKeyboardButton(text="Мои тесты 🗒", callback_data="mentor_my_tests")],
         [InlineKeyboardButton(text="Панель наставника 🎓", callback_data="mentor_panel")],
         [InlineKeyboardButton(text="Помощь ❓", callback_data="mentor_help")],
@@ -1106,7 +1106,7 @@ def format_help_message(role_name: str) -> str:
 <b>Основные функции:</b>
 • <b>Панель наставника 🎓</b> — список стажеров, управление траекториями и этапами
 • <b>Мои тесты 🗒</b> — пройти тесты, назначенные рекрутером через рассылку
-• <b>База знаний 📁</b> — корпоративные материалы
+• <b>База знаний 📒</b> — корпоративные материалы
 
 <b>Возможности:</b>
 • Назначение траекторий обучения своим стажерам
@@ -2408,7 +2408,7 @@ def get_session_tests_keyboard(tests: list, session_id: int, stage_id: int) -> I
     # Список тестов в сессии (кнопки для редактирования)
     for i, test in enumerate(tests, 1):
         keyboard.append([InlineKeyboardButton(
-            text=f"Тест {i}",
+            text=test.name,
             callback_data=f"edit_test:{test.id}:{session_id}"
         )])
     

@@ -465,7 +465,7 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
             for i, test in enumerate(tests, 1):
                 keyboard_buttons.append([
                     InlineKeyboardButton(
-                        text=f"Тест {i}",
+                        text=test.name,
                         callback_data=f"take_test:{session_id}:{test.id}"
                     )
                 ])
@@ -600,7 +600,7 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
             for i, test in enumerate(tests, 1):
                 keyboard_buttons.append([
                     InlineKeyboardButton(
-                        text=f"Тест {i}",
+                        text=test.name,
                         callback_data=f"take_test:{session_id}:{test.id}"
                     )
                 ])
