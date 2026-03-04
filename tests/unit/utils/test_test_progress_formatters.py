@@ -23,7 +23,7 @@ class TestGetTestStatusIcon:
     def test_not_passed_stage_open_returns_available(self):
         """Если тест не пройден и этап открыт - доступен"""
         icon = get_test_status_icon(is_passed=False, is_stage_opened=True)
-        assert icon == "♻️"
+        assert icon == "⏳"
 
     def test_not_passed_stage_closed_returns_closed(self):
         """Если тест не пройден и этап закрыт - закрытый"""
