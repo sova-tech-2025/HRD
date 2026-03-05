@@ -1,6 +1,8 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from utils.media.photo import get_trainee_menu_photo, get_mentor_menu_photo, get_main_menu_photo
+
 
 # Тексты кнопок главного меню для всех ролей
 # Используется для валидации ввода - чтобы случайное нажатие на меню не сохранялось как данные
@@ -246,6 +248,20 @@ def get_confirmation_keyboard(user_id: int, role_name: str, action: str) -> Inli
         ]
     )
     return keyboard
+
+
+def get_menu_by_role(primary_role: str):
+    """Возвращает (keyboard, photo_source) для главного меню по роли.
+
+    Для Стажера/Наставника — инлайн-клавиатура + фото баннера.
+    Для остальных — reply-клавиатура + фото main menu (если настроено).
+    """
+    if primary_role == "Стажер":
+        return get_trainee_inline_menu(), get_trainee_menu_photo()
+    elif primary_role == "Наставник":
+        return get_mentor_inline_menu(), get_mentor_menu_photo()
+    else:
+        return get_keyboard_by_role(primary_role), get_main_menu_photo()
 
 
 def get_keyboard_by_role(roles) -> ReplyKeyboardMarkup:
