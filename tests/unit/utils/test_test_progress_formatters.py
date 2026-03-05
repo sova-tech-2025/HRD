@@ -1,9 +1,9 @@
 """Тесты для модуля форматирования прогресса тестов"""
-import pytest
+
 from utils.formatters.test_progress import (
-    get_test_status_icon,
     format_test_line,
     format_test_with_percentage,
+    get_test_status_icon,
 )
 
 
@@ -51,32 +51,16 @@ class TestFormatTestWithPercentage:
     def test_formats_with_percentage(self):
         """Форматирование с процентами для пройденного теста"""
         line = format_test_with_percentage(
-            test_num=1,
-            test_name="Основы Python",
-            icon="✅",
-            score=85.0,
-            max_score=100.0
+            test_num=1, test_name="Основы Python", icon="✅", score=85.0, max_score=100.0
         )
         assert line == "✅<b>Тест 1:</b> Основы Python - 85%\n"
 
     def test_formats_without_percentage_when_not_passed(self):
         """Форматирование без процентов для непройденного теста"""
-        line = format_test_with_percentage(
-            test_num=2,
-            test_name="SQL запросы",
-            icon="♻️",
-            score=None,
-            max_score=None
-        )
+        line = format_test_with_percentage(test_num=2, test_name="SQL запросы", icon="♻️", score=None, max_score=None)
         assert line == "♻️<b>Тест 2:</b> SQL запросы\n"
 
     def test_rounds_percentage(self):
         """Проценты округляются до целых"""
-        line = format_test_with_percentage(
-            test_num=1,
-            test_name="Тест",
-            icon="✅",
-            score=78.6,
-            max_score=100.0
-        )
+        line = format_test_with_percentage(test_num=1, test_name="Тест", icon="✅", score=78.6, max_score=100.0)
         assert line == "✅<b>Тест 1:</b> Тест - 79%\n"

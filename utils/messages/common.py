@@ -1,4 +1,5 @@
 """Формирование текстовых сообщений для общих хэндлеров (профиль, меню)."""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.db import get_user_roles
@@ -23,7 +24,7 @@ async def format_profile_text(user, session: AsyncSession) -> str:
 <b>Телефон:</b> {user.phone_number}
 <b>Username:</b> {username_display}
 <b>Номер:</b> #{user.id}
-<b>Дата регистрации:</b> {user.registration_date.strftime('%d.%m.%Y %H:%M')}
+<b>Дата регистрации:</b> {user.registration_date.strftime("%d.%m.%Y %H:%M")}
 
 ━━━━━━━━━━━━
 
@@ -53,14 +54,8 @@ def get_main_menu_text(is_inline: bool = True) -> str:
     is_inline=False — для остальных ролей.
     """
     if is_inline:
-        return (
-            "☰ <b>Главное меню</b>\n\n"
-            "Используй команды бота или кнопки клавиатуры для навигации по системе"
-        )
-    return (
-        "☰ Главное меню\n\n"
-        "Используй команды бота или кнопки клавиатуры для навигации по системе."
-    )
+        return "☰ <b>Главное меню</b>\n\nИспользуй команды бота или кнопки клавиатуры для навигации по системе"
+    return "☰ Главное меню\n\nИспользуй команды бота или кнопки клавиатуры для навигации по системе."
 
 
 def get_reload_menu_text() -> str:
@@ -73,7 +68,4 @@ def get_reload_menu_text() -> str:
 
 def get_reload_inline_menu_text() -> str:
     """Текст при перезагрузке инлайн-меню (наставник/стажёр)."""
-    return (
-        "☰ <b>Главное меню</b>\n\n"
-        "Используй кнопки для навигации по системе"
-    )
+    return "☰ <b>Главное меню</b>\n\nИспользуй кнопки для навигации по системе"

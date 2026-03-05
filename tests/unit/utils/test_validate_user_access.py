@@ -1,8 +1,9 @@
 """Тесты validate_user_access из utils/auth/auth.py"""
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime
 
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 AUTH_MODULE = "utils.auth.auth"
 
@@ -28,7 +29,6 @@ class FakeRole:
 
 
 class TestValidateUserAccess:
-
     @pytest.mark.asyncio
     async def test_inactive_user(self):
         from utils.auth.auth import validate_user_access

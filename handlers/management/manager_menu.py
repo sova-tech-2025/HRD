@@ -1,19 +1,16 @@
-﻿"""
+"""
 Обработчики меню руководителя.
 Включает управление аттестациями и стажерами.
 """
 
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import (
-    get_user_by_tg_id, get_manager_trainees, get_attestation_results,
-    check_user_permission
-)
-from utils.auth.auth import check_auth
+from database.db import check_user_permission, get_attestation_results, get_manager_trainees, get_user_by_tg_id
 from keyboards.keyboards import get_main_menu_keyboard
+from utils.auth.auth import check_auth
 from utils.logger import log_user_action, log_user_error
 
 router = Router()
@@ -40,16 +37,14 @@ async def cmd_my_attestations(message: Message, state: FSMContext, session: Asyn
         has_permission = await check_user_permission(session, user.id, "conduct_attestations")
         if not has_permission:
             await message.answer(
-                "❌ <b>Недостаточно прав</b>\n\n"
-                "У тебя нет прав для проведения аттестаций.\n"
-                "Обратись к администратору.",
-                parse_mode="HTML"
+                "❌ <b>Недостаточно прав</b>\n\nУ тебя нет прав для проведения аттестаций.\nОбратись к администратору.",
+                parse_mode="HTML",
             )
             return
 
         # Получаем company_id для изоляции
         data = await state.get_data()
-        company_id = data.get('company_id') or user.company_id
+        company_id = data.get("company_id") or user.company_id
 
         # Получаем стажеров руководителя с изоляцией по компании
         trainees = await get_manager_trainees(session, user.id, company_id=company_id)
@@ -61,7 +56,7 @@ async def cmd_my_attestations(message: Message, state: FSMContext, session: Asyn
                 "У тебя нет назначенных стажеров для проведения аттестаций.\n"
                 "Обратись к наставнику для назначения стажеров.",
                 parse_mode="HTML",
-                reply_markup=get_main_menu_keyboard()
+                reply_markup=get_main_menu_keyboard(),
             )
             log_user_action(user.tg_id, "no_trainees_for_manager", "У руководителя нет стажеров")
             return
@@ -87,22 +82,18 @@ async def cmd_my_attestations(message: Message, state: FSMContext, session: Asyn
             if last_result:
                 status_text = "✅ Пройдена" if last_result.is_passed else "❌ Не пройдена"
 
-            keyboard.inline_keyboard.append([
-                InlineKeyboardButton(
-                    text=f"{trainee.full_name} ({status_text})",
-                    callback_data=f"select_trainee_for_attestation:{trainee.id}"
-                )
-            ])
+            keyboard.inline_keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{trainee.full_name} ({status_text})",
+                        callback_data=f"select_trainee_for_attestation:{trainee.id}",
+                    )
+                ]
+            )
 
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
-        ])
+        keyboard.inline_keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
 
-        await message.answer(
-            attestation_menu,
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
+        await message.answer(attestation_menu, parse_mode="HTML", reply_markup=keyboard)
 
         log_user_action(user.tg_id, "my_attestations_opened", f"Открыто меню аттестаций с {len(trainees)} стажерами")
 
@@ -124,6 +115,7 @@ async def callback_select_trainee_for_attestation(callback: CallbackQuery, sessi
 
         # Получаем стажера
         from database.db import get_user_by_id
+
         trainee = await get_user_by_id(session, trainee_id)
         if not trainee:
             await callback.message.edit_text("Стажер не найден")
@@ -160,25 +152,29 @@ async def callback_select_trainee_for_attestation(callback: CallbackQuery, sessi
 
         trainee_info += "🎯 <b>Выбери действие:</b>"
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="📝 Провести аттестацию", callback_data=f"conduct_attestation:{trainee_id}")
-            ],
-            [
-                InlineKeyboardButton(text="📊 Посмотреть результаты", callback_data=f"view_attestation_results:{trainee_id}")
-            ],
-            [
-                InlineKeyboardButton(text="↩️ Назад к списку", callback_data="back_to_my_attestations")
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📝 Провести аттестацию", callback_data=f"conduct_attestation:{trainee_id}"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="📊 Посмотреть результаты", callback_data=f"view_attestation_results:{trainee_id}"
+                    )
+                ],
+                [InlineKeyboardButton(text="↩️ Назад к списку", callback_data="back_to_my_attestations")],
             ]
-        ])
-
-        await callback.message.edit_text(
-            trainee_info,
-            parse_mode="HTML",
-            reply_markup=keyboard
         )
 
-        log_user_action(callback.from_user.id, "trainee_selected_for_attestation", f"Выбран стажер {trainee.full_name} для аттестации")
+        await callback.message.edit_text(trainee_info, parse_mode="HTML", reply_markup=keyboard)
+
+        log_user_action(
+            callback.from_user.id,
+            "trainee_selected_for_attestation",
+            f"Выбран стажер {trainee.full_name} для аттестации",
+        )
 
     except Exception as e:
         await callback.message.edit_text("Произошла ошибка при выборе стажера")
@@ -206,9 +202,7 @@ async def callback_back_to_my_attestations(callback: CallbackQuery, session: Asy
         trainees = await get_manager_trainees(session, user.id, company_id=company_id)
 
         if not trainees:
-            await callback.message.edit_text(
-                "У тебя нет назначенных стажеров для проведения аттестаций."
-            )
+            await callback.message.edit_text("У тебя нет назначенных стажеров для проведения аттестаций.")
             return
 
         # Формируем меню аттестаций
@@ -232,22 +226,18 @@ async def callback_back_to_my_attestations(callback: CallbackQuery, session: Asy
             if last_result:
                 status_text = "✅ Пройдена" if last_result.is_passed else "❌ Не пройдена"
 
-            keyboard.inline_keyboard.append([
-                InlineKeyboardButton(
-                    text=f"{trainee.full_name} ({status_text})",
-                    callback_data=f"select_trainee_for_attestation:{trainee.id}"
-                )
-            ])
+            keyboard.inline_keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{trainee.full_name} ({status_text})",
+                        callback_data=f"select_trainee_for_attestation:{trainee.id}",
+                    )
+                ]
+            )
 
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
-        ])
+        keyboard.inline_keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
 
-        await callback.message.edit_text(
-            attestation_menu,
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
+        await callback.message.edit_text(attestation_menu, parse_mode="HTML", reply_markup=keyboard)
 
     except Exception as e:
         await callback.message.edit_text("Произошла ошибка при возврате к списку аттестаций")
@@ -275,16 +265,14 @@ async def cmd_my_trainees(message: Message, state: FSMContext, session: AsyncSes
         has_permission = await check_user_permission(session, user.id, "conduct_attestations")
         if not has_permission:
             await message.answer(
-                "❌ <b>Недостаточно прав</b>\n\n"
-                "У тебя нет прав для просмотра стажеров.\n"
-                "Обратись к администратору.",
-                parse_mode="HTML"
+                "❌ <b>Недостаточно прав</b>\n\nУ тебя нет прав для просмотра стажеров.\nОбратись к администратору.",
+                parse_mode="HTML",
             )
             return
 
         # Получаем company_id для изоляции
         data = await state.get_data()
-        company_id = data.get('company_id') or user.company_id
+        company_id = data.get("company_id") or user.company_id
 
         # Получаем стажеров руководителя с изоляцией по компании
         trainees = await get_manager_trainees(session, user.id, company_id=company_id)
@@ -296,7 +284,7 @@ async def cmd_my_trainees(message: Message, state: FSMContext, session: AsyncSes
                 "У тебя нет назначенных стажеров.\n"
                 "Обратись к наставнику для назначения стажеров.",
                 parse_mode="HTML",
-                reply_markup=get_main_menu_keyboard()
+                reply_markup=get_main_menu_keyboard(),
             )
             return
 
@@ -328,22 +316,18 @@ async def cmd_my_trainees(message: Message, state: FSMContext, session: AsyncSes
                 f"📅 <b>Назначен:</b> {trainee_manager.assigned_date.strftime('%d.%m.%Y')}\n\n"
             )
 
-            keyboard.inline_keyboard.append([
-                InlineKeyboardButton(
-                    text=f"🎯 Аттестация: {trainee.full_name}",
-                    callback_data=f"select_trainee_for_attestation:{trainee.id}"
-                )
-            ])
+            keyboard.inline_keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"🎯 Аттестация: {trainee.full_name}",
+                        callback_data=f"select_trainee_for_attestation:{trainee.id}",
+                    )
+                ]
+            )
 
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
-        ])
+        keyboard.inline_keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
 
-        await message.answer(
-            trainees_list,
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
+        await message.answer(trainees_list, parse_mode="HTML", reply_markup=keyboard)
 
         log_user_action(user.tg_id, "my_trainees_opened", f"Открыт список стажеров ({len(trainees)} человек)")
 

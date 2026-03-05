@@ -1,4 +1,5 @@
 """Хелперы для работы с callback-запросами."""
+
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +30,7 @@ async def ensure_callback_auth(callback: CallbackQuery, state: FSMContext, sessi
         role=primary_role,
         is_authenticated=True,
         auth_time=moscow_now().timestamp(),
-        company_id=user.company_id
+        company_id=user.company_id,
     )
     return True
 

@@ -22,18 +22,14 @@ router = Router()
 
 
 @router.callback_query(F.data == "login_again")
-async def callback_login_again(
-    callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot
-):
+async def callback_login_again(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot):
     """Кнопка быстрого входа заново после истечения сессии"""
     await cmd_login(callback.message, state, session, bot, tg_user=callback.from_user)
     await callback.answer()
 
 
 @router.message(Command("login"))
-async def cmd_login(
-    message: Message, state: FSMContext, session: AsyncSession, bot, tg_user=None
-):
+async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, bot, tg_user=None):
     try:
         actor = tg_user or message.from_user
         user = await get_user_by_tg_id(session, actor.id)
@@ -43,9 +39,7 @@ async def cmd_login(
                 "Привет! Добро пожаловать в чат-бот.\n\n🏢 Выбери действие:",
                 reply_markup=get_company_selection_keyboard(),
             )
-            log_user_action(
-                actor.id, actor.username, "failed login attempt - not registered"
-            )
+            log_user_action(actor.id, actor.username, "failed login attempt - not registered")
             return
 
         is_valid, error_msg, primary_role = await validate_user_access(session, user)
@@ -73,9 +67,7 @@ async def cmd_login(
         )
     except Exception as e:
         log_user_error(actor.id, actor.username, "login error", e)
-        await message.answer(
-            "Произошла ошибка при входе в систему. Пожалуйста, попробуй позже."
-        )
+        await message.answer("Произошла ошибка при входе в систему. Пожалуйста, попробуй позже.")
 
 
 @router.message(Command("logout"))
@@ -96,12 +88,8 @@ async def cmd_logout(message: Message, state: FSMContext, bot):
             {"role": role, "user_id": user_id} if user_id else None,
         )
     except Exception as e:
-        log_user_error(
-            message.from_user.id, message.from_user.username, "logout error", e
-        )
-        await message.answer(
-            "Произошла ошибка при выходе из системы. Пожалуйста, попробуй еще раз."
-        )
+        log_user_error(message.from_user.id, message.from_user.username, "logout error", e)
+        await message.answer("Произошла ошибка при выходе из системы. Пожалуйста, попробуй еще раз.")
 
 
 @router.message(Command("start"))
@@ -157,12 +145,8 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession, 
             {"role": primary_role, "user_id": user.id, "company_id": user.company_id},
         )
     except Exception as e:
-        log_user_error(
-            message.from_user.id, message.from_user.username, "start command error", e
-        )
-        await message.answer(
-            "Произошла ошибка при запуске бота. Пожалуйста, попробуй позже."
-        )
+        log_user_error(message.from_user.id, message.from_user.username, "start command error", e)
+        await message.answer("Произошла ошибка при запуске бота. Пожалуйста, попробуй позже.")
 
 
 @router.callback_query(F.data == "register:normal")
@@ -178,9 +162,7 @@ async def callback_register_normal(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "Начинаем регистрацию 🚩\nПожалуйста, введи свою фамилию и имя\n\nПример: Иванов Иван",
         reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback)]
-            ]
+            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback)]]
         ),
     )
     await state.set_state(RegistrationStates.waiting_for_full_name)
@@ -210,9 +192,7 @@ async def callback_register_with_code(callback: CallbackQuery, state: FSMContext
         "Этот шаг нужен только тем, кому рекрутер выдал специальный код\n\n"
         "Если есть код, введи его ниже",
         reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback)]
-            ]
+            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback)]]
         ),
     )
     await state.set_state(RegistrationStates.waiting_for_admin_token)
@@ -239,11 +219,8 @@ async def callback_back_to_welcome(callback: CallbackQuery, state: FSMContext):
     # Обычный возврат - очищаем состояние
     await state.clear()
     await callback.message.edit_text(
-        "Привет! Добро пожаловать в чат-бот.\n\n"
-        "Ты ещё не зарегистрирован. Давай подключим тебе доступ.",
+        "Привет! Добро пожаловать в чат-бот.\n\nТы ещё не зарегистрирован. Давай подключим тебе доступ.",
         reply_markup=get_welcome_keyboard(),
     )
-    log_user_action(
-        callback.from_user.id, callback.from_user.username, "returned to welcome screen"
-    )
+    log_user_action(callback.from_user.id, callback.from_user.username, "returned to welcome screen")
     await callback.answer()

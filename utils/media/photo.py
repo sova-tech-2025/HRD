@@ -1,10 +1,15 @@
 """Получение источника фото для меню по конфиг-переменным."""
+
 from aiogram.types import FSInputFile
 
 from config import (
-    MAIN_MENU_IMAGE_FILE_ID, MAIN_MENU_IMAGE_URL, MAIN_MENU_IMAGE_PATH,
-    MENTOR_MENU_IMAGE_FILE_ID, MENTOR_MENU_IMAGE_PATH,
-    TRAINEE_MENU_IMAGE_FILE_ID, TRAINEE_MENU_IMAGE_PATH,
+    MAIN_MENU_IMAGE_FILE_ID,
+    MAIN_MENU_IMAGE_PATH,
+    MAIN_MENU_IMAGE_URL,
+    MENTOR_MENU_IMAGE_FILE_ID,
+    MENTOR_MENU_IMAGE_PATH,
+    TRAINEE_MENU_IMAGE_FILE_ID,
+    TRAINEE_MENU_IMAGE_PATH,
 )
 from utils.logger import logger
 

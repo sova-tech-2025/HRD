@@ -1,8 +1,10 @@
 """Тесты check_auth из handlers/core/auth.py"""
+
 import time
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 def make_message(user_id=123, username="testuser"):
@@ -53,8 +55,8 @@ AUTH_MODULE = "utils.auth.auth"
 
 # --- Ветка: уже аутентифицирован ---
 
-class TestCheckAuthAuthenticated:
 
+class TestCheckAuthAuthenticated:
     @pytest.mark.asyncio
     async def test_expired_session_clears_state(self):
         """Сессия старше 24ч — state.clear() и возврат False"""
@@ -190,8 +192,8 @@ class TestCheckAuthAuthenticated:
 
 # --- Ветка: не аутентифицирован ---
 
-class TestCheckAuthNotAuthenticated:
 
+class TestCheckAuthNotAuthenticated:
     @pytest.mark.asyncio
     async def test_user_not_found(self):
         """Не аутентифицирован и не найден в БД"""
@@ -359,19 +361,21 @@ class TestCheckAuthNotAuthenticated:
 
 # --- Ветка: fallback по user_id из FSM ---
 
-class TestCheckAuthFallbackUserId:
 
+class TestCheckAuthFallbackUserId:
     @pytest.mark.asyncio
     async def test_authenticated_fallback_to_fsm_user_id(self):
         """Аутентифицирован, get_user_by_tg_id=None, но есть user_id в FSM"""
         from utils.auth.auth import check_auth
 
         msg = make_message()
-        state = make_state({
-            "is_authenticated": True,
-            "auth_time": time.time(),
-            "user_id": 42,
-        })
+        state = make_state(
+            {
+                "is_authenticated": True,
+                "auth_time": time.time(),
+                "user_id": 42,
+            }
+        )
         session = AsyncMock()
         user = make_user(user_id=42)
         company = make_company()
@@ -412,8 +416,8 @@ class TestCheckAuthFallbackUserId:
 
 # --- Ветка: исключение ---
 
-class TestCheckAuthException:
 
+class TestCheckAuthException:
     @pytest.mark.asyncio
     async def test_exception_returns_false(self):
         """Исключение в check_auth — возврат False и сообщение об ошибке"""

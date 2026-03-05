@@ -28,6 +28,7 @@ SESSIONS_DIR = Path(__file__).parent / "sessions"
 # Event loop: единый loop для всей сессии
 # --------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Единый event loop для всей сессии тестов."""
@@ -39,6 +40,7 @@ def event_loop():
 # --------------------------------------------------------------------------
 # Конфигурация из .env.e2e
 # --------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session")
 def e2e_config() -> dict:
@@ -65,6 +67,7 @@ def e2e_config() -> dict:
 # Shared state — dict для передачи данных между ordered test files
 # --------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="session")
 def shared_state() -> dict:
     """
@@ -87,64 +90,50 @@ def shared_state() -> dict:
 # Raw Telethon clients (session-scoped)
 # --------------------------------------------------------------------------
 
-async def _create_client(
-    api_id: int, api_hash: str, session_name: str
-) -> TelegramClient:
+
+async def _create_client(api_id: int, api_hash: str, session_name: str) -> TelegramClient:
     """Создать и подключить TelegramClient из сохранённой сессии."""
     session_path = str(SESSIONS_DIR / session_name)
     client = TelegramClient(session_path, api_id, api_hash)
     await client.connect()
 
     if not await client.is_user_authorized():
-        raise RuntimeError(
-            f"Session '{session_name}' not authorized. "
-            f"Run: python tests/e2e/auth_sessions.py"
-        )
+        raise RuntimeError(f"Session '{session_name}' not authorized. Run: python tests/e2e/auth_sessions.py")
 
     return client
 
 
 @pytest_asyncio.fixture(scope="session")
 async def recruiter_client(e2e_config) -> TelegramClient:
-    client = await _create_client(
-        e2e_config["api_id"], e2e_config["api_hash"], "recruiter"
-    )
+    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "recruiter")
     yield client
     await client.disconnect()
 
 
 @pytest_asyncio.fixture(scope="session")
 async def mentor_client(e2e_config) -> TelegramClient:
-    client = await _create_client(
-        e2e_config["api_id"], e2e_config["api_hash"], "mentor"
-    )
+    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "mentor")
     yield client
     await client.disconnect()
 
 
 @pytest_asyncio.fixture(scope="session")
 async def manager_client(e2e_config) -> TelegramClient:
-    client = await _create_client(
-        e2e_config["api_id"], e2e_config["api_hash"], "manager"
-    )
+    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "manager")
     yield client
     await client.disconnect()
 
 
 @pytest_asyncio.fixture(scope="session")
 async def trainee1_client(e2e_config) -> TelegramClient:
-    client = await _create_client(
-        e2e_config["api_id"], e2e_config["api_hash"], "trainee1"
-    )
+    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "trainee1")
     yield client
     await client.disconnect()
 
 
 @pytest_asyncio.fixture(scope="session")
 async def trainee2_client(e2e_config) -> TelegramClient:
-    client = await _create_client(
-        e2e_config["api_id"], e2e_config["api_hash"], "trainee2"
-    )
+    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "trainee2")
     yield client
     await client.disconnect()
 
@@ -152,6 +141,7 @@ async def trainee2_client(e2e_config) -> TelegramClient:
 # --------------------------------------------------------------------------
 # Helper: resolve bot entity per client
 # --------------------------------------------------------------------------
+
 
 async def _resolve_bot(client: TelegramClient, config: dict):
     """Resolve бот по username для конкретного клиента."""
@@ -164,6 +154,7 @@ async def _resolve_bot(client: TelegramClient, config: dict):
 # --------------------------------------------------------------------------
 # BotClient wrappers (session-scoped, each resolves bot independently)
 # --------------------------------------------------------------------------
+
 
 @pytest_asyncio.fixture(scope="session")
 async def recruiter(recruiter_client, e2e_config) -> BotClient:
@@ -199,6 +190,7 @@ async def trainee2(trainee2_client, e2e_config) -> BotClient:
 # Database reset
 # --------------------------------------------------------------------------
 
+
 async def _reset_database(config: dict) -> None:
     """TRUNCATE CASCADE всех таблиц в тестовой БД, сохраняя seed-данные."""
     # Таблицы с начальными данными (роли, права) — не трогаем
@@ -218,10 +210,7 @@ async def _reset_database(config: dict) -> None:
             AND tablename NOT LIKE 'alembic%'
         """)
 
-        to_truncate = [
-            t["tablename"] for t in tables
-            if t["tablename"] not in SEED_TABLES
-        ]
+        to_truncate = [t["tablename"] for t in tables if t["tablename"] not in SEED_TABLES]
 
         if to_truncate:
             table_names = ", ".join(f'"{t}"' for t in to_truncate)
@@ -243,6 +232,7 @@ async def clean_db_before_session(e2e_config):
 # --------------------------------------------------------------------------
 # Direct DB access for SQL manipulation in tests
 # --------------------------------------------------------------------------
+
 
 @pytest_asyncio.fixture(scope="session")
 async def e2e_db(e2e_config):

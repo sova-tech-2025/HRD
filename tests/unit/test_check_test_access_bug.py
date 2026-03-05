@@ -10,8 +10,10 @@
 1. Стажер: TraineeTestAccess существует и активен → сразу return True
 2. Сотрудник: проверяем TraineeTestAccess вместо роли создателя
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 def make_role(name: str) -> MagicMock:
@@ -68,14 +70,16 @@ class TestTraineeAccessWithTraineeTestAccess:
         # Старый код: granted_by_id is None → return False
         #
         # В НОВОМ коде используется только вызов 1 → return True
-        session.execute = AsyncMock(side_effect=[
-            make_execute_result(scalar_value=access_mock),       # TraineeTestAccess
-            make_execute_result(scalar_value=trainee_path_mock), # TraineeLearningPath
-            make_execute_result(first_value=None),               # trajectory (open stage) → нет
-            make_execute_result(first_value=(16,)),              # trajectory (all) → есть
-        ])
+        session.execute = AsyncMock(
+            side_effect=[
+                make_execute_result(scalar_value=access_mock),  # TraineeTestAccess
+                make_execute_result(scalar_value=trainee_path_mock),  # TraineeLearningPath
+                make_execute_result(first_value=None),  # trajectory (open stage) → нет
+                make_execute_result(first_value=(16,)),  # trajectory (all) → есть
+            ]
+        )
 
-        with patch('database.db.get_user_roles', return_value=[make_role("Стажер")]):
+        with patch("database.db.get_user_roles", return_value=[make_role("Стажер")]):
             result = await check_test_access(session, user_id=568, test_id=16, company_id=1)
 
         assert result is True
@@ -99,8 +103,8 @@ class TestTraineeAccessWithTraineeTestAccess:
         test_mock.company_id = 1
 
         with (
-            patch('database.db.get_user_roles', return_value=[make_role("Стажер")]),
-            patch('database.db.get_test_by_id', return_value=test_mock),
+            patch("database.db.get_user_roles", return_value=[make_role("Стажер")]),
+            patch("database.db.get_test_by_id", return_value=test_mock),
         ):
             result = await check_test_access(session, user_id=568, test_id=16, company_id=1)
 
@@ -125,8 +129,8 @@ class TestTraineeAccessWithTraineeTestAccess:
         test_mock.company_id = 999  # другая компания
 
         with (
-            patch('database.db.get_user_roles', return_value=[make_role("Стажер")]),
-            patch('database.db.get_test_by_id', return_value=test_mock),
+            patch("database.db.get_user_roles", return_value=[make_role("Стажер")]),
+            patch("database.db.get_test_by_id", return_value=test_mock),
         ):
             result = await check_test_access(session, user_id=568, test_id=16, company_id=1)
 
@@ -181,9 +185,9 @@ class TestEmployeeAccess:
             return []
 
         with (
-            patch('database.db.get_user_roles', side_effect=roles_side_effect),
-            patch('database.db.get_test_by_id', return_value=test_mock),
-            patch('database.db.get_user_by_id', return_value=creator_mock),
+            patch("database.db.get_user_roles", side_effect=roles_side_effect),
+            patch("database.db.get_test_by_id", return_value=test_mock),
+            patch("database.db.get_user_by_id", return_value=creator_mock),
         ):
             result = await check_test_access(session, user_id=441, test_id=12, company_id=1)
 
@@ -202,8 +206,8 @@ class TestEmployeeAccess:
         session.execute.return_value = make_execute_result(scalar_value=None)
 
         with (
-            patch('database.db.get_user_roles', return_value=[make_role("Сотрудник")]),
-            patch('database.db.get_test_by_id', return_value=test_mock),
+            patch("database.db.get_user_roles", return_value=[make_role("Сотрудник")]),
+            patch("database.db.get_test_by_id", return_value=test_mock),
         ):
             result = await check_test_access(session, user_id=441, test_id=99, company_id=1)
 
@@ -220,8 +224,8 @@ class TestEmployeeAccess:
         test_mock.company_id = 999  # другая компания
 
         with (
-            patch('database.db.get_user_roles', return_value=[make_role("Сотрудник")]),
-            patch('database.db.get_test_by_id', return_value=test_mock),
+            patch("database.db.get_user_roles", return_value=[make_role("Сотрудник")]),
+            patch("database.db.get_test_by_id", return_value=test_mock),
         ):
             result = await check_test_access(session, user_id=441, test_id=12, company_id=1)
 
@@ -235,8 +239,8 @@ class TestEmployeeAccess:
         session = AsyncMock()
 
         with (
-            patch('database.db.get_user_roles', return_value=[make_role("Сотрудник")]),
-            patch('database.db.get_test_by_id', return_value=None),
+            patch("database.db.get_user_roles", return_value=[make_role("Сотрудник")]),
+            patch("database.db.get_test_by_id", return_value=None),
         ):
             result = await check_test_access(session, user_id=441, test_id=999, company_id=1)
 
@@ -273,7 +277,7 @@ class TestTraineeFallbackToTrajectory:
 
         session.execute = AsyncMock(side_effect=[no_access, has_path, has_test])
 
-        with patch('database.db.get_user_roles', return_value=[make_role("Стажер")]):
+        with patch("database.db.get_user_roles", return_value=[make_role("Стажер")]):
             result = await check_test_access(session, user_id=568, test_id=16, company_id=1)
 
         assert result is True
@@ -295,7 +299,7 @@ class TestTraineeFallbackToTrajectory:
 
         session.execute = AsyncMock(side_effect=[no_access, has_path, no_test])
 
-        with patch('database.db.get_user_roles', return_value=[make_role("Стажер")]):
+        with patch("database.db.get_user_roles", return_value=[make_role("Стажер")]):
             result = await check_test_access(session, user_id=568, test_id=16, company_id=1)
 
         assert result is False
@@ -314,7 +318,7 @@ class TestTraineeFallbackToTrajectory:
 
         session.execute = AsyncMock(side_effect=[no_access, no_path])
 
-        with patch('database.db.get_user_roles', return_value=[make_role("Стажер")]):
+        with patch("database.db.get_user_roles", return_value=[make_role("Стажер")]):
             result = await check_test_access(session, user_id=568, test_id=16, company_id=1)
 
         assert result is False
@@ -339,8 +343,8 @@ class TestOtherRolesAccess:
         test_mock.company_id = 1
 
         with (
-            patch('database.db.get_user_roles', return_value=[make_role("Рекрутер")]),
-            patch('database.db.get_test_by_id', return_value=test_mock),
+            patch("database.db.get_user_roles", return_value=[make_role("Рекрутер")]),
+            patch("database.db.get_test_by_id", return_value=test_mock),
         ):
             result = await check_test_access(session, user_id=100, test_id=1, company_id=1)
 
@@ -357,8 +361,8 @@ class TestOtherRolesAccess:
         test_mock.company_id = 999
 
         with (
-            patch('database.db.get_user_roles', return_value=[make_role("Наставник")]),
-            patch('database.db.get_test_by_id', return_value=test_mock),
+            patch("database.db.get_user_roles", return_value=[make_role("Наставник")]),
+            patch("database.db.get_test_by_id", return_value=test_mock),
         ):
             result = await check_test_access(session, user_id=200, test_id=1, company_id=1)
 
@@ -381,8 +385,8 @@ class TestEdgeCases:
         session = AsyncMock()
 
         with (
-            patch('database.db.get_user_roles', return_value=[make_role("Стажер")]),
-            patch('database.db.get_user_by_id', return_value=MagicMock(company_id=None)),
+            patch("database.db.get_user_roles", return_value=[make_role("Стажер")]),
+            patch("database.db.get_user_by_id", return_value=MagicMock(company_id=None)),
         ):
             result = await check_test_access(session, user_id=568, test_id=16, company_id=None)
 
@@ -395,7 +399,7 @@ class TestEdgeCases:
 
         session = AsyncMock()
 
-        with patch('database.db.get_user_roles', side_effect=Exception("DB error")):
+        with patch("database.db.get_user_roles", side_effect=Exception("DB error")):
             result = await check_test_access(session, user_id=1, test_id=1, company_id=1)
 
         assert result is False

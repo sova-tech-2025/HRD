@@ -3,27 +3,29 @@
 Включает просмотр траектории, выбор этапов, сессий и прохождение тестов.
 """
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import (
-    get_trainee_learning_path, get_trainee_stage_progress,
-    get_stage_session_progress, get_learning_path_stages,
-    complete_stage_for_trainee, complete_session_for_trainee,
-    get_user_test_result, get_user_by_tg_id, get_user_by_id, check_user_permission,
-    get_trainee_attestation_status
-)
 from config import TRAINEE_TRAJECTORY_IMAGE_FILE_ID, TRAINEE_TRAJECTORY_IMAGE_PATH
+from database.db import (
+    get_stage_session_progress,
+    get_trainee_attestation_status,
+    get_trainee_learning_path,
+    get_trainee_stage_progress,
+    get_user_by_id,
+    get_user_by_tg_id,
+    get_user_test_result,
+)
+from keyboards.keyboards import get_mentor_contact_keyboard
 from utils.auth.auth import check_auth
-from utils.handlers.user import get_current_user
+from utils.formatters.test_progress import format_test_line_figma, get_test_status_icon
 from utils.handlers.callback import ensure_callback_auth
-from keyboards.keyboards import get_main_menu_keyboard, get_mentor_contact_keyboard
-from utils.logger import logger, log_user_action, log_user_error
-from utils.formatters.test_progress import get_test_status_icon, format_test_line_figma
+from utils.handlers.user import get_current_user
+from utils.logger import log_user_action, log_user_error, logger
 
 router = Router()
 
@@ -31,6 +33,7 @@ router = Router()
 # ==============================
 # Вспомогательные функции
 # ==============================
+
 
 async def build_trajectory_text(session, user, trainee_path, company_id=None):
     """
@@ -53,14 +56,14 @@ async def build_trajectory_text(session, user, trainee_path, company_id=None):
         total_tests = 0
         passed_tests = 0
         for sp in sessions_progress:
-            if hasattr(sp.session, 'tests') and sp.session.tests:
+            if hasattr(sp.session, "tests") and sp.session.tests:
                 for test in sp.session.tests:
                     total_tests += 1
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
                     if test_result and test_result.is_passed:
                         passed_tests += 1
 
-        all_completed = (passed_tests == total_tests and total_tests > 0)
+        all_completed = passed_tests == total_tests and total_tests > 0
 
         # Статус доступа этапа (Figma)
         if all_completed and stage_progress.is_opened:
@@ -79,7 +82,7 @@ async def build_trajectory_text(session, user, trainee_path, company_id=None):
             if not sp.session:
                 continue
             text += f"<b>{sp.session.name}</b>\n"
-            if hasattr(sp.session, 'tests') and sp.session.tests:
+            if hasattr(sp.session, "tests") and sp.session.tests:
                 for test in sp.session.tests:
                     test_result = await get_user_test_result(session, user.id, test.id, company_id=company_id)
                     is_passed = bool(test_result and test_result.is_passed)
@@ -125,11 +128,7 @@ async def _safe_edit_message(message, text, reply_markup=None, parse_mode=None):
     """Редактирует сообщение, корректно обрабатывая фото-сообщения (edit_caption вместо edit_text)."""
     if message.photo:
         try:
-            await message.edit_caption(
-                caption=text,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode
-            )
+            await message.edit_caption(caption=text, reply_markup=reply_markup, parse_mode=parse_mode)
             return
         except TelegramBadRequest:
             pass
@@ -142,26 +141,20 @@ async def _safe_edit_message(message, text, reply_markup=None, parse_mode=None):
         if photo_source:
             try:
                 await message.answer_photo(
-                    photo=photo_source,
-                    caption=text,
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode
+                    photo=photo_source, caption=text, reply_markup=reply_markup, parse_mode=parse_mode
                 )
                 return
             except Exception:
                 pass
         await message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
     else:
-        await message.edit_text(
-            text,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode
-        )
+        await message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
 
 # ==============================
 # Обработчики команд
 # ==============================
+
 
 @router.message(Command("trajectory"))
 async def cmd_trajectory_slash(message: Message, state: FSMContext, session: AsyncSession):
@@ -189,9 +182,13 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
                 "❌ <b>Доступ запрещен</b>\n\n"
                 "Траектории обучения доступны только стажерам.\n"
                 "После перехода в сотрудники ты получаешь доступ к тестам от рекрутера через рассылку.",
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
-            log_user_action(user.tg_id, "trajectory_access_denied", f"Пользователь с ролью {user_roles} попытался получить доступ к траектории")
+            log_user_action(
+                user.tg_id,
+                "trajectory_access_denied",
+                f"Пользователь с ролью {user_roles} попытался получить доступ к траектории",
+            )
             return
 
         company_id = user.company_id
@@ -204,17 +201,16 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
             if photo_source:
                 try:
                     await message.answer_photo(
-                        photo=photo_source,
-                        caption=no_traj_text,
-                        reply_markup=no_traj_keyboard,
-                        parse_mode="HTML"
+                        photo=photo_source, caption=no_traj_text, reply_markup=no_traj_keyboard, parse_mode="HTML"
                     )
                 except Exception as e:
                     logger.warning(f"Не удалось отправить фото траектории: {e}")
                     await message.answer(no_traj_text, parse_mode="HTML", reply_markup=no_traj_keyboard)
             else:
                 await message.answer(no_traj_text, parse_mode="HTML", reply_markup=no_traj_keyboard)
-            log_user_action(user.tg_id, "trajectory_not_assigned", "Стажер попытался открыть траекторию, но она не назначена")
+            log_user_action(
+                user.tg_id, "trajectory_not_assigned", "Стажер попытался открыть траекторию, но она не назначена"
+            )
             return
 
         trajectory_text, stages_progress = await build_trajectory_text(session, user, trainee_path, company_id)
@@ -225,28 +221,24 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
         if available_stages:
             trajectory_text += "Выбери этап траектории 👇"
             for sp in available_stages:
-                keyboard_buttons.append([
-                    InlineKeyboardButton(
-                        text=f"Этап {sp.stage.order_number}",
-                        callback_data=f"select_stage:{sp.stage.id}"
-                    )
-                ])
+                keyboard_buttons.append(
+                    [
+                        InlineKeyboardButton(
+                            text=f"Этап {sp.stage.order_number}", callback_data=f"select_stage:{sp.stage.id}"
+                        )
+                    ]
+                )
         else:
             trajectory_text += "❌ Нет открытых этапов для прохождения"
 
-        keyboard_buttons.append([
-            InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
-        ])
+        keyboard_buttons.append([InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")])
 
         photo_source = _get_trajectory_photo()
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         if photo_source:
             try:
                 await message.answer_photo(
-                    photo=photo_source,
-                    caption=trajectory_text,
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
+                    photo=photo_source, caption=trajectory_text, reply_markup=keyboard, parse_mode="HTML"
                 )
             except Exception as e:
                 logger.warning(f"Не удалось отправить фото траектории: {e}")
@@ -283,7 +275,7 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await _safe_edit_message(callback.message,"Ты не зарегистрирован в системе.")
+            await _safe_edit_message(callback.message, "Ты не зарегистрирован в системе.")
             return
 
         company_id = user.company_id
@@ -300,17 +292,16 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
             if photo_source:
                 try:
                     await callback.message.answer_photo(
-                        photo=photo_source,
-                        caption=no_traj_text,
-                        reply_markup=no_traj_keyboard,
-                        parse_mode="HTML"
+                        photo=photo_source, caption=no_traj_text, reply_markup=no_traj_keyboard, parse_mode="HTML"
                     )
                 except Exception as e:
                     logger.warning(f"Не удалось отправить фото траектории: {e}")
                     await callback.message.answer(no_traj_text, parse_mode="HTML", reply_markup=no_traj_keyboard)
             else:
                 await callback.message.answer(no_traj_text, parse_mode="HTML", reply_markup=no_traj_keyboard)
-            log_user_action(user.tg_id, "trajectory_not_assigned", "Стажер попытался открыть траектории, но она не назначена")
+            log_user_action(
+                user.tg_id, "trajectory_not_assigned", "Стажер попытался открыть траектории, но она не назначена"
+            )
             return
 
         trajectory_text, stages_progress = await build_trajectory_text(session, user, trainee_path, company_id)
@@ -321,18 +312,17 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
         if available_stages:
             trajectory_text += "Выбери этап траектории 👇"
             for sp in available_stages:
-                keyboard_buttons.append([
-                    InlineKeyboardButton(
-                        text=f"Этап {sp.stage.order_number}",
-                        callback_data=f"select_stage:{sp.stage.id}"
-                    )
-                ])
+                keyboard_buttons.append(
+                    [
+                        InlineKeyboardButton(
+                            text=f"Этап {sp.stage.order_number}", callback_data=f"select_stage:{sp.stage.id}"
+                        )
+                    ]
+                )
         else:
             trajectory_text += "❌ Нет открытых этапов для прохождения"
 
-        keyboard_buttons.append([
-            InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
-        ])
+        keyboard_buttons.append([InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")])
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         photo_source = _get_trajectory_photo()
@@ -343,28 +333,21 @@ async def callback_trajectory_command(callback: CallbackQuery, state: FSMContext
                 pass
             try:
                 await callback.message.answer_photo(
-                    photo=photo_source,
-                    caption=trajectory_text,
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
+                    photo=photo_source, caption=trajectory_text, reply_markup=keyboard, parse_mode="HTML"
                 )
             except Exception as e:
                 logger.warning(f"Не удалось отправить фото траектории: {e}")
                 await callback.message.answer(trajectory_text, reply_markup=keyboard, parse_mode="HTML")
         else:
             try:
-                await _safe_edit_message(callback.message,
-                    trajectory_text,
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
-                )
+                await _safe_edit_message(callback.message, trajectory_text, reply_markup=keyboard, parse_mode="HTML")
             except Exception:
                 await callback.message.answer(trajectory_text, reply_markup=keyboard, parse_mode="HTML")
 
         log_user_action(user.tg_id, "trajectory_opened", f"Открыта траектория {trainee_path.learning_path.name}")
 
     except Exception as e:
-        await _safe_edit_message(callback.message,"Произошла ошибка при открытии траектории")
+        await _safe_edit_message(callback.message, "Произошла ошибка при открытии траектории")
         log_user_error(callback.from_user.id, "trajectory_command_error", str(e))
 
 
@@ -378,20 +361,20 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await _safe_edit_message(callback.message,"Пользователь не найден")
+            await _safe_edit_message(callback.message, "Пользователь не найден")
             return
 
         company_id = user.company_id
         trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
-            await _safe_edit_message(callback.message,"Траектория не найдена")
+            await _safe_edit_message(callback.message, "Траектория не найдена")
             return
 
         stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
         stage_progress = next((sp for sp in stages_progress if sp.stage_id == stage_id), None)
 
         if not stage_progress or not stage_progress.is_opened:
-            await _safe_edit_message(callback.message,"Этап не доступен для прохождения")
+            await _safe_edit_message(callback.message, "Этап не доступен для прохождения")
             return
 
         sessions_progress = await get_stage_session_progress(session, stage_progress.id)
@@ -406,29 +389,29 @@ async def callback_select_stage(callback: CallbackQuery, state: FSMContext, sess
 
         if available_sessions:
             for sp in available_sessions:
-                keyboard_buttons.append([
-                    InlineKeyboardButton(
-                        text=f"Сессия {sp.session.order_number}",
-                        callback_data=f"select_session:{sp.session.id}"
-                    )
-                ])
+                keyboard_buttons.append(
+                    [
+                        InlineKeyboardButton(
+                            text=f"Сессия {sp.session.order_number}", callback_data=f"select_session:{sp.session.id}"
+                        )
+                    ]
+                )
         else:
             trajectory_text += "❌ Нет открытых сессий для прохождения"
 
-        keyboard_buttons.append([
-            InlineKeyboardButton(text="← назад", callback_data="trajectory_command")
-        ])
+        keyboard_buttons.append([InlineKeyboardButton(text="← назад", callback_data="trajectory_command")])
 
-        await _safe_edit_message(callback.message,
+        await _safe_edit_message(
+            callback.message,
             trajectory_text,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
 
         log_user_action(callback.from_user.id, "stage_selected", f"Выбран этап {stage_progress.stage.name}")
 
     except Exception as e:
-        await _safe_edit_message(callback.message,"Произошла ошибка при выборе этапа")
+        await _safe_edit_message(callback.message, "Произошла ошибка при выборе этапа")
         log_user_error(callback.from_user.id, "select_stage_error", str(e))
 
 
@@ -442,22 +425,23 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await _safe_edit_message(callback.message,"Пользователь не найден")
+            await _safe_edit_message(callback.message, "Пользователь не найден")
             return
 
         company_id = user.company_id
         trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
-            await _safe_edit_message(callback.message,"Траектория не найдена")
+            await _safe_edit_message(callback.message, "Траектория не найдена")
             return
 
         from database.db import get_session_with_tests
+
         selected_session = await get_session_with_tests(session, session_id, company_id=company_id)
         if not selected_session:
-            await _safe_edit_message(callback.message,"Сессия не найдена")
+            await _safe_edit_message(callback.message, "Сессия не найдена")
             return
 
-        tests = selected_session.tests if hasattr(selected_session, 'tests') and selected_session.tests else []
+        tests = selected_session.tests if hasattr(selected_session, "tests") and selected_session.tests else []
 
         # Полная траектория + кнопки выбора теста
         trajectory_text, _ = await build_trajectory_text(session, user, trainee_path, company_id)
@@ -465,30 +449,25 @@ async def callback_select_session(callback: CallbackQuery, state: FSMContext, se
         keyboard_buttons = []
         if tests:
             for i, test in enumerate(tests, 1):
-                keyboard_buttons.append([
-                    InlineKeyboardButton(
-                        text=test.name,
-                        callback_data=f"take_test:{session_id}:{test.id}"
-                    )
-                ])
+                keyboard_buttons.append(
+                    [InlineKeyboardButton(text=test.name, callback_data=f"take_test:{session_id}:{test.id}")]
+                )
 
-        keyboard_buttons.append([
-            InlineKeyboardButton(
-                text="← назад",
-                callback_data=f"select_stage:{selected_session.stage_id}"
-            )
-        ])
+        keyboard_buttons.append(
+            [InlineKeyboardButton(text="← назад", callback_data=f"select_stage:{selected_session.stage_id}")]
+        )
 
-        await _safe_edit_message(callback.message,
+        await _safe_edit_message(
+            callback.message,
             trajectory_text,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
 
         log_user_action(callback.from_user.id, "session_selected", f"Выбрана сессия {selected_session.name}")
 
     except Exception as e:
-        await _safe_edit_message(callback.message,"Произошла ошибка при выборе сессии")
+        await _safe_edit_message(callback.message, "Произошла ошибка при выборе сессии")
         log_user_error(callback.from_user.id, "select_session_error", str(e))
 
 
@@ -507,11 +486,10 @@ async def callback_take_test(callback: CallbackQuery, state: FSMContext, session
 
         # Удаляем медиа-файл с материалами, если он был отправлен
         data = await state.get_data()
-        if 'material_message_id' in data:
+        if "material_message_id" in data:
             try:
                 await callback.bot.delete_message(
-                    chat_id=callback.message.chat.id,
-                    message_id=data['material_message_id']
+                    chat_id=callback.message.chat.id, message_id=data["material_message_id"]
                 )
             except Exception:
                 pass
@@ -520,52 +498,50 @@ async def callback_take_test(callback: CallbackQuery, state: FSMContext, session
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await _safe_edit_message(callback.message,"❌ Ты не зарегистрирован в системе.")
+            await _safe_edit_message(callback.message, "❌ Ты не зарегистрирован в системе.")
             return
 
         session_id = int(parts[1])
         test_id = int(parts[2])
 
         from database.db import get_test_by_id
+
         test = await get_test_by_id(session, test_id, company_id=user.company_id)
         if not test:
-            await _safe_edit_message(callback.message,"Тест не найден")
+            await _safe_edit_message(callback.message, "Тест не найден")
             return
 
         test_info = f"""📌 <b>{test.name}</b>
 
 <b>Порог:</b> {test.threshold_score:.1f}/{test.max_score:.1f} б.
 
-{test.description or 'Описание отсутствует'}
+{test.description or "Описание отсутствует"}
 
 Если есть сомнения по теме, сначала прочти прикреплённые обучающие материалы, а потом переходи к тесту"""
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="▶️ Начать тест", callback_data=f"start_test:{test_id}"),
-                InlineKeyboardButton(text="📚 Материалы", callback_data=f"show_materials:{session_id}:{test_id}")
-            ],
-            [
-                InlineKeyboardButton(text="← назад", callback_data=f"back_to_session:{session_id}"),
-                InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="▶️ Начать тест", callback_data=f"start_test:{test_id}"),
+                    InlineKeyboardButton(text="📚 Материалы", callback_data=f"show_materials:{session_id}:{test_id}"),
+                ],
+                [
+                    InlineKeyboardButton(text="← назад", callback_data=f"back_to_session:{session_id}"),
+                    InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu"),
+                ],
             ]
-        ])
-
-        await _safe_edit_message(callback.message,
-            test_info,
-            reply_markup=keyboard,
-            parse_mode="HTML"
         )
+
+        await _safe_edit_message(callback.message, test_info, reply_markup=keyboard, parse_mode="HTML")
 
         log_user_action(callback.from_user.id, "test_selected", f"Выбран тест {test.name}")
 
     except Exception as e:
-        await _safe_edit_message(callback.message,"Произошла ошибка при открытии теста")
+        await _safe_edit_message(callback.message, "Произошла ошибка при открытии теста")
         log_user_error(callback.from_user.id, "take_test_error", str(e))
 
 
 # Обработчик start_test: перенесен в test_taking.py для универсального использования
-
 
 
 @router.callback_query(F.data.startswith("back_to_session:"))
@@ -578,52 +554,48 @@ async def callback_back_to_session(callback: CallbackQuery, state: FSMContext, s
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await _safe_edit_message(callback.message,"Пользователь не найден")
+            await _safe_edit_message(callback.message, "Пользователь не найден")
             return
 
         company_id = user.company_id
         trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
-            await _safe_edit_message(callback.message,"Траектория не найдена")
+            await _safe_edit_message(callback.message, "Траектория не найдена")
             return
 
         from database.db import get_session_with_tests
+
         selected_session = await get_session_with_tests(session, session_id, company_id=company_id)
         if not selected_session:
-            await _safe_edit_message(callback.message,"Сессия не найдена")
+            await _safe_edit_message(callback.message, "Сессия не найдена")
             return
 
-        tests = selected_session.tests if hasattr(selected_session, 'tests') and selected_session.tests else []
+        tests = selected_session.tests if hasattr(selected_session, "tests") and selected_session.tests else []
 
         trajectory_text, _ = await build_trajectory_text(session, user, trainee_path, company_id)
 
         keyboard_buttons = []
         if tests:
             for i, test in enumerate(tests, 1):
-                keyboard_buttons.append([
-                    InlineKeyboardButton(
-                        text=test.name,
-                        callback_data=f"take_test:{session_id}:{test.id}"
-                    )
-                ])
+                keyboard_buttons.append(
+                    [InlineKeyboardButton(text=test.name, callback_data=f"take_test:{session_id}:{test.id}")]
+                )
 
-        keyboard_buttons.append([
-            InlineKeyboardButton(
-                text="← назад",
-                callback_data=f"select_stage:{selected_session.stage_id}"
-            )
-        ])
+        keyboard_buttons.append(
+            [InlineKeyboardButton(text="← назад", callback_data=f"select_stage:{selected_session.stage_id}")]
+        )
 
-        await _safe_edit_message(callback.message,
+        await _safe_edit_message(
+            callback.message,
             trajectory_text,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
 
         log_user_action(callback.from_user.id, "back_to_session", f"Возврат к сессии {selected_session.name}")
 
     except Exception as e:
-        await _safe_edit_message(callback.message,"Произошла ошибка при возврате к сессии")
+        await _safe_edit_message(callback.message, "Произошла ошибка при возврате к сессии")
         log_user_error(callback.from_user.id, "back_to_session_error", str(e))
 
 
@@ -635,7 +607,7 @@ async def callback_show_materials(callback: CallbackQuery, state: FSMContext, se
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await _safe_edit_message(callback.message,"❌ Ты не зарегистрирован в системе.")
+            await _safe_edit_message(callback.message, "❌ Ты не зарегистрирован в системе.")
             return
 
         parts = callback.data.split(":")
@@ -643,20 +615,23 @@ async def callback_show_materials(callback: CallbackQuery, state: FSMContext, se
         test_id = int(parts[2])
 
         from database.db import get_test_by_id
+
         test = await get_test_by_id(session, test_id, company_id=user.company_id)
         if not test:
-            await _safe_edit_message(callback.message,"Тест не найден")
+            await _safe_edit_message(callback.message, "Тест не найден")
             return
 
         if not test.material_link:
-            await _safe_edit_message(callback.message,
-                "📚 <b>Материалы для изучения</b>\n\n"
-                "К этому тесту не прикреплены материалы.",
+            await _safe_edit_message(
+                callback.message,
+                "📚 <b>Материалы для изучения</b>\n\nК этому тесту не прикреплены материалы.",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="▶️ Начать тест", callback_data=f"start_test:{test_id}")],
-                    [InlineKeyboardButton(text="← назад", callback_data=f"take_test:{session_id}:{test_id}")]
-                ])
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="▶️ Начать тест", callback_data=f"start_test:{test_id}")],
+                        [InlineKeyboardButton(text="← назад", callback_data=f"take_test:{session_id}:{test_id}")],
+                    ]
+                ),
             )
             return
 
@@ -664,58 +639,61 @@ async def callback_show_materials(callback: CallbackQuery, state: FSMContext, se
             try:
                 if test.material_type == "photo":
                     sent_media = await callback.bot.send_photo(
-                        chat_id=callback.message.chat.id,
-                        photo=test.material_file_path
+                        chat_id=callback.message.chat.id, photo=test.material_file_path
                     )
                 elif test.material_type == "video":
                     sent_media = await callback.bot.send_video(
-                        chat_id=callback.message.chat.id,
-                        video=test.material_file_path
+                        chat_id=callback.message.chat.id, video=test.material_file_path
                     )
                 else:
                     sent_media = await callback.bot.send_document(
-                        chat_id=callback.message.chat.id,
-                        document=test.material_file_path
+                        chat_id=callback.message.chat.id, document=test.material_file_path
                     )
 
                 await state.update_data(material_message_id=sent_media.message_id)
 
                 sent_text = await callback.message.answer(
                     "📎 Материал отправлен выше.",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="▶️ Начать тест", callback_data=f"start_test:{test_id}")],
-                        [InlineKeyboardButton(text="← назад", callback_data=f"take_test:{session_id}:{test_id}")]
-                    ])
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="▶️ Начать тест", callback_data=f"start_test:{test_id}")],
+                            [InlineKeyboardButton(text="← назад", callback_data=f"take_test:{session_id}:{test_id}")],
+                        ]
+                    ),
                 )
                 await state.update_data(material_text_message_id=sent_text.message_id)
-            except Exception as e:
-                await _safe_edit_message(callback.message,
-                    f"❌ <b>Ошибка загрузки файла</b>\n\n"
-                    f"Не удалось загрузить материал.\n\n"
-                    f"📌 <b>Тест:</b> {test.name}",
+            except Exception:
+                await _safe_edit_message(
+                    callback.message,
+                    f"❌ <b>Ошибка загрузки файла</b>\n\nНе удалось загрузить материал.\n\n📌 <b>Тест:</b> {test.name}",
                     parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text="▶️ Начать тест", callback_data=f"start_test:{test_id}")],
-                        [InlineKeyboardButton(text="← назад", callback_data=f"take_test:{session_id}:{test_id}")]
-                    ])
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="▶️ Начать тест", callback_data=f"start_test:{test_id}")],
+                            [InlineKeyboardButton(text="← назад", callback_data=f"take_test:{session_id}:{test_id}")],
+                        ]
+                    ),
                 )
         else:
-            await _safe_edit_message(callback.message,
+            await _safe_edit_message(
+                callback.message,
                 f"📚 <b>Материалы для изучения</b>\n\n"
                 f"📌 <b>Тест:</b> {test.name}\n\n"
                 f"🔗 <b>Ссылка:</b>\n{test.material_link}\n\n"
                 f"💡 Изучи материалы перед прохождением теста!",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="▶️ Начать тест", callback_data=f"start_test:{test_id}")],
-                    [InlineKeyboardButton(text="← назад", callback_data=f"take_test:{session_id}:{test_id}")]
-                ])
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="▶️ Начать тест", callback_data=f"start_test:{test_id}")],
+                        [InlineKeyboardButton(text="← назад", callback_data=f"take_test:{session_id}:{test_id}")],
+                    ]
+                ),
             )
 
         log_user_action(callback.from_user.id, "materials_viewed", f"Просмотрены материалы для теста {test.name}")
 
     except Exception as e:
-        await _safe_edit_message(callback.message,"Произошла ошибка при показе материалов")
+        await _safe_edit_message(callback.message, "Произошла ошибка при показе материалов")
         log_user_error(callback.from_user.id, "show_materials_error", str(e))
 
 
@@ -729,7 +707,7 @@ async def callback_back_to_trajectory(callback: CallbackQuery, state: FSMContext
 
         user = await get_user_by_id(session, user_id)
         if not user:
-            await _safe_edit_message(callback.message,"Пользователь не найден")
+            await _safe_edit_message(callback.message, "Пользователь не найден")
             return
 
         message = callback.message
@@ -737,7 +715,7 @@ async def callback_back_to_trajectory(callback: CallbackQuery, state: FSMContext
         await cmd_trajectory(message, state, session)
 
     except Exception as e:
-        await _safe_edit_message(callback.message,"Произошла ошибка при возврате к траектории")
+        await _safe_edit_message(callback.message, "Произошла ошибка при возврате к траектории")
         log_user_error(callback.from_user.id, "back_to_trajectory_error", str(e))
 
 
@@ -751,13 +729,13 @@ async def callback_back_to_stage(callback: CallbackQuery, state: FSMContext, ses
 
         user = await get_user_by_id(session, user_id)
         if not user:
-            await _safe_edit_message(callback.message,"Пользователь не найден")
+            await _safe_edit_message(callback.message, "Пользователь не найден")
             return
 
         company_id = user.company_id
         trainee_path = await get_trainee_learning_path(session, user.id, company_id=company_id)
         if not trainee_path:
-            await _safe_edit_message(callback.message,"Траектория не найдена")
+            await _safe_edit_message(callback.message, "Траектория не найдена")
             return
 
         stages_progress = await get_trainee_stage_progress(session, trainee_path.id, company_id=company_id)
@@ -767,16 +745,17 @@ async def callback_back_to_stage(callback: CallbackQuery, state: FSMContext, ses
             callback.data = f"select_stage:{opened_stage.stage_id}"
             await callback_select_stage(callback, state, session)
         else:
-            await _safe_edit_message(callback.message,"Нет открытых этапов")
+            await _safe_edit_message(callback.message, "Нет открытых этапов")
 
     except Exception as e:
-        await _safe_edit_message(callback.message,"Произошла ошибка при возврате к этапу")
+        await _safe_edit_message(callback.message, "Произошла ошибка при возврате к этапу")
         log_user_error(callback.from_user.id, "back_to_stage_error", str(e))
 
 
 # ==============================
 # Аттестация
 # ==============================
+
 
 async def format_attestation_status(session, user_id, trainee_path):
     """Форматирование статуса аттестации с правильной индикацией"""
@@ -790,10 +769,10 @@ async def format_attestation_status(session, user_id, trainee_path):
             )
             return f"🏁 <b>Аттестация:</b> {trainee_path.learning_path.attestation.name} {attestation_status}\n\n"
         else:
-            return f"🏁 <b>Аттестация:</b> Не указана ⛔️\n\n"
+            return "🏁 <b>Аттестация:</b> Не указана ⛔️\n\n"
     except Exception as e:
         log_user_error(user_id, "format_attestation_status_error", str(e))
-        return f"🏁 <b>Аттестация:</b> Ошибка загрузки ⛔️\n\n"
+        return "🏁 <b>Аттестация:</b> Ошибка загрузки ⛔️\n\n"
 
 
 @router.callback_query(F.data == "contact_mentor")
@@ -804,24 +783,28 @@ async def callback_contact_mentor(callback: CallbackQuery, state: FSMContext, se
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
-            await _safe_edit_message(callback.message,"❌ Ты не зарегистрирован в системе.")
+            await _safe_edit_message(callback.message, "❌ Ты не зарегистрирован в системе.")
             return
 
         from database.db import get_user_mentor
+
         mentor = await get_user_mentor(session, user.id)
 
         if not mentor:
-            await _safe_edit_message(callback.message,
+            await _safe_edit_message(
+                callback.message,
                 "❌ <b>Наставник не назначен</b>\n\n"
                 "Тебе еще не назначен наставник.\n"
                 "Обратись к рекрутеру для назначения наставника.",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="← назад", callback_data="trajectory_command"),
-                        InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(text="← назад", callback_data="trajectory_command"),
+                            InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu"),
+                        ]
                     ]
-                ])
+                ),
             )
             return
 
@@ -829,23 +812,28 @@ async def callback_contact_mentor(callback: CallbackQuery, state: FSMContext, se
 
 🧑 <b>Имя:</b> {mentor.full_name}
 📞 <b>Телефон:</b> {mentor.phone_number}
-👤 <b>Username:</b> @{mentor.username or 'не указан'}
+👤 <b>Username:</b> @{mentor.username or "не указан"}
 
 💬 <b>Свяжись с наставником для назначения траектории обучения</b>"""
 
-        await _safe_edit_message(callback.message,
+        await _safe_edit_message(
+            callback.message,
             mentor_info,
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="← назад", callback_data="trajectory_command"),
-                    InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="← назад", callback_data="trajectory_command"),
+                        InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu"),
+                    ]
                 ]
-            ])
+            ),
         )
 
-        log_user_action(user.tg_id, "mentor_contact_viewed", f"Стажер просмотрел контакты наставника: {mentor.full_name}")
+        log_user_action(
+            user.tg_id, "mentor_contact_viewed", f"Стажер просмотрел контакты наставника: {mentor.full_name}"
+        )
 
     except Exception as e:
         log_user_error(callback.from_user.id, "contact_mentor_error", str(e))
-        await _safe_edit_message(callback.message,"❌ Произошла ошибка при получении контактов наставника.")
+        await _safe_edit_message(callback.message, "❌ Произошла ошибка при получении контактов наставника.")

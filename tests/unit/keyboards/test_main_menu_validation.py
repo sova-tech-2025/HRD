@@ -1,6 +1,6 @@
 """Тесты для валидации текстов главного меню"""
-import pytest
-from keyboards.keyboards import is_main_menu_text, MAIN_MENU_TEXTS
+
+from keyboards.keyboards import MAIN_MENU_TEXTS, is_main_menu_text
 
 
 class TestIsMainMenuText:

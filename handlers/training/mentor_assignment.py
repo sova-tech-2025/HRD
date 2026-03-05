@@ -1,21 +1,24 @@
-﻿"""
+"""
 Обработчики для назначения наставников стажерам рекрутерами.
 Включает выбор стажера, выбор наставника и подтверждение назначения.
 """
 
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.db import (
-    get_trainees_without_mentor, get_available_mentors_for_trainee,
-    assign_mentor_to_trainee, check_user_permission, get_user_by_tg_id,
-    ensure_company_id
+    assign_mentor_to_trainee,
+    check_user_permission,
+    ensure_company_id,
+    get_available_mentors_for_trainee,
+    get_trainees_without_mentor,
+    get_user_by_tg_id,
 )
-from utils.auth.auth import check_auth
+from keyboards.keyboards import get_main_menu_keyboard
 from states.states import MentorAssignmentStates
-from keyboards.keyboards import get_main_menu_keyboard, get_keyboard_by_role
+from utils.auth.auth import check_auth
 from utils.logger import log_user_action, log_user_error
 
 router = Router()
@@ -43,7 +46,7 @@ async def cmd_assign_mentor(message: Message, state: FSMContext, session: AsyncS
                 "❌ <b>Недостаточно прав</b>\n\n"
                 "У тебя нет прав для назначения наставников.\n"
                 "Обратись к администратору.",
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
             log_user_error(user.tg_id, "mentor_assignment_access_denied", "Попытка доступа без прав")
             return
@@ -60,7 +63,7 @@ async def cmd_assign_mentor(message: Message, state: FSMContext, session: AsyncS
                 "🎯 <b>Все стажеры уже имеют наставников!</b>\n\n"
                 "Все активные стажеры уже назначены наставникам.",
                 reply_markup=get_main_menu_keyboard(),
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
             log_user_action(user.tg_id, "no_trainees_without_mentor", "Все стажеры имеют наставников")
             return
@@ -86,26 +89,23 @@ async def cmd_assign_mentor(message: Message, state: FSMContext, session: AsyncS
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
 
         for trainee in trainees_without_mentor:
-            keyboard.inline_keyboard.append([
-                InlineKeyboardButton(
-                    text=f"{trainee.full_name}",
-                    callback_data=f"select_trainee:{trainee.id}"
-                )
-            ])
+            keyboard.inline_keyboard.append(
+                [InlineKeyboardButton(text=f"{trainee.full_name}", callback_data=f"select_trainee:{trainee.id}")]
+            )
 
         # Кнопка отмены
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="🚫 Отменить", callback_data="cancel_mentor_assignment")
-        ])
-
-        await message.answer(
-            stats_message,
-            reply_markup=keyboard,
-            parse_mode="HTML"
+        keyboard.inline_keyboard.append(
+            [InlineKeyboardButton(text="🚫 Отменить", callback_data="cancel_mentor_assignment")]
         )
 
+        await message.answer(stats_message, reply_markup=keyboard, parse_mode="HTML")
+
         await state.set_state(MentorAssignmentStates.selecting_trainee)
-        log_user_action(user.tg_id, "mentor_assignment_started", f"Начат процесс назначения наставников. Стажеров без наставника: {trainees_count}")
+        log_user_action(
+            user.tg_id,
+            "mentor_assignment_started",
+            f"Начат процесс назначения наставников. Стажеров без наставника: {trainees_count}",
+        )
 
     except Exception as e:
         await message.answer("Произошла ошибка при открытии меню назначения наставников")
@@ -135,7 +135,7 @@ async def callback_select_trainee(callback: CallbackQuery, state: FSMContext, se
                 f"👤 <b>Стажер:</b> {trainee.full_name}\n\n"
                 "Для этого стажера нет доступных наставников.\n"
                 "Возможно, нет сотрудников, работающих на том же объекте.",
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
             return
 
@@ -163,26 +163,23 @@ async def callback_select_trainee(callback: CallbackQuery, state: FSMContext, se
                 f"📧 @{mentor.username if mentor.username else 'не указан'}"
             )
 
-            keyboard.inline_keyboard.append([
-                InlineKeyboardButton(
-                    text=mentor.full_name,
-                    callback_data=f"select_mentor:{mentor.id}"
-                )
-            ])
+            keyboard.inline_keyboard.append(
+                [InlineKeyboardButton(text=mentor.full_name, callback_data=f"select_mentor:{mentor.id}")]
+            )
 
         # Кнопка отмены
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="🚫 Отменить", callback_data="cancel_mentor_assignment")
-        ])
+        keyboard.inline_keyboard.append(
+            [InlineKeyboardButton(text="🚫 Отменить", callback_data="cancel_mentor_assignment")]
+        )
 
         await callback.message.edit_text(
-            trainee_info + "\n<b>Выбери наставника для этого стажера:</b>",
-            reply_markup=keyboard,
-            parse_mode="HTML"
+            trainee_info + "\n<b>Выбери наставника для этого стажера:</b>", reply_markup=keyboard, parse_mode="HTML"
         )
 
         await state.set_state(MentorAssignmentStates.selecting_mentor)
-        log_user_action(callback.from_user.id, "trainee_selected", f"Выбран стажер {trainee.full_name} (ID: {trainee_id})")
+        log_user_action(
+            callback.from_user.id, "trainee_selected", f"Выбран стажер {trainee.full_name} (ID: {trainee_id})"
+        )
 
     except Exception as e:
         await callback.message.edit_text("Произошла ошибка при выборе стажера")
@@ -234,21 +231,23 @@ async def callback_select_mentor(callback: CallbackQuery, state: FSMContext, ses
         )
 
         # Клавиатура подтверждения
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_mentor_assignment"),
-                InlineKeyboardButton(text="🚫 Отменить", callback_data="cancel_mentor_assignment")
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_mentor_assignment"),
+                    InlineKeyboardButton(text="🚫 Отменить", callback_data="cancel_mentor_assignment"),
+                ]
             ]
-        ])
-
-        await callback.message.edit_text(
-            confirmation_message,
-            reply_markup=keyboard,
-            parse_mode="HTML"
         )
 
+        await callback.message.edit_text(confirmation_message, reply_markup=keyboard, parse_mode="HTML")
+
         await state.set_state(MentorAssignmentStates.confirming_assignment)
-        log_user_action(callback.from_user.id, "mentor_selected", f"Выбран наставник {mentor.full_name} (ID: {mentor_id}) для стажера {trainee.full_name}")
+        log_user_action(
+            callback.from_user.id,
+            "mentor_selected",
+            f"Выбран наставник {mentor.full_name} (ID: {mentor_id}) для стажера {trainee.full_name}",
+        )
 
     except Exception as e:
         await callback.message.edit_text("Произошла ошибка при выборе наставника")
@@ -283,6 +282,7 @@ async def callback_confirm_mentor_assignment(callback: CallbackQuery, state: FSM
 
         # Назначаем наставника
         from main import bot
+
         success = await assign_mentor_to_trainee(session, trainee_id, mentor_id, recruiter_id, bot, company_id)
 
         if success:
@@ -305,30 +305,35 @@ async def callback_confirm_mentor_assignment(callback: CallbackQuery, state: FSM
             )
 
             # Клавиатура для продолжения работы
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="👨‍🏫 Назначить наставника", callback_data="assign_mentor"),
-                    InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="👨‍🏫 Назначить наставника", callback_data="assign_mentor"),
+                        InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu"),
+                    ]
                 ]
-            ])
-
-            await callback.message.edit_text(
-                success_message,
-                reply_markup=keyboard,
-                parse_mode="HTML"
             )
 
-            log_user_action(recruiter_id, "mentor_assigned_success",
-                          f"Назначен наставник {mentor.full_name} (ID: {mentor_id}) стажеру {trainee.full_name} (ID: {trainee_id})")
+            await callback.message.edit_text(success_message, reply_markup=keyboard, parse_mode="HTML")
+
+            log_user_action(
+                recruiter_id,
+                "mentor_assigned_success",
+                f"Назначен наставник {mentor.full_name} (ID: {mentor_id}) стажеру {trainee.full_name} (ID: {trainee_id})",
+            )
 
         else:
             await callback.message.edit_text(
                 "❌ <b>Ошибка назначения наставника</b>\n\n"
                 "Произошла ошибка при назначении наставника.\n"
                 "Попробуй позже или обратись к администратору.",
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
-            log_user_error(recruiter_id, "mentor_assignment_failed", f"Ошибка назначения наставника {mentor_id} стажеру {trainee_id}")
+            log_user_error(
+                recruiter_id,
+                "mentor_assignment_failed",
+                f"Ошибка назначения наставника {mentor_id} стажеру {trainee_id}",
+            )
 
         # Очищаем состояние
         await state.clear()
@@ -345,10 +350,9 @@ async def callback_cancel_mentor_assignment(callback: CallbackQuery, state: FSMC
         await callback.answer()
 
         await callback.message.edit_text(
-            "🚫 <b>Назначение наставника отменено</b>\n\n"
-            "Ты можешь вернуться к этому позже через главное меню.",
+            "🚫 <b>Назначение наставника отменено</b>\n\nТы можешь вернуться к этому позже через главное меню.",
             reply_markup=get_main_menu_keyboard(),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
 
         await state.clear()
@@ -373,10 +377,7 @@ async def callback_assign_mentor(callback: CallbackQuery, state: FSMContext, ses
         # Проверка прав доступа
         has_permission = await check_user_permission(session, user.id, "manage_groups")
         if not has_permission:
-            await callback.message.edit_text(
-                "❌ <b>Недостаточно прав</b>",
-                parse_mode="HTML"
-            )
+            await callback.message.edit_text("❌ <b>Недостаточно прав</b>", parse_mode="HTML")
             return
 
         # Получаем список стажеров без наставника
@@ -384,9 +385,7 @@ async def callback_assign_mentor(callback: CallbackQuery, state: FSMContext, ses
 
         if not trainees_without_mentor:
             await callback.message.edit_text(
-                "🎯 <b>Все стажеры уже имеют наставников!</b>",
-                reply_markup=get_main_menu_keyboard(),
-                parse_mode="HTML"
+                "🎯 <b>Все стажеры уже имеют наставников!</b>", reply_markup=get_main_menu_keyboard(), parse_mode="HTML"
             )
             return
 

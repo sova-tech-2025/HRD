@@ -1,28 +1,29 @@
 import asyncio
 import logging
 import sys
+
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.client.default import DefaultBotProperties
 
-from config import BOT_TOKEN, LOG_LEVEL
+from config import BOT_TOKEN
 from database.db import init_db
-from handlers.core import auth, common, fallback, registration
 from handlers.company import company, groups, objects
-from handlers.users import admin, user_activation, user_edit, role_permissions
-from handlers.tests import tests, test_taking, broadcast
-from handlers.training import learning_paths, trajectory_editor, trainee_trajectory, mentorship, mentor_assignment
-from handlers.management import manager_attestation, manager_menu, employee_transition
+from handlers.core import auth, common, fallback, registration
 from handlers.knowledge import knowledge_base
-from middlewares.db_middleware import DatabaseMiddleware
-from middlewares.role_middleware import RoleMiddleware
+from handlers.management import employee_transition, manager_attestation, manager_menu
+from handlers.tests import broadcast, test_taking, tests
+from handlers.training import learning_paths, mentor_assignment, mentorship, trainee_trajectory, trajectory_editor
+from handlers.users import admin, role_permissions, user_activation, user_edit
 from middlewares.bot_middleware import BotMiddleware
 from middlewares.company_middleware import CompanyMiddleware
-from utils.bot.errors import router as error_router
-from utils.validation.config import validate_env_vars
-from utils.logger import logger, log_format
+from middlewares.db_middleware import DatabaseMiddleware
+from middlewares.role_middleware import RoleMiddleware
 from utils.bot.commands import set_bot_commands
+from utils.bot.errors import router as error_router
+from utils.logger import log_format, logger
+from utils.validation.config import validate_env_vars
 
 # Настраиваем root logger с московским временем (для aiogram и других библиотек)
 root_logger = logging.getLogger()
@@ -66,11 +67,12 @@ dp.update.middleware(BotMiddleware())
 dp.update.middleware(CompanyMiddleware())  # Проверка подписки компании
 dp.update.middleware(RoleMiddleware())
 
+
 async def main():
     if not validate_env_vars():
         logger.critical("Ошибка проверки переменных окружения. Выход...")
         return
-    
+
     try:
         # Инициализация базы данных
         logger.info("Инициализация базы данных...")
@@ -78,21 +80,23 @@ async def main():
 
         # Исправление прав доступа к базе знаний (если нужно)
         logger.info("Проверка прав доступа к базе знаний...")
-        from database.db import fix_knowledge_base_permissions, fix_recruiter_take_tests_permission, async_session
+        from database.db import async_session, fix_knowledge_base_permissions, fix_recruiter_take_tests_permission
+
         async with async_session() as session:
             await fix_knowledge_base_permissions(session)
             await fix_recruiter_take_tests_permission(session)
             await session.commit()
-        
+
         # Установка команд бота
         logger.info("Настройка команд бота...")
         await set_bot_commands(bot)
-        
+
         # Запуск планировщика задач для проверки подписок
         logger.info("Запуск планировщика задач...")
         from utils.bot.scheduler import start_scheduler
+
         scheduler = start_scheduler(bot)
-        
+
         # Запуск бота
         logger.info("Запуск бота...")
         await bot.delete_webhook(drop_pending_updates=True)
@@ -106,7 +110,6 @@ async def main():
         logger.info("Бот остановлен")
 
 
-
 if __name__ == "__main__":
     try:
         asyncio.run(main())
@@ -114,4 +117,4 @@ if __name__ == "__main__":
         logger.info("Бот остановлен по прерыванию с клавиатуры")
     except Exception as e:
         logger.critical(f"Непредвиденная ошибка: {e}")
-        sys.exit(1) 
+        sys.exit(1)

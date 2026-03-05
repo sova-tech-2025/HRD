@@ -8,6 +8,7 @@ from utils.logger import logger
 
 load_dotenv()
 
+
 def get_required_env(name: str) -> str:
     """Получает обязательную переменную окружения или завершает программу при её отсутствии"""
 
@@ -16,6 +17,7 @@ def get_required_env(name: str) -> str:
         logger.critical(f"Обязательная переменная окружения {name} не задана")
         sys.exit(1)
     return value
+
 
 BOT_TOKEN = get_required_env("BOT_TOKEN")
 
@@ -53,7 +55,7 @@ INVITE_CODE_LENGTH = int(os.getenv("INVITE_CODE_LENGTH", "10"))
 INVITE_CODE_PREFIX = os.getenv("INVITE_CODE_PREFIX", "")
 
 # Дни предупреждения об окончании подписки
-SUBSCRIPTION_WARNING_DAYS = [int(d) for d in os.getenv("SUBSCRIPTION_WARNING_DAYS", "3,7,14").split(",")] 
+SUBSCRIPTION_WARNING_DAYS = [int(d) for d in os.getenv("SUBSCRIPTION_WARNING_DAYS", "3,7,14").split(",")]
 
 # =================================================================
 # МЕДИА РЕСУРСЫ
@@ -65,7 +67,9 @@ _DEFAULT_MY_TESTS_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "tests" / "my_t
 _DEFAULT_MENTOR_PANEL_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "mentor_panel" / "mentor_panel.png"
 _DEFAULT_MENTOR_MENU_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "mentor_menu" / "mentor_main_menu.png"
 _DEFAULT_TRAINEE_MENU_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "trainee_menu" / "trainee_main_menu.png"
-_DEFAULT_TRAINEE_TRAJECTORY_IMAGE_PATH = _BASE_DIR / "assets" / "images" / "trainee_trajectory" / "trajectory_banner.png"
+_DEFAULT_TRAINEE_TRAJECTORY_IMAGE_PATH = (
+    _BASE_DIR / "assets" / "images" / "trainee_trajectory" / "trajectory_banner.png"
+)
 
 MAIN_MENU_IMAGE_FILE_ID = os.getenv("MAIN_MENU_IMAGE_FILE_ID")
 MAIN_MENU_IMAGE_URL = os.getenv("MAIN_MENU_IMAGE_URL")

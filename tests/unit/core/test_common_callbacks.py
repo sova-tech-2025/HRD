@@ -1,6 +1,8 @@
 """Тесты callback-хэндлеров из handlers/core/common.py"""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 def make_callback(user_id=123, username="testuser"):
@@ -29,8 +31,8 @@ class FakeRole:
 
 # --- callback_trainee_profile ---
 
-class TestCallbackTraineeProfile:
 
+class TestCallbackTraineeProfile:
     @pytest.mark.asyncio
     async def test_inactive_user_blocked(self):
         """Деактивированный пользователь не может открыть профиль"""
@@ -77,13 +79,17 @@ class TestCallbackTraineeProfile:
         mock_fmt.assert_awaited_once_with(user, session)
         callback.message.answer.assert_awaited_once()
         call_kwargs = callback.message.answer.call_args
-        assert "<b>Профиль</b>" in call_kwargs.args or call_kwargs.kwargs.get("text") == "<b>Профиль</b>" or "<b>Профиль</b>" == call_kwargs[0][0]
+        assert (
+            "<b>Профиль</b>" in call_kwargs.args
+            or call_kwargs.kwargs.get("text") == "<b>Профиль</b>"
+            or "<b>Профиль</b>" == call_kwargs[0][0]
+        )
 
 
 # --- callback_trainee_help ---
 
-class TestCallbackTraineeHelp:
 
+class TestCallbackTraineeHelp:
     @pytest.mark.asyncio
     async def test_inactive_user_blocked(self):
         """Деактивированный пользователь не может открыть помощь"""

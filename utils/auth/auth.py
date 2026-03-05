@@ -1,10 +1,10 @@
 import os
 
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import get_user_by_tg_id, get_user_by_id, get_user_roles, get_company_by_id
+from database.db import get_company_by_id, get_user_by_id, get_user_by_tg_id, get_user_roles
 from utils.logger import log_user_action, log_user_error
 from utils.timezone import moscow_now
 
@@ -20,23 +20,28 @@ async def validate_user_access(session: AsyncSession, user) -> tuple[bool, str |
         return False, "Твой аккаунт деактивирован. Обратись к администратору.", None
 
     if not user.company_id:
-        return False, (
-            "❌ Ты не привязан ни к одной компании.\n\n"
-            "Обратись к администратору."
-        ), None
+        return False, ("❌ Ты не привязан ни к одной компании.\n\nОбратись к администратору."), None
 
     company = await get_company_by_id(session, user.company_id)
     if company and not company.subscribe:
-        return False, (
-            "❌ Подписка компании истекла (заморожена).\n\n"
-            "Обратись к администратору компании для продления подписки."
-        ), None
+        return (
+            False,
+            (
+                "❌ Подписка компании истекла (заморожена).\n\n"
+                "Обратись к администратору компании для продления подписки."
+            ),
+            None,
+        )
 
     if company and company.finish_date and company.finish_date < moscow_now():
-        return False, (
-            "❌ Подписка компании истекла (заморожена).\n\n"
-            "Обратись к администратору компании для продления подписки."
-        ), None
+        return (
+            False,
+            (
+                "❌ Подписка компании истекла (заморожена).\n\n"
+                "Обратись к администратору компании для продления подписки."
+            ),
+            None,
+        )
 
     roles = await get_user_roles(session, user.id)
     if not roles:
@@ -55,9 +60,9 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
             await state.clear()
             await message.answer(
                 "👀 Ты давно не заходил\n\nДля безопасности твоя сессия завершена. Пожалуйста, обновись",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Войти заново", callback_data="login_again")]
-                ])
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text="Войти заново", callback_data="login_again")]]
+                ),
             )
             return False
 
@@ -74,10 +79,7 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
             # Проверка наличия компании и подписки
             if not user.company_id:
                 await state.clear()
-                await message.answer(
-                    "❌ Ты не привязан ни к одной компании.\n\n"
-                    "Обратись к администратору."
-                )
+                await message.answer("❌ Ты не привязан ни к одной компании.\n\nОбратись к администратору.")
                 return False
 
             # Проверка подписки компании (используем явный запрос вместо lazy loading)
@@ -116,10 +118,7 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
 
         # Проверка наличия компании
         if not user.company_id:
-            await message.answer(
-                "❌ Ты не привязан ни к одной компании.\n\n"
-                "Обратись к администратору."
-            )
+            await message.answer("❌ Ты не привязан ни к одной компании.\n\nОбратись к администратору.")
             return False
 
         # Проверка подписки компании (используем явный запрос вместо lazy loading)
@@ -157,14 +156,14 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
             role=primary_role,
             is_authenticated=True,
             auth_time=message.date.timestamp(),
-            company_id=user.company_id  # КРИТИЧНО: сохраняем company_id для изоляции!
+            company_id=user.company_id,  # КРИТИЧНО: сохраняем company_id для изоляции!
         )
 
         log_user_action(
             message.from_user.id,
             message.from_user.username,
             "auto authentication",
-            {"role": primary_role, "user_id": user.id, "company_id": user.company_id}
+            {"role": primary_role, "user_id": user.id, "company_id": user.company_id},
         )
 
         return True

@@ -18,7 +18,6 @@ from tests.e2e.helpers.waiters import (
     wait_between_actions,
 )
 
-
 pytestmark = [
     pytest.mark.order(2),
     pytest.mark.timeout(300),
@@ -51,30 +50,22 @@ async def take_test_via_trajectory(
         Текст финального сообщения с результатом.
     """
     # Открываем траекторию
-    resp = await trainee.send_and_wait(
-        "Траектория обучения 📖", pattern="[Тт]раектори|этап|Этап"
-    )
+    resp = await trainee.send_and_wait("Траектория обучения 📖", pattern="[Тт]раектори|этап|Этап")
 
     # Ищем нужный этап
-    stage_btn = trainee.find_button_data(
-        resp, text_contains=stage_name, data_prefix="select_stage:"
-    )
+    stage_btn = trainee.find_button_data(resp, text_contains=stage_name, data_prefix="select_stage:")
     if not stage_btn:
         # Этап может быть уже открыт в тексте — ищем любую кнопку этапа
         all_stage_btns = trainee.find_all_buttons_data(resp, data_prefix="select_stage:")
         assert all_stage_btns, f"No stage buttons found. Message: {(resp.text or '')[:300]}"
         stage_btn = all_stage_btns[0][1]
 
-    resp = await trainee.click_and_wait(
-        resp, data=stage_btn, wait_pattern="сессия|[Сс]ессия|тест|Тест"
-    )
+    resp = await trainee.click_and_wait(resp, data=stage_btn, wait_pattern="сессия|[Сс]ессия|тест|Тест")
 
     # Сначала нажимаем на сессию (UI показывает сессии, потом тесты)
     session_btn = trainee.find_button_data(resp, data_prefix="select_session:")
     if session_btn:
-        resp = await trainee.click_and_wait(
-            resp, data=session_btn, wait_pattern="тест|Тест"
-        )
+        resp = await trainee.click_and_wait(resp, data=session_btn, wait_pattern="тест|Тест")
 
     # Ищем тест: кнопки показывают "Тест N" (не имя теста)
     # Используем data_prefix и test_index
@@ -88,18 +79,14 @@ async def take_test_via_trajectory(
 
     assert test_btn, f"Test button not found (looking for '{test_name}'). Buttons: {trainee.get_button_texts(resp)}"
 
-    resp = await trainee.click_and_wait(
-        resp, data=test_btn, wait_pattern="[Нн]ачать|[Пп]ройти|тест|вопрос"
-    )
+    resp = await trainee.click_and_wait(resp, data=test_btn, wait_pattern="[Нн]ачать|[Пп]ройти|тест|вопрос")
 
     # Нажимаем "Начать тест" если есть карточка теста
     start_btn = trainee.find_button_data(resp, data_prefix="take_test:")
     if not start_btn:
         start_btn = trainee.find_button_data(resp, data_prefix="start_test:")
     if start_btn:
-        resp = await trainee.click_and_wait(
-            resp, data=start_btn, wait_pattern="вопрос|Вопрос|\\?"
-        )
+        resp = await trainee.click_and_wait(resp, data=start_btn, wait_pattern="вопрос|Вопрос|\\?")
 
     # Отвечаем на вопрос (single_choice: нажимаем кнопку с правильным ответом)
     answer_btn = trainee.find_button_data(resp, data_prefix="answer:")
@@ -111,8 +98,7 @@ async def take_test_via_trajectory(
         else:
             answer_data = all_answers[0][1]
         resp = await trainee.click_and_wait(
-            resp, data=answer_data,
-            wait_pattern="результат|[Тт]ест.*пройден|балл|Балл|Набрано|Поздравля|завершён"
+            resp, data=answer_data, wait_pattern="результат|[Тт]ест.*пройден|балл|Балл|Набрано|Поздравля|завершён"
         )
 
     return resp.text or ""
@@ -126,9 +112,7 @@ async def open_mentor_stage(
     """Наставник открывает этап для стажёра."""
     await wait_between_actions()
 
-    resp = await mentor.send_and_wait(
-        "Мои стажеры 👥", pattern="стажер|стажёр|Стажёр"
-    )
+    resp = await mentor.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр|Стажёр")
 
     # Выбираем стажёра
     trainee_btn = mentor.find_button_data(
@@ -138,16 +122,12 @@ async def open_mentor_stage(
     )
     assert trainee_btn, f"Trainee '{trainee_name}' not found in mentor's list"
 
-    resp = await mentor.click_and_wait(
-        resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка"
-    )
+    resp = await mentor.click_and_wait(resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка")
 
     # Переходим в управление этапами
     stages_btn = mentor.find_button_data(resp, data_prefix="manage_stages:")
     if stages_btn:
-        resp = await mentor.click_and_wait(
-            resp, data=stages_btn, wait_pattern="[Ээ]тап|[Оо]ткрыть|[Зз]акрыть"
-        )
+        resp = await mentor.click_and_wait(resp, data=stages_btn, wait_pattern="[Ээ]тап|[Оо]ткрыть|[Зз]акрыть")
 
     # Ищем кнопку открытия нужного этапа
     open_btn = mentor.find_button_data(
@@ -157,9 +137,7 @@ async def open_mentor_stage(
     )
 
     if open_btn:
-        resp = await mentor.click_and_wait(
-            resp, data=open_btn, wait_pattern="открыт|Открыт|успешно"
-        )
+        resp = await mentor.click_and_wait(resp, data=open_btn, wait_pattern="открыт|Открыт|успешно")
     # Если кнопки нет — этап уже открыт (🔒 Закрыть) или завершён (✅)
 
     return resp
@@ -173,9 +151,7 @@ async def close_mentor_stage(
     """Наставник закрывает этап для стажёра."""
     await wait_between_actions()
 
-    resp = await mentor.send_and_wait(
-        "Мои стажеры 👥", pattern="стажер|стажёр|Стажёр"
-    )
+    resp = await mentor.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр|Стажёр")
 
     # Выбираем стажёра
     trainee_btn = mentor.find_button_data(
@@ -185,16 +161,12 @@ async def close_mentor_stage(
     )
     assert trainee_btn, f"Trainee '{trainee_name}' not found"
 
-    resp = await mentor.click_and_wait(
-        resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка"
-    )
+    resp = await mentor.click_and_wait(resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка")
 
     # Управление этапами
     stages_btn = mentor.find_button_data(resp, data_prefix="manage_stages:")
     if stages_btn:
-        resp = await mentor.click_and_wait(
-            resp, data=stages_btn, wait_pattern="[Ээ]тап|[Оо]ткрыть|[Зз]акрыть"
-        )
+        resp = await mentor.click_and_wait(resp, data=stages_btn, wait_pattern="[Ээ]тап|[Оо]ткрыть|[Зз]акрыть")
 
     # Ищем кнопку закрытия этапа
     close_btn = mentor.find_button_data(
@@ -209,14 +181,9 @@ async def close_mentor_stage(
         already_closed = any(f"Открыть этап {stage_number}" in b for b in buttons)
         if completed or already_closed:
             return resp
-    assert close_btn, (
-        f"Close button for stage {stage_number} not found. "
-        f"Buttons: {mentor.get_button_texts(resp)}"
-    )
+    assert close_btn, f"Close button for stage {stage_number} not found. Buttons: {mentor.get_button_texts(resp)}"
 
-    resp = await mentor.click_and_wait(
-        resp, data=close_btn, wait_pattern="Название траектории|Какой этап"
-    )
+    resp = await mentor.click_and_wait(resp, data=close_btn, wait_pattern="Название траектории|Какой этап")
 
     return resp
 
@@ -241,15 +208,11 @@ class TestScenario1_TraineeFallbackAccess:
     и кнопки навигации пропадут).
     """
 
-    async def test_step1_mentor_opens_stage1(
-        self, mentor: BotClient, shared_state: dict
-    ):
+    async def test_step1_mentor_opens_stage1(self, mentor: BotClient, shared_state: dict):
         """Наставник открывает этап 1 для Стажёра 1."""
         await open_mentor_stage(mentor, "Стажёров Первый", stage_number=1)
 
-    async def test_step2_delete_trainee_test_access(
-        self, e2e_db: asyncpg.Connection, shared_state: dict
-    ):
+    async def test_step2_delete_trainee_test_access(self, e2e_db: asyncpg.Connection, shared_state: dict):
         """
         SQL: Удаляем ВСЕ записи TraineeTestAccess для Стажёра 1.
 
@@ -268,14 +231,11 @@ class TestScenario1_TraineeFallbackAccess:
         """)
         deleted_count = int(result.split()[-1])
         assert deleted_count > 0, (
-            "No TraineeTestAccess records found for trainee1. "
-            "Stage opening may not have created them."
+            "No TraineeTestAccess records found for trainee1. Stage opening may not have created them."
         )
         shared_state["trainee1_deleted_access_count"] = deleted_count
 
-    async def test_step3_trainee1_takes_test_via_fallback(
-        self, trainee1: BotClient, shared_state: dict
-    ):
+    async def test_step3_trainee1_takes_test_via_fallback(self, trainee1: BotClient, shared_state: dict):
         """
         КРИТИЧЕСКАЯ ПРОВЕРКА: Стажёр 1 проходит тест БЕЗ TraineeTestAccess,
         используя fallback на структуру траектории (тест в открытом этапе).
@@ -324,23 +284,21 @@ class TestScenario2_EmployeeAccess:
     Для воспроизведения: устанавливаем creator_id = NULL через SQL.
     """
 
-    async def test_step1_mentor_opens_all_stages_for_trainee2(
-        self, mentor: BotClient, shared_state: dict
-    ):
+    async def test_step1_mentor_opens_all_stages_for_trainee2(self, mentor: BotClient, shared_state: dict):
         """Наставник открывает все этапы для Стажёра 2."""
         await open_mentor_stage(mentor, "Стажёров Второй", stage_number=1)
         await wait_between_actions()
         await open_mentor_stage(mentor, "Стажёров Второй", stage_number=2)
 
-    async def test_step2_trainee2_passes_all_tests(
-        self, trainee2: BotClient, shared_state: dict
-    ):
+    async def test_step2_trainee2_passes_all_tests(self, trainee2: BotClient, shared_state: dict):
         """Стажёр 2 проходит все тесты во всех этапах."""
         await wait_between_actions()
 
         # Тест 1: E2E Тест Кофе (этап 1)
         result = await take_test_via_trajectory(
-            trainee2, stage_name="Базовые", test_name="E2E Тест Кофе",
+            trainee2,
+            stage_name="Базовые",
+            test_name="E2E Тест Кофе",
             correct_answer_index=1,
         )
         assert not contains_access_denied(result)
@@ -349,8 +307,11 @@ class TestScenario2_EmployeeAccess:
 
         # Тест 2: E2E Тест Сервис (этап 2, тест 1 в сессии)
         result = await take_test_via_trajectory(
-            trainee2, stage_name="Продвинутые", test_name="E2E Тест Сервис",
-            correct_answer_index=1, test_index=0,
+            trainee2,
+            stage_name="Продвинутые",
+            test_name="E2E Тест Сервис",
+            correct_answer_index=1,
+            test_index=0,
         )
         assert not contains_access_denied(result)
 
@@ -358,20 +319,19 @@ class TestScenario2_EmployeeAccess:
 
         # Тест 3: E2E Тест Гигиена (этап 2, тест 2 в сессии)
         result = await take_test_via_trajectory(
-            trainee2, stage_name="Продвинутые", test_name="E2E Тест Гигиена",
-            correct_answer_index=1, test_index=1,
+            trainee2,
+            stage_name="Продвинутые",
+            test_name="E2E Тест Гигиена",
+            correct_answer_index=1,
+            test_index=1,
         )
         assert not contains_access_denied(result)
 
-    async def test_step3_mentor_assigns_attestation(
-        self, mentor: BotClient, shared_state: dict
-    ):
+    async def test_step3_mentor_assigns_attestation(self, mentor: BotClient, shared_state: dict):
         """Наставник назначает аттестацию для Стажёра 2."""
         await wait_between_actions()
 
-        resp = await mentor.send_and_wait(
-            "Мои стажеры 👥", pattern="стажер|стажёр"
-        )
+        resp = await mentor.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
 
         # Выбираем стажёра 2
         trainee_btn = mentor.find_button_data(
@@ -388,73 +348,53 @@ class TestScenario2_EmployeeAccess:
         )
 
         # Нажимаем "Назначить аттестацию"
-        att_btn = mentor.find_button_data(
-            resp, data_prefix="view_trainee_attestation:"
-        )
+        att_btn = mentor.find_button_data(resp, data_prefix="view_trainee_attestation:")
         assert att_btn, f"Attestation button not found. Buttons: {mentor.get_button_texts(resp)}"
 
         resp = await mentor.click_and_wait(
-            resp, data=att_btn,
-            wait_pattern="руководител|[Рр]уководител|[Вв]ыбери|менеджер|назначить"
+            resp, data=att_btn, wait_pattern="руководител|[Рр]уководител|[Вв]ыбери|менеджер|назначить"
         )
 
         # Выбираем руководителя
-        manager_btn = mentor.find_button_data(
-            resp, data_prefix="select_manager_for_attestation:"
-        )
+        manager_btn = mentor.find_button_data(resp, data_prefix="select_manager_for_attestation:")
         assert manager_btn, "Manager button not found for attestation"
 
-        resp = await mentor.click_and_wait(
-            resp, data=manager_btn,
-            wait_pattern="Подтвердить|подтверд|назначить"
-        )
+        resp = await mentor.click_and_wait(resp, data=manager_btn, wait_pattern="Подтвердить|подтверд|назначить")
 
         # Подтверждаем назначение
         resp = await mentor.click_and_wait(
-            resp, data=b"confirm_attestation_assignment",
-            wait_pattern="назначена|успешно|аттестация"
+            resp, data=b"confirm_attestation_assignment", wait_pattern="назначена|успешно|аттестация"
         )
 
-    async def test_step4_manager_conducts_attestation(
-        self, manager: BotClient, shared_state: dict
-    ):
+    async def test_step4_manager_conducts_attestation(self, manager: BotClient, shared_state: dict):
         """Руководитель проводит аттестацию: отвечает на все вопросы максимальным баллом."""
         await wait_between_actions()
 
         # Открываем меню аттестаций
-        resp = await manager.send_and_wait(
-            "Аттестация ✔️", pattern="[Аа]ттестац|стажер"
-        )
+        resp = await manager.send_and_wait("Аттестация ✔️", pattern="[Аа]ттестац|стажер")
 
         # Выбираем стажёра для аттестации
-        att_btn = (
-            manager.find_button_data(resp, text_contains="Второй", data_prefix="select_trainee_attestation:")
-            or manager.find_button_data(resp, text_contains="Второй", data_prefix="manage_attestation:")
-        )
+        att_btn = manager.find_button_data(
+            resp, text_contains="Второй", data_prefix="select_trainee_attestation:"
+        ) or manager.find_button_data(resp, text_contains="Второй", data_prefix="manage_attestation:")
         if not att_btn:
             # Берём первую аттестацию
-            att_btn = (
-                manager.find_button_data(resp, data_prefix="select_trainee_attestation:")
-                or manager.find_button_data(resp, data_prefix="manage_attestation:")
-            )
+            att_btn = manager.find_button_data(
+                resp, data_prefix="select_trainee_attestation:"
+            ) or manager.find_button_data(resp, data_prefix="manage_attestation:")
         assert att_btn, "Attestation assignment not found"
 
-        resp = await manager.click_and_wait(
-            resp, data=att_btn, wait_pattern="[Нн]ачать|аттестац"
-        )
+        resp = await manager.click_and_wait(resp, data=att_btn, wait_pattern="[Нн]ачать|аттестац")
 
         # Начинаем аттестацию
         start_btn = manager.find_button_data(resp, data_prefix="start_attestation:")
         assert start_btn, "Start attestation button not found"
 
-        resp = await manager.click_and_wait(
-            resp, data=start_btn, wait_pattern="[Дд]а|[Пп]одтверд|[Нн]ачать"
-        )
+        resp = await manager.click_and_wait(resp, data=start_btn, wait_pattern="[Дд]а|[Пп]одтверд|[Нн]ачать")
 
         # Подтверждаем начало
         resp = await manager.click_and_wait(
-            resp, data=b"confirm_start_attestation",
-            wait_pattern="вопрос|Вопрос|балл|оцен"
+            resp, data=b"confirm_start_attestation", wait_pattern="вопрос|Вопрос|балл|оцен"
         )
 
         # Отвечаем на все вопросы максимальным баллом
@@ -479,9 +419,7 @@ class TestScenario2_EmployeeAccess:
             f"Attestation not marked as passed: {final_text[:300]}"
         )
 
-    async def test_step5_trainee2_becomes_employee(
-        self, trainee2: BotClient, shared_state: dict
-    ):
+    async def test_step5_trainee2_becomes_employee(self, trainee2: BotClient, shared_state: dict):
         """Стажёр 2 нажимает 'Стать сотрудником'."""
         await wait_between_actions(3.0)
 
@@ -501,19 +439,14 @@ class TestScenario2_EmployeeAccess:
 
         if target_msg and become_btn:
             resp = await trainee2.click_and_wait(
-                target_msg, data=become_btn,
-                wait_pattern="сотрудник|Сотрудник|Поздравля|обновить"
+                target_msg, data=become_btn, wait_pattern="сотрудник|Сотрудник|Поздравля|обновить"
             )
         else:
             # Может уже быть сотрудником или уведомление было раньше
             # Пробуем /start чтобы обновить меню
-            resp = await trainee2.send_and_wait(
-                "/start", pattern="меню|[Мм]ой профиль|Сотрудник"
-            )
+            resp = await trainee2.send_and_wait("/start", pattern="меню|[Мм]ой профиль|Сотрудник")
 
-    async def test_step6_set_null_creator_id(
-        self, e2e_db: asyncpg.Connection, shared_state: dict
-    ):
+    async def test_step6_set_null_creator_id(self, e2e_db: asyncpg.Connection, shared_state: dict):
         """
         SQL: Устанавливаем creator_id = NULL для теста "E2E Тест Кофе".
 
@@ -525,13 +458,9 @@ class TestScenario2_EmployeeAccess:
             UPDATE tests SET creator_id = NULL
             WHERE name = 'E2E Тест Кофе'
         """)
-        assert "UPDATE 1" in result, (
-            f"Failed to nullify creator_id on 'E2E Тест Кофе': {result}"
-        )
+        assert "UPDATE 1" in result, f"Failed to nullify creator_id on 'E2E Тест Кофе': {result}"
 
-    async def test_step7_employee_can_access_test_with_null_creator(
-        self, trainee2: BotClient, shared_state: dict
-    ):
+    async def test_step7_employee_can_access_test_with_null_creator(self, trainee2: BotClient, shared_state: dict):
         """
         КРИТИЧЕСКАЯ ПРОВЕРКА: Сотрудник может открыть тест с creator_id = NULL
         через "Мои тесты 📋".
@@ -542,9 +471,7 @@ class TestScenario2_EmployeeAccess:
         """
         await wait_between_actions()
 
-        resp = await trainee2.send_and_wait(
-            "Мои тесты 📋", pattern="тест|Тест|Нет тестов|пусто"
-        )
+        resp = await trainee2.send_and_wait("Мои тесты 📋", pattern="тест|Тест|Нет тестов|пусто")
 
         text = resp.text or ""
 
@@ -554,18 +481,15 @@ class TestScenario2_EmployeeAccess:
         )
 
         # Пробуем открыть конкретный тест с creator_id = NULL
-        test_btn = trainee2.find_button_data(
-            resp, text_contains="Кофе", data_prefix="test:"
-        )
+        test_btn = trainee2.find_button_data(resp, text_contains="Кофе", data_prefix="test:")
         if not test_btn:
             # Попробуем другие варианты кнопок
-            test_btn = trainee2.find_button_data(
-                resp, text_contains="Кофе", data_prefix="take_test:"
-            )
+            test_btn = trainee2.find_button_data(resp, text_contains="Кофе", data_prefix="take_test:")
 
         if test_btn:
             resp = await trainee2.click_and_wait(
-                resp, data=test_btn,
+                resp,
+                data=test_btn,
                 wait_pattern="тест|результат|балл|Кофе|доступ|пройден",
                 timeout=10.0,
             )

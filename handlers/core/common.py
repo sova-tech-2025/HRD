@@ -1,17 +1,27 @@
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import get_user_by_tg_id, get_user_roles, check_user_permission
-from utils.auth.auth import check_auth
+from database.db import check_user_permission, get_user_by_tg_id, get_user_roles
 from keyboards.keyboards import format_help_message, get_menu_by_role
-from utils.handlers.user import get_validated_user
-from utils.handlers.callback import cleanup_callback
-from utils.logger import logger, log_user_action
-from utils.messages.common import format_profile_text, get_main_menu_text, get_reload_menu_text, get_reload_inline_menu_text
+from utils.auth.auth import check_auth
 from utils.bot.roles import get_primary_role
+from utils.handlers.callback import cleanup_callback
+from utils.handlers.user import get_validated_user
+from utils.logger import log_user_action, logger
+from utils.messages.common import (
+    format_profile_text,
+    get_main_menu_text,
+    get_reload_inline_menu_text,
+    get_reload_menu_text,
+)
 
 router = Router()
 
@@ -52,9 +62,9 @@ async def cmd_profile(message: Message, state: FSMContext, session: AsyncSession
         return
 
     profile_text = await format_profile_text(user, session)
-    profile_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
-    ])
+    profile_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]]
+    )
     await message.answer(profile_text, parse_mode="HTML", reply_markup=profile_keyboard)
 
 
@@ -66,6 +76,7 @@ async def button_profile(message: Message, state: FSMContext, session: AsyncSess
 @router.message(F.text.in_(["Помощь", "❓ Помощь", "Помощь ❓"]))
 async def button_help(message: Message, state: FSMContext, session: AsyncSession):
     await cmd_help(message, state, session)
+
 
 @router.message(F.text == "☰ Главное меню")
 async def cmd_inline_main_menu(message: Message, state: FSMContext, session: AsyncSession):
@@ -91,7 +102,7 @@ async def cmd_inline_main_menu(message: Message, state: FSMContext, session: Asy
                 photo=photo_source,
                 caption=main_menu_text,
                 parse_mode="HTML",
-                reply_markup=keyboard
+                reply_markup=keyboard,
             )
         except Exception as e:
             logger.warning(f"Не удалось отправить фото меню: {e}")
@@ -132,18 +143,14 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext, session:
                     photo=photo_source,
                     caption=main_menu_text,
                     parse_mode="HTML",
-                    reply_markup=keyboard
+                    reply_markup=keyboard,
                 )
                 message_sent = True
             except Exception as photo_error:
                 logger.warning(f"Не удалось отправить изображение главного меню: {photo_error}")
 
         if not message_sent:
-            await callback.message.answer(
-                main_menu_text,
-                parse_mode="HTML",
-                reply_markup=keyboard
-            )
+            await callback.message.answer(main_menu_text, parse_mode="HTML", reply_markup=keyboard)
 
         await cleanup_callback(callback, state)
         log_user_action(callback.from_user.id, callback.from_user.username, "returned_to_main_menu")
@@ -174,11 +181,7 @@ async def process_reload_menu(callback: CallbackQuery, state: FSMContext, sessio
             except Exception:
                 pass
 
-        await callback.message.answer(
-            reload_text,
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
+        await callback.message.answer(reload_text, parse_mode="HTML", reply_markup=keyboard)
 
         await cleanup_callback(callback, state)
         log_user_action(callback.from_user.id, callback.from_user.username, "reloaded_menu")
@@ -205,9 +208,9 @@ async def callback_trainee_profile(callback: CallbackQuery, session: AsyncSessio
     await callback.message.answer(
         profile_text,
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
-        ])
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]]
+        ),
     )
     await callback.answer()
 
@@ -232,8 +235,8 @@ async def callback_trainee_help(callback: CallbackQuery, session: AsyncSession):
     await callback.message.answer(
         help_text,
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]
-        ])
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")]]
+        ),
     )
     await callback.answer()

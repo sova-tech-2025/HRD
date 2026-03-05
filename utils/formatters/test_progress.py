@@ -16,7 +16,6 @@
 
 from typing import Optional
 
-
 # Константы для иконок статуса теста
 TEST_ICON_PASSED = "✅"
 TEST_ICON_AVAILABLE = "⏳"
@@ -63,11 +62,7 @@ def format_test_line(test_num: int, test_name: str, icon: str) -> str:
 
 
 def format_test_with_percentage(
-    test_num: int,
-    test_name: str,
-    icon: str,
-    score: Optional[float] = None,
-    max_score: Optional[float] = None
+    test_num: int, test_name: str, icon: str, score: Optional[float] = None, max_score: Optional[float] = None
 ) -> str:
     """
     Форматирует строку теста с процентом выполнения.

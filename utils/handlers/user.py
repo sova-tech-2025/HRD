@@ -1,9 +1,10 @@
 """Хелперы для получения и валидации пользователей."""
+
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.db import get_user_by_tg_id, get_user_by_id, get_user_roles
+from database.db import get_user_by_id, get_user_by_tg_id, get_user_roles
 
 
 async def get_validated_user(session: AsyncSession, callback: CallbackQuery):

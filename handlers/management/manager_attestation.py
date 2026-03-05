@@ -1,25 +1,30 @@
-﻿"""
+"""
 Обработчики для управления аттестациями руководителями (Task 7).
 Включает просмотр назначенных аттестаций, изменение даты/времени, проведение аттестации.
 """
 
-from datetime import datetime
-from utils.timezone import moscow_now
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.db import (
-    get_user_by_tg_id, get_user_by_id, check_user_permission,
-    get_manager_assigned_attestations, update_attestation_schedule, start_attestation_session,
-    get_trainee_attestation_by_id, save_attestation_question_result, complete_attestation_session,
-    get_attestation_by_id, change_trainee_to_employee, create_attestation_result
+    change_trainee_to_employee,
+    check_user_permission,
+    complete_attestation_session,
+    create_attestation_result,
+    get_manager_assigned_attestations,
+    get_trainee_attestation_by_id,
+    get_user_by_tg_id,
+    save_attestation_question_result,
+    start_attestation_session,
+    update_attestation_schedule,
 )
-from utils.auth.auth import check_auth
-from keyboards.keyboards import get_main_menu_keyboard, get_keyboard_by_role
+from keyboards.keyboards import get_main_menu_keyboard
 from states.states import ManagerAttestationStates
+from utils.auth.auth import check_auth
 from utils.logger import log_user_action, log_user_error, logger
+from utils.timezone import moscow_now
 
 router = Router()
 
@@ -27,6 +32,7 @@ router = Router()
 # ===============================
 # Обработчики для Task 7: ЛК руководителя для управления аттестациями
 # ===============================
+
 
 @router.message(F.text.in_(["Аттестация", "Аттестация ✔️"]))
 async def cmd_manager_attestations(message: Message, state: FSMContext, session: AsyncSession):
@@ -47,16 +53,14 @@ async def cmd_manager_attestations(message: Message, state: FSMContext, session:
         has_permission = await check_user_permission(session, user.id, "conduct_attestations")
         if not has_permission:
             await message.answer(
-                "❌ <b>Недостаточно прав</b>\n\n"
-                "У тебя нет прав для проведения аттестаций.\n"
-                "Обратись к администратору.",
-                parse_mode="HTML"
+                "❌ <b>Недостаточно прав</b>\n\nУ тебя нет прав для проведения аттестаций.\nОбратись к администратору.",
+                parse_mode="HTML",
             )
             return
 
         # Получаем список назначенных аттестаций с изоляцией по компании
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assigned_attestations = await get_manager_assigned_attestations(session, user.id, company_id=company_id)
 
         if not assigned_attestations:
@@ -66,15 +70,12 @@ async def cmd_manager_attestations(message: Message, state: FSMContext, session:
                 "У тебя нет назначенных стажеров на аттестацию.\n"
                 "Обратись к наставнику для назначения стажеров.",
                 parse_mode="HTML",
-                reply_markup=get_main_menu_keyboard()
+                reply_markup=get_main_menu_keyboard(),
             )
             return
 
         # Формируем список стажеров согласно ТЗ
-        message_text = (
-            "🔍<b>Аттестация🔍</b>\n"
-            "Ниже список сотрудников, которые готовы пройти аттестацию👇\n\n"
-        )
+        message_text = "🔍<b>Аттестация🔍</b>\nНиже список сотрудников, которые готовы пройти аттестацию👇\n\n"
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
 
@@ -92,25 +93,20 @@ async def cmd_manager_attestations(message: Message, state: FSMContext, session:
             )
 
             # Добавляем кнопку для выбора стажера
-            keyboard.inline_keyboard.append([
-                InlineKeyboardButton(
-                    text=f"{trainee.full_name}",
-                    callback_data=f"select_trainee_attestation:{assignment.id}"
-                )
-            ])
+            keyboard.inline_keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{trainee.full_name}", callback_data=f"select_trainee_attestation:{assignment.id}"
+                    )
+                ]
+            )
 
         message_text += "Выбери стажёра на клавиатуре"
 
         # Кнопка "Назад"
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")
-        ])
+        keyboard.inline_keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")])
 
-        await message.answer(
-            message_text,
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
+        await message.answer(message_text, parse_mode="HTML", reply_markup=keyboard)
 
         log_user_action(user.tg_id, "manager_attestations_opened", "Открыт список назначенных аттестаций")
 
@@ -129,7 +125,7 @@ async def callback_select_trainee_attestation(callback: CallbackQuery, state: FS
 
         # Получаем данные назначенной аттестации
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await callback.message.edit_text("Аттестация не найдена")
@@ -152,19 +148,25 @@ async def callback_select_trainee_attestation(callback: CallbackQuery, state: FS
             f"🟢<b>Время:</b> {assignment.scheduled_time or ''}"
         )
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Начать аттестацию", callback_data=f"start_attestation:{assignment_id}")],
-            [InlineKeyboardButton(text="📅 Изменить дату", callback_data=f"change_attestation_date:{assignment_id}")],
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_attestations")]
-        ])
-
-        await callback.message.edit_text(
-            message_text,
-            parse_mode="HTML",
-            reply_markup=keyboard
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🚀 Начать аттестацию", callback_data=f"start_attestation:{assignment_id}")],
+                [
+                    InlineKeyboardButton(
+                        text="📅 Изменить дату", callback_data=f"change_attestation_date:{assignment_id}"
+                    )
+                ],
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_attestations")],
+            ]
         )
 
-        log_user_action(callback.from_user.id, "trainee_attestation_selected", f"Выбран стажер {trainee.full_name} для управления аттестацией")
+        await callback.message.edit_text(message_text, parse_mode="HTML", reply_markup=keyboard)
+
+        log_user_action(
+            callback.from_user.id,
+            "trainee_attestation_selected",
+            f"Выбран стажер {trainee.full_name} для управления аттестацией",
+        )
 
     except Exception as e:
         await callback.message.edit_text("Произошла ошибка при выборе стажера")
@@ -182,7 +184,7 @@ async def callback_change_attestation_date(callback: CallbackQuery, state: FSMCo
 
         # Получаем данные аттестации
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await callback.message.edit_text("Аттестация не найдена")
@@ -203,13 +205,14 @@ async def callback_change_attestation_date(callback: CallbackQuery, state: FSMCo
             "<b>Укажите новую дату аттестации:</b>"
         )
 
-        await callback.message.edit_text(
-            message_text,
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text(message_text, parse_mode="HTML")
 
         await state.set_state(ManagerAttestationStates.waiting_for_date)
-        log_user_action(callback.from_user.id, "date_change_requested", f"Запрошено изменение даты аттестации для стажера {trainee.full_name}")
+        log_user_action(
+            callback.from_user.id,
+            "date_change_requested",
+            f"Запрошено изменение даты аттестации для стажера {trainee.full_name}",
+        )
 
     except Exception as e:
         await callback.message.edit_text("Произошла ошибка при изменении даты")
@@ -221,16 +224,16 @@ async def process_new_date(message: Message, state: FSMContext, session: AsyncSe
     """Обработчик ввода новой даты (ТЗ шаг 9-10)"""
     try:
         new_date = message.text.strip()
-        
+
         # Сохраняем дату в состоянии
         await state.update_data(new_date=new_date)
-        
+
         state_data = await state.get_data()
         assignment_id = state_data.get("assignment_id")
-        
+
         # Получаем данные аттестации
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await message.answer("Аттестация не найдена")
@@ -251,10 +254,7 @@ async def process_new_date(message: Message, state: FSMContext, session: AsyncSe
             "<b>Укажите новое время аттестации:</b>"
         )
 
-        await message.answer(
-            message_text,
-                parse_mode="HTML"
-            )
+        await message.answer(message_text, parse_mode="HTML")
 
         await state.set_state(ManagerAttestationStates.waiting_for_time)
         log_user_action(message.from_user.id, "date_entered", f"Введена дата: {new_date}")
@@ -269,14 +269,14 @@ async def process_new_time(message: Message, state: FSMContext, session: AsyncSe
     """Обработчик ввода нового времени (ТЗ шаг 11-13)"""
     try:
         new_time = message.text.strip()
-        
+
         state_data = await state.get_data()
         assignment_id = state_data.get("assignment_id")
         new_date = state_data.get("new_date")
-        
+
         # Получаем данные аттестации
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await message.answer("Аттестация не найдена")
@@ -297,21 +297,19 @@ async def process_new_time(message: Message, state: FSMContext, session: AsyncSe
             "🟡<b>Сохранить новую дату и время?</b>"
         )
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Да", callback_data="save_new_schedule"),
-                InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_schedule_change")
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Да", callback_data="save_new_schedule"),
+                    InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_schedule_change"),
+                ]
             ]
-        ])
+        )
 
         # Сохраняем время в состоянии
         await state.update_data(new_time=new_time)
 
-        await message.answer(
-            message_text,
-            parse_mode="HTML",
-            reply_markup=keyboard
-        )
+        await message.answer(message_text, parse_mode="HTML", reply_markup=keyboard)
 
         await state.set_state(ManagerAttestationStates.confirming_schedule)
         log_user_action(message.from_user.id, "time_entered", f"Введено время: {new_time}")
@@ -338,8 +336,8 @@ async def callback_save_new_schedule(callback: CallbackQuery, state: FSMContext,
 
         # Получаем company_id для изоляции
         data = await state.get_data()
-        company_id = data.get('company_id')
-        
+        company_id = data.get("company_id")
+
         # Обновляем расписание аттестации
         success = await update_attestation_schedule(session, assignment_id, new_date, new_time, company_id=company_id)
         if not success:
@@ -348,18 +346,17 @@ async def callback_save_new_schedule(callback: CallbackQuery, state: FSMContext,
 
         # Получаем обновленные данные
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         trainee = assignment.trainee
 
         # Отправляем уведомление стажеру согласно ТЗ (шаг 14) с изоляцией по компании
-        await send_schedule_change_notification_to_trainee(session, callback.message.bot, assignment_id, company_id=company_id)
+        await send_schedule_change_notification_to_trainee(
+            session, callback.message.bot, assignment_id, company_id=company_id
+        )
 
         # Подтверждение руководителю (шаг 15)
-        await callback.message.edit_text(
-            "✅<b>Дата и время успешно изменены</b>",
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text("✅<b>Дата и время успешно изменены</b>", parse_mode="HTML")
 
         # Сразу показываем меню управления (шаг 16)
         message_text = (
@@ -372,17 +369,19 @@ async def callback_save_new_schedule(callback: CallbackQuery, state: FSMContext,
             f"🟢<b>Время:</b> {assignment.scheduled_time}"
         )
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Начать аттестацию", callback_data=f"start_attestation:{assignment_id}")],
-            [InlineKeyboardButton(text="📅 Изменить дату", callback_data=f"change_attestation_date:{assignment_id}")],
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_attestations")]
-        ])
-
-        await callback.message.answer(
-            message_text,
-            parse_mode="HTML",
-            reply_markup=keyboard
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🚀 Начать аттестацию", callback_data=f"start_attestation:{assignment_id}")],
+                [
+                    InlineKeyboardButton(
+                        text="📅 Изменить дату", callback_data=f"change_attestation_date:{assignment_id}"
+                    )
+                ],
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_attestations")],
+            ]
         )
+
+        await callback.message.answer(message_text, parse_mode="HTML", reply_markup=keyboard)
 
         await state.clear()
         log_user_action(callback.from_user.id, "schedule_saved", f"Сохранено новое расписание: {new_date} {new_time}")
@@ -403,7 +402,7 @@ async def callback_start_attestation(callback: CallbackQuery, state: FSMContext,
 
         # Получаем данные аттестации
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await callback.message.edit_text("Аттестация не найдена")
@@ -424,20 +423,22 @@ async def callback_start_attestation(callback: CallbackQuery, state: FSMContext,
             "<b>Начать аттестацию для стажёра?</b>"
         )
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Да", callback_data="confirm_start_attestation"),
-                InlineKeyboardButton(text="❌ Нет", callback_data=f"select_trainee_attestation:{assignment_id}")
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Да", callback_data="confirm_start_attestation"),
+                    InlineKeyboardButton(text="❌ Нет", callback_data=f"select_trainee_attestation:{assignment_id}"),
+                ]
             ]
-        ])
-
-        await callback.message.edit_text(
-            message_text,
-            parse_mode="HTML",
-            reply_markup=keyboard
         )
 
-        log_user_action(callback.from_user.id, "attestation_start_requested", f"Запрошено начало аттестации для стажера {trainee.full_name}")
+        await callback.message.edit_text(message_text, parse_mode="HTML", reply_markup=keyboard)
+
+        log_user_action(
+            callback.from_user.id,
+            "attestation_start_requested",
+            f"Запрошено начало аттестации для стажера {trainee.full_name}",
+        )
 
     except Exception as e:
         await callback.message.edit_text("Произошла ошибка при начале аттестации")
@@ -455,7 +456,7 @@ async def callback_confirm_start_attestation(callback: CallbackQuery, state: FSM
 
         # Получаем данные аттестации
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await callback.message.edit_text("Аттестация не найдена")
@@ -463,17 +464,13 @@ async def callback_confirm_start_attestation(callback: CallbackQuery, state: FSM
 
         # Получаем company_id для изоляции
         data = await state.get_data()
-        company_id = data.get('company_id')
-        
+        company_id = data.get("company_id")
+
         # Начинаем сессию аттестации
         await start_attestation_session(session, assignment_id, company_id=company_id)
 
         # Инициализируем прохождение вопросов
-        await state.update_data(
-            assignment_id=assignment_id,
-            current_question_index=0,
-            answers=[]
-        )
+        await state.update_data(assignment_id=assignment_id, current_question_index=0, answers=[])
 
         # Показываем первый вопрос
         await show_attestation_question(callback, state, session)
@@ -492,7 +489,7 @@ async def show_attestation_question(callback: CallbackQuery, state: FSMContext, 
 
         # Получаем данные аттестации
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         attestation = assignment.attestation
         questions = attestation.questions
@@ -512,17 +509,14 @@ async def show_attestation_question(callback: CallbackQuery, state: FSMContext, 
             "💡 <b>Инструкция:</b> Задай вопрос стажеру голосом, выслушай ответ и введи балл согласно критериям в вопросе."
         )
 
-        await callback.message.edit_text(
-            question_text,
-            parse_mode="HTML"
-        )
+        await callback.message.edit_text(question_text, parse_mode="HTML")
 
         # Руководитель должен задать вопрос стажеру голосом, выслушать ответ,
         # а затем ввести балл (шаги 6-9)
-        
+
         # Ждем ввода балла от руководителя
         await state.set_state(ManagerAttestationStates.waiting_for_score)
-        
+
         log_user_action(callback.from_user.id, "question_shown", f"Показан вопрос {current_index + 1}")
 
     except Exception as e:
@@ -548,7 +542,7 @@ async def process_question_score(message: Message, state: FSMContext, session: A
 
         # Получаем данные аттестации
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         attestation = assignment.attestation
         questions = attestation.questions
@@ -569,21 +563,14 @@ async def process_question_score(message: Message, state: FSMContext, session: A
             return
 
         # Сохраняем ответ
-        answers.append({
-            "question_id": question.id,
-            "score": score,
-            "max_score": question.max_points
-        })
+        answers.append({"question_id": question.id, "score": score, "max_score": question.max_points})
 
         # Переходим к следующему вопросу
         next_index = current_index + 1
-        await state.update_data(
-            current_question_index=next_index,
-            answers=answers
-        )
+        await state.update_data(current_question_index=next_index, answers=answers)
 
         log_user_action(message.from_user.id, "score_entered", f"Введен балл {score} за вопрос {current_index + 1}")
-        
+
         # Подтверждаем принятие балла
         await message.answer(f"✅ Балл {score:.1f} принят за вопрос {current_index + 1}")
 
@@ -591,10 +578,7 @@ async def process_question_score(message: Message, state: FSMContext, session: A
         if next_index < len(questions):
             # Есть еще вопросы
             question = questions[next_index]
-            question_text = (
-                f"<b>Вопрос {next_index + 1}:</b>\n\n"
-                f'"{question.question_text}"\n\n'
-            )
+            question_text = f'<b>Вопрос {next_index + 1}:</b>\n\n"{question.question_text}"\n\n'
 
             await message.answer(question_text, parse_mode="HTML")
         else:
@@ -615,7 +599,7 @@ async def show_attestation_results_message(message: Message, state: FSMContext, 
 
         # Получаем данные аттестации
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         trainee = assignment.trainee
         attestation = assignment.attestation
@@ -627,22 +611,29 @@ async def show_attestation_results_message(message: Message, state: FSMContext, 
 
         # Создаем результат аттестации
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         attestation_result = await create_attestation_result(
-            session, trainee.id, attestation.id, assignment.manager_id,
-            total_score, max_score, is_passed, company_id=company_id
+            session,
+            trainee.id,
+            attestation.id,
+            assignment.manager_id,
+            total_score,
+            max_score,
+            is_passed,
+            company_id=company_id,
         )
 
         # Сохраняем детали по вопросам
         for answer in answers:
             await save_attestation_question_result(
-                session, attestation_result.id, answer["question_id"], 
-                answer["score"], answer["max_score"]
+                session, attestation_result.id, answer["question_id"], answer["score"], answer["max_score"]
             )
 
         # Завершаем сессию аттестации
-        await complete_attestation_session(session, assignment_id, total_score, max_score, is_passed, company_id=company_id)
-        
+        await complete_attestation_session(
+            session, assignment_id, total_score, max_score, is_passed, company_id=company_id
+        )
+
         # Сохраняем все изменения в базу данных
         await session.commit()
 
@@ -661,12 +652,20 @@ async def show_attestation_results_message(message: Message, state: FSMContext, 
 
             # Отправляем результат руководителю
             await message.answer(message_text, parse_mode="HTML")
-            
+
             # Уведомляем стажера об успехе (ТЗ шаг 12-4)
             await send_attestation_success_notification(
-                session, message.bot, trainee, attestation, total_score, attestation.passing_score,
-                assignment.manager.full_name, assignment.manager.username,
-                assignment.scheduled_date, assignment.scheduled_time, company_id
+                session,
+                message.bot,
+                trainee,
+                attestation,
+                total_score,
+                attestation.passing_score,
+                assignment.manager.full_name,
+                assignment.manager.username,
+                assignment.scheduled_date,
+                assignment.scheduled_time,
+                company_id,
             )
 
         else:
@@ -682,28 +681,50 @@ async def show_attestation_results_message(message: Message, state: FSMContext, 
                 f"🟢<b>Время:</b> {assignment.scheduled_time or ''}"
             )
 
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🚀 Начать аттестацию", callback_data=f"start_attestation:{assignment_id}")],
-                [InlineKeyboardButton(text="👨‍💼 Сделать сотрудником", callback_data=f"make_employee_anyway:{assignment_id}")],
-                [InlineKeyboardButton(text="📅 Изменить дату", callback_data=f"change_attestation_date:{assignment_id}")],
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_attestations")]
-            ])
-
-            await message.answer(
-                message_text,
-                parse_mode="HTML",
-                reply_markup=keyboard if not is_passed else None
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🚀 Начать аттестацию", callback_data=f"start_attestation:{assignment_id}"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="👨‍💼 Сделать сотрудником", callback_data=f"make_employee_anyway:{assignment_id}"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="📅 Изменить дату", callback_data=f"change_attestation_date:{assignment_id}"
+                        )
+                    ],
+                    [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_attestations")],
+                ]
             )
 
-            # Уведомляем стажера о провале (ТЗ шаг 12-2)  
+            await message.answer(message_text, parse_mode="HTML", reply_markup=keyboard if not is_passed else None)
+
+            # Уведомляем стажера о провале (ТЗ шаг 12-2)
             await send_attestation_failure_notification(
-                session, message.bot, trainee, attestation, total_score, attestation.passing_score,
-                assignment.manager.full_name, assignment.manager.username,
-                assignment.scheduled_date, assignment.scheduled_time, company_id
+                session,
+                message.bot,
+                trainee,
+                attestation,
+                total_score,
+                attestation.passing_score,
+                assignment.manager.full_name,
+                assignment.manager.username,
+                assignment.scheduled_date,
+                assignment.scheduled_time,
+                company_id,
             )
 
         await state.clear()
-        log_user_action(message.from_user.id, "attestation_completed", f"Завершена аттестация для {trainee.full_name}: {total_score}/{max_score}, пройдена: {is_passed}")
+        log_user_action(
+            message.from_user.id,
+            "attestation_completed",
+            f"Завершена аттестация для {trainee.full_name}: {total_score}/{max_score}, пройдена: {is_passed}",
+        )
 
     except Exception as e:
         await message.answer("Произошла ошибка при показе результатов")
@@ -712,7 +733,10 @@ async def show_attestation_results_message(message: Message, state: FSMContext, 
 
 # Вспомогательные функции для уведомлений
 
-async def send_schedule_change_notification_to_trainee(session: AsyncSession, bot, assignment_id: int, company_id: int = None):
+
+async def send_schedule_change_notification_to_trainee(
+    session: AsyncSession, bot, assignment_id: int, company_id: int = None
+):
     """Отправка уведомления стажеру об изменении даты/времени (ТЗ шаг 14)"""
     try:
         # Получаем assignment с изоляцией по компании
@@ -733,18 +757,25 @@ async def send_schedule_change_notification_to_trainee(session: AsyncSession, bo
             f"🟢<b>Время:</b> {assignment.scheduled_time}"
         )
 
-        await bot.send_message(
-            chat_id=trainee.tg_id,
-            text=notification_text,
-            parse_mode="HTML"
-        )
+        await bot.send_message(chat_id=trainee.tg_id, text=notification_text, parse_mode="HTML")
 
     except Exception as e:
         log_user_error(0, "schedule_change_notification_error", str(e))
 
 
-async def send_attestation_success_notification(session: AsyncSession, bot, trainee, attestation, 
-                                              score, passing_score, manager_name, manager_username, date, time, company_id: int = None):
+async def send_attestation_success_notification(
+    session: AsyncSession,
+    bot,
+    trainee,
+    attestation,
+    score,
+    passing_score,
+    manager_name,
+    manager_username,
+    date,
+    time,
+    company_id: int = None,
+):
     """Уведомление стажеру об успешной аттестации (ТЗ шаг 12-4) с изоляцией по компании"""
     try:
         # Изоляция по компании - проверяем принадлежность стажера
@@ -761,25 +792,31 @@ async def send_attestation_success_notification(session: AsyncSession, bot, trai
             f"🟢<b>Дата:</b> {date or ''}\n"
             f"🟢<b>Время:</b> {time or ''}\n\n"
             "🚀<b>Нажми на кнопку, чтобы стать сотрудником!👇</b>"
-            )
-
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👨‍💼 Стать сотрудником", callback_data="become_employee")]
-        ])
-
-        await bot.send_message(
-            chat_id=trainee.tg_id,
-            text=notification_text,
-            parse_mode="HTML",
-            reply_markup=keyboard
         )
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="👨‍💼 Стать сотрудником", callback_data="become_employee")]]
+        )
+
+        await bot.send_message(chat_id=trainee.tg_id, text=notification_text, parse_mode="HTML", reply_markup=keyboard)
 
     except Exception as e:
         log_user_error(0, "success_notification_error", str(e))
 
 
-async def send_attestation_failure_notification(session: AsyncSession, bot, trainee, attestation,
-                                              score, passing_score, manager_name, manager_username, date, time, company_id: int = None):
+async def send_attestation_failure_notification(
+    session: AsyncSession,
+    bot,
+    trainee,
+    attestation,
+    score,
+    passing_score,
+    manager_name,
+    manager_username,
+    date,
+    time,
+    company_id: int = None,
+):
     """Уведомление стажеру о провале аттестации (ТЗ шаг 12-2) с изоляцией по компании"""
     try:
         # Изоляция по компании - проверяем принадлежность стажера
@@ -798,11 +835,7 @@ async def send_attestation_failure_notification(session: AsyncSession, bot, trai
             "<b>Договорись с руководителем, когда тебе нужно пройти аттестацию повторно</b>"
         )
 
-        await bot.send_message(
-            chat_id=trainee.tg_id,
-            text=notification_text,
-            parse_mode="HTML"
-        )
+        await bot.send_message(chat_id=trainee.tg_id, text=notification_text, parse_mode="HTML")
 
     except Exception as e:
         log_user_error(0, "failure_notification_error", str(e))
@@ -813,34 +846,34 @@ async def callback_make_employee_anyway(callback: CallbackQuery, state: FSMConte
     """Обработчик кнопки 'Сделать сотрудником' при провале аттестации"""
     try:
         await callback.answer()
-        
+
         assignment_id = int(callback.data.split(":")[1])
-        
+
         # Получаем данные аттестации
         data = await state.get_data()
-        company_id = data.get('company_id')
+        company_id = data.get("company_id")
         assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await callback.message.edit_text("Аттестация не найдена")
             return
-            
+
         trainee = assignment.trainee
-        
+
         # Проверяем права руководителя
         manager = await get_user_by_tg_id(session, callback.from_user.id)
         if not manager or manager.id != assignment.manager_id:
             await callback.message.edit_text("❌ У тебя нет прав для изменения статуса этого стажера")
             return
-            
+
         # Получаем company_id для изоляции
         company_id = trainee.company_id if not company_id else company_id
-            
+
         # Меняем роль стажера на сотрудника несмотря на провал с изоляцией по компании
         success = await change_trainee_to_employee(session, trainee.id, None, company_id=company_id)
         if not success:
             await callback.message.edit_text("❌ Ошибка при изменении роли стажера")
             return
-        
+
         # Подтверждение руководителю
         await callback.message.edit_text(
             f"✅ <b>Стажер переведен в сотрудники</b>\n\n"
@@ -848,9 +881,9 @@ async def callback_make_employee_anyway(callback: CallbackQuery, state: FSMConte
             f"👑 <b>Новая роль:</b> Сотрудник\n\n"
             "<i>Стажер переведен в сотрудники по решению руководителя, "
             "несмотря на неуспешную аттестацию.</i>",
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
-        
+
         # Уведомляем стажера о переводе
         await callback.message.bot.send_message(
             chat_id=trainee.tg_id,
@@ -861,12 +894,16 @@ async def callback_make_employee_anyway(callback: CallbackQuery, state: FSMConte
                 "<i>Ты переведён в сотрудники по решению руководителя.</i>\n\n"
                 "🚀 <b>Используй /start чтобы обновить меню</b>"
             ),
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
-        
+
         await state.clear()
-        log_user_action(callback.from_user.id, "employee_anyway", f"Руководитель {manager.full_name} сделал стажера {trainee.full_name} сотрудником несмотря на провал аттестации")
-        
+        log_user_action(
+            callback.from_user.id,
+            "employee_anyway",
+            f"Руководитель {manager.full_name} сделал стажера {trainee.full_name} сотрудником несмотря на провал аттестации",
+        )
+
     except Exception as e:
         await callback.message.edit_text("Произошла ошибка при переводе в сотрудники")
         log_user_error(callback.from_user.id, "make_employee_anyway_error", str(e))
@@ -874,91 +911,89 @@ async def callback_make_employee_anyway(callback: CallbackQuery, state: FSMConte
 
 # Дополнительные обработчики
 
+
 @router.callback_query(F.data == "back_to_attestations")
 async def callback_back_to_attestations(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Возврат к списку аттестаций"""
     try:
         await callback.answer()
         await state.clear()
-        
+
         # Получаем пользователя и проверяем права
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
             await callback.message.edit_text("❌ Пользователь не найден")
             return
-        
+
         # Проверяем права доступа
         has_permission = await check_user_permission(session, user.id, "conduct_attestations")
         if not has_permission:
             await callback.message.edit_text(
-                "❌ <b>Недостаточно прав</b>\n\n"
-                "У тебя нет прав для проведения аттестаций.\n"
-                "Обратись к администратору.",
-                parse_mode="HTML"
+                "❌ <b>Недостаточно прав</b>\n\nУ тебя нет прав для проведения аттестаций.\nОбратись к администратору.",
+                parse_mode="HTML",
             )
             return
-        
+
         # Получаем аттестации для руководителя с изоляцией по компании
         state_data = await state.get_data()
-        company_id = state_data.get('company_id')
+        company_id = state_data.get("company_id")
         manager_attestations = await get_manager_assigned_attestations(session, user.id, company_id=company_id)
-        
+
         if not manager_attestations:
             await callback.message.edit_text(
                 "🔍 <b>Аттестация стажеров</b>\n\n"
                 "❌ У тебя пока нет назначенных аттестаций.\n\n"
                 "Аттестации назначают наставники через кнопку 'Аттестация' в разделе 'Мои стажёры'.",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
-                ])
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]]
+                ),
             )
             return
-        
+
         # Формируем список аттестаций
         attestations_list = []
         for i, attestation_data in enumerate(manager_attestations, 1):
-            trainee = attestation_data['trainee']
-            attestation = attestation_data['attestation']
-            assignment = attestation_data['assignment']
-            
+            trainee = attestation_data["trainee"]
+            attestation = attestation_data["attestation"]
+            assignment = attestation_data["assignment"]
+
             status_text = {
-                'assigned': '🟡 Назначена',
-                'in_progress': '🔄 В процессе',
-                'completed': '✅ Завершена',
-                'failed': '❌ Провалена'
-            }.get(assignment.status, '❓ Неизвестно')
-            
+                "assigned": "🟡 Назначена",
+                "in_progress": "🔄 В процессе",
+                "completed": "✅ Завершена",
+                "failed": "❌ Провалена",
+            }.get(assignment.status, "❓ Неизвестно")
+
             scheduled_info = ""
             if assignment.scheduled_date and assignment.scheduled_time:
                 scheduled_info = f"\n   📅 Дата: {assignment.scheduled_date.strftime('%d.%m.%Y')} в {assignment.scheduled_time.strftime('%H:%M')}"
-            
+
             attestations_list.append(
                 f"<b>{i}. {trainee.full_name}</b>\n"
                 f"   📋 Аттестация: {attestation.name}\n"
                 f"   📊 Статус: {status_text}{scheduled_info}"
             )
-        
+
         attestations_display = "\n\n".join(attestations_list)
-        
+
         # Создаем клавиатуру для выбора аттестации
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
-        
+
         for attestation_data in manager_attestations:
-            assignment = attestation_data['assignment']
-            trainee = attestation_data['trainee']
-            
-            keyboard.inline_keyboard.append([
-                InlineKeyboardButton(
-                    text=f"👤 {trainee.full_name}",
-                    callback_data=f"manage_attestation:{assignment.id}"
-                )
-            ])
-        
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
-        ])
-        
+            assignment = attestation_data["assignment"]
+            trainee = attestation_data["trainee"]
+
+            keyboard.inline_keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"👤 {trainee.full_name}", callback_data=f"manage_attestation:{assignment.id}"
+                    )
+                ]
+            )
+
+        keyboard.inline_keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
+
         await callback.message.edit_text(
             f"🔍 <b>Аттестация стажеров</b>\n\n"
             f"👨‍💼 <b>Руководитель:</b> {user.full_name}\n"
@@ -966,7 +1001,7 @@ async def callback_back_to_attestations(callback: CallbackQuery, state: FSMConte
             f"{attestations_display}\n\n"
             "Выбери стажера для управления аттестацией:",
             reply_markup=keyboard,
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
 
     except Exception as e:
@@ -979,24 +1014,29 @@ async def callback_cancel_schedule_change(callback: CallbackQuery, state: FSMCon
     """Отмена изменения расписания"""
     try:
         await callback.answer()
-        
+
         state_data = await state.get_data()
         assignment_id = state_data.get("assignment_id")
-        
+
         await state.clear()
         await state.update_data(assignment_id=assignment_id)
-        
+
         # Возвращаемся к управлению стажером
         await callback_select_trainee_attestation(
-            type('MockCallback', (), {
-                'data': f'select_trainee_attestation:{assignment_id}',
-                'message': callback.message,
-                'from_user': callback.from_user,
-                'answer': lambda *args, **kwargs: None
-            })(), 
-            state, session
+            type(
+                "MockCallback",
+                (),
+                {
+                    "data": f"select_trainee_attestation:{assignment_id}",
+                    "message": callback.message,
+                    "from_user": callback.from_user,
+                    "answer": lambda *args, **kwargs: None,
+                },
+            )(),
+            state,
+            session,
         )
-    
+
     except Exception as e:
         await callback.message.edit_text("Произошла ошибка при отмене")
         log_user_error(callback.from_user.id, "cancel_schedule_error", str(e))

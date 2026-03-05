@@ -14,7 +14,6 @@ from telethon import TelegramClient
 from telethon.errors import FloodWaitError
 from telethon.tl.custom.message import Message
 
-
 # Минимальный интервал между API-вызовами (секунды)
 MIN_CALL_INTERVAL = 1.5
 
@@ -72,9 +71,7 @@ class BotClient:
 
     async def get_messages(self, limit: int = 5) -> list[Message]:
         """Получить последние сообщения из диалога с ботом."""
-        return await self._handle_flood(
-            self.client.get_messages, self.bot_entity, limit=limit
-        )
+        return await self._handle_flood(self.client.get_messages, self.bot_entity, limit=limit)
 
     async def get_last_message(self) -> Optional[Message]:
         """Получить последнее сообщение от бота."""
@@ -151,9 +148,7 @@ class BotClient:
         if pattern:
             filter_info += f" pattern='{pattern}'"
 
-        raise TimeoutError(
-            f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}{detail}"
-        )
+        raise TimeoutError(f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}{detail}")
 
     async def send_and_wait(
         self,
@@ -203,10 +198,7 @@ class BotClient:
 
         # Собираем доступные кнопки для ошибки
         available = self.get_button_texts(message)
-        raise ValueError(
-            f"[{self.name}] Button not found (text='{text}', data={data}). "
-            f"Available: {available}"
-        )
+        raise ValueError(f"[{self.name}] Button not found (text='{text}', data={data}). Available: {available}")
 
     async def click_and_wait(
         self,
@@ -244,9 +236,7 @@ class BotClient:
                 # Вариант 1: Бот отправил новое сообщение
                 is_new = msg.id > original_msg_id
                 # Вариант 2: Бот отредактировал сообщение с кнопкой
-                is_edited = (
-                    msg.id == original_msg_id and msg_text != original_text
-                )
+                is_edited = msg.id == original_msg_id and msg_text != original_text
 
                 if not is_new and not is_edited:
                     continue
@@ -255,9 +245,7 @@ class BotClient:
                     last_candidate = msg
                     continue
 
-                if wait_pattern and not re.search(
-                    wait_pattern, clean_text, re.IGNORECASE
-                ):
+                if wait_pattern and not re.search(wait_pattern, clean_text, re.IGNORECASE):
                     last_candidate = msg
                     continue
 
@@ -276,9 +264,7 @@ class BotClient:
         if wait_pattern:
             filter_info += f" pattern='{wait_pattern}'"
 
-        raise TimeoutError(
-            f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}{detail}"
-        )
+        raise TimeoutError(f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}{detail}")
 
     @staticmethod
     def get_button_texts(message: Message) -> list[str]:

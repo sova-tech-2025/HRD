@@ -17,7 +17,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from telethon import TelegramClient
 
-
 # Загружаем .env.e2e
 ENV_PATH = Path(__file__).parent / ".env.e2e"
 load_dotenv(ENV_PATH)

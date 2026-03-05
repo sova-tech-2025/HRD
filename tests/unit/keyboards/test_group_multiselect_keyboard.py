@@ -1,12 +1,14 @@
 """Тесты для клавиатуры мультивыбора групп пользователя"""
-import pytest
+
 from dataclasses import dataclass
+
 from keyboards.keyboards import get_user_groups_multiselect_keyboard
 
 
 @dataclass
 class MockGroup:
     """Мок для модели Group"""
+
     id: int
     name: str
 
@@ -120,7 +122,9 @@ class TestGetUserGroupsMultiselectKeyboard:
 
         # На первой странице должно быть 5 кнопок групп
         group_buttons = [
-            btn for row in keyboard.inline_keyboard for btn in row
+            btn
+            for row in keyboard.inline_keyboard
+            for btn in row
             if btn.callback_data.startswith("user_edit_toggle_group:")
         ]
         assert len(group_buttons) == 5
