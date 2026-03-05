@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.db import get_user_by_tg_id, get_user_roles, check_user_permission
 from handlers.core.auth import check_auth
-from keyboards.keyboards import format_help_message, get_keyboard_by_role, get_menu_by_role
-from utils.handlers.helpers import get_user_with_keyboard, cleanup_callback
+from keyboards.keyboards import format_help_message, get_menu_by_role
+from utils.handlers.helpers import get_validated_user, cleanup_callback
 from utils.logger import logger, log_user_action
 from utils.messages.common import format_profile_text, get_main_menu_text, get_reload_menu_text, get_reload_inline_menu_text
 from utils.roles import get_primary_role
@@ -106,12 +106,10 @@ async def cmd_inline_main_menu(message: Message, state: FSMContext, session: Asy
 async def process_main_menu(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Универсальный обработчик возврата в главное меню с обновлением клавиатуры согласно роли"""
     try:
-        result = await get_user_with_keyboard(session, callback)
-        if not result:
+        user = await get_validated_user(session, callback)
+        if not user:
             return
-        user, keyboard = result
 
-        # Определяем роль для специальной обработки
         roles = await get_user_roles(session, user.id)
         primary_role = get_primary_role(roles)
 
@@ -158,12 +156,10 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext, session:
 async def process_reload_menu(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик кнопки 'Перезагрузка' - обновляет клавиатуру согласно роли пользователя"""
     try:
-        result = await get_user_with_keyboard(session, callback)
-        if not result:
+        user = await get_validated_user(session, callback)
+        if not user:
             return
-        user, keyboard = result
 
-        # Определяем роль для специальной обработки
         roles = await get_user_roles(session, user.id)
         primary_role = get_primary_role(roles)
 
@@ -194,9 +190,8 @@ async def process_reload_menu(callback: CallbackQuery, state: FSMContext, sessio
 @router.callback_query(F.data == "trainee_profile")
 async def callback_trainee_profile(callback: CallbackQuery, session: AsyncSession):
     """Обработчик 'Мой профиль' из инлайн-меню стажера"""
-    user = await get_user_by_tg_id(session, callback.from_user.id)
+    user = await get_validated_user(session, callback)
     if not user:
-        await callback.answer("❌ Не зарегистрирован", show_alert=True)
         return
 
     profile_text = await format_profile_text(user, session)
@@ -219,15 +214,12 @@ async def callback_trainee_profile(callback: CallbackQuery, session: AsyncSessio
 @router.callback_query(F.data == "trainee_help")
 async def callback_trainee_help(callback: CallbackQuery, session: AsyncSession):
     """Обработчик 'Помощь' из инлайн-меню стажера"""
-    user = await get_user_by_tg_id(session, callback.from_user.id)
+    user = await get_validated_user(session, callback)
     if not user:
-        await callback.answer("❌ Не зарегистрирован", show_alert=True)
         return
 
     roles = await get_user_roles(session, user.id)
-    role_name = "Стажер"
-    if roles:
-        role_name = roles[0].name
+    role_name = get_primary_role(roles)
 
     help_text = format_help_message(role_name)
 

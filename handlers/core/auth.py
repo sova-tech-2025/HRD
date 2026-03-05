@@ -5,85 +5,18 @@ from aiogram import Router, F
 from utils.timezone import moscow_now
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import MENTOR_MENU_IMAGE_FILE_ID, MENTOR_MENU_IMAGE_PATH, TRAINEE_MENU_IMAGE_FILE_ID, TRAINEE_MENU_IMAGE_PATH
 from database.db import get_user_by_tg_id, get_user_by_id, get_user_roles, get_company_by_id
-from keyboards.keyboards import get_keyboard_by_role, get_welcome_keyboard, get_mentor_inline_menu, get_trainee_inline_menu
+from keyboards.keyboards import get_keyboard_by_role, get_welcome_keyboard
 from states.states import AuthStates, RegistrationStates
 from utils.logger import logger, log_user_action, log_user_error
 from utils.bot_commands import set_bot_commands
+from utils.handlers.helpers import send_mentor_menu, send_trainee_menu
 
 router = Router()
 
-
-async def _send_mentor_menu(message: Message):
-    """Отправляет главное меню наставника с баннером (по Figma 7.1-7.4)"""
-    menu_text = (
-        "☰ <b>Главное меню</b>\n\n"
-        "Используй кнопки для навигации по системе"
-    )
-    photo_source = None
-    if MENTOR_MENU_IMAGE_FILE_ID:
-        photo_source = MENTOR_MENU_IMAGE_FILE_ID
-    elif MENTOR_MENU_IMAGE_PATH:
-        try:
-            photo_source = FSInputFile(MENTOR_MENU_IMAGE_PATH)
-        except Exception:
-            pass
-
-    if photo_source:
-        try:
-            await message.answer_photo(
-                photo=photo_source,
-                caption=menu_text,
-                parse_mode="HTML",
-                reply_markup=get_mentor_inline_menu()
-            )
-            return
-        except Exception:
-            pass
-
-    await message.answer(
-        menu_text,
-        parse_mode="HTML",
-        reply_markup=get_mentor_inline_menu()
-    )
-
-
-async def _send_trainee_menu(message: Message):
-    """Отправляет главное меню стажера с баннером (по Figma 13.1-13.4)"""
-    menu_text = (
-        "☰ <b>Главное меню</b>\n\n"
-        "Используй кнопки для навигации по системе"
-    )
-    photo_source = None
-    if TRAINEE_MENU_IMAGE_FILE_ID:
-        photo_source = TRAINEE_MENU_IMAGE_FILE_ID
-    elif TRAINEE_MENU_IMAGE_PATH:
-        try:
-            photo_source = FSInputFile(TRAINEE_MENU_IMAGE_PATH)
-        except Exception as e:
-            logger.warning(f"Не удалось загрузить изображение меню стажера из файла: {e}")
-
-    if photo_source:
-        try:
-            await message.answer_photo(
-                photo=photo_source,
-                caption=menu_text,
-                parse_mode="HTML",
-                reply_markup=get_trainee_inline_menu()
-            )
-            return
-        except Exception as e:
-            logger.warning(f"Не удалось отправить изображение меню стажера: {e}")
-
-    await message.answer(
-        menu_text,
-        parse_mode="HTML",
-        reply_markup=get_trainee_inline_menu()
-    )
 
 @router.callback_query(F.data == "login_again")
 async def callback_login_again(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot):
@@ -157,9 +90,9 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
                 reply_markup=ReplyKeyboardRemove()
             )
             if primary_role == "Наставник":
-                await _send_mentor_menu(message)
+                await send_mentor_menu(message)
             if primary_role == "Стажер":
-                await _send_trainee_menu(message)
+                await send_trainee_menu(message)
         else:
             await message.answer(
                 f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
@@ -188,20 +121,6 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
     except Exception as e:
         log_user_error(actor.id, actor.username, "login error", e)
         await message.answer("Произошла ошибка при входе в систему. Пожалуйста, попробуй позже.")
-
-async def get_current_user(message: Message, state: FSMContext, session: AsyncSession):
-    """Получает текущего пользователя по message.from_user.id или из FSM state.
-
-    Нужен потому что callback.message.from_user — это бот, а не пользователь.
-    """
-    user = await get_user_by_tg_id(session, message.from_user.id)
-    if not user:
-        data = await state.get_data()
-        user_id = data.get("user_id")
-        if user_id:
-            user = await get_user_by_id(session, user_id)
-    return user
-
 
 async def ensure_callback_auth(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> bool:
     """Восстанавливает FSM state для callback-обработчиков.
@@ -445,9 +364,9 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession, 
                 reply_markup=ReplyKeyboardRemove()
             )
             if primary_role == "Наставник":
-                await _send_mentor_menu(message)
+                await send_mentor_menu(message)
             if primary_role == "Стажер":
-                await _send_trainee_menu(message)
+                await send_trainee_menu(message)
         else:
             await message.answer(
                 f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",

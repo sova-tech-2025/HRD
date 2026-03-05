@@ -1,11 +1,9 @@
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 import re
-
-from config import MENTOR_MENU_IMAGE_FILE_ID, MENTOR_MENU_IMAGE_PATH, TRAINEE_MENU_IMAGE_FILE_ID, TRAINEE_MENU_IMAGE_PATH
 
 from database.db import (
     create_company, get_company_by_invite_code, check_company_access,
@@ -18,61 +16,13 @@ from keyboards.keyboards import (
     get_contact_keyboard, get_company_info_keyboard, get_company_edit_name_keyboard,
     get_company_edit_description_keyboard, get_company_code_keyboard,
     get_company_code_only_keyboard, get_company_bot_link_keyboard,
-    get_mentor_inline_menu, get_trainee_inline_menu
 )
 from states.states import CompanyCreationStates, CompanyJoinStates, CompanyManagementStates
 from utils.logger import logger, log_user_action, log_user_error
+from utils.handlers.helpers import send_mentor_menu, send_trainee_menu
 from utils.validators import validate_full_name, validate_phone_number
 
 router = Router()
-
-
-async def _send_mentor_menu_photo(message: Message):
-    """Отправляет главное меню наставника с баннером"""
-    menu_text = (
-        "☰ <b>Главное меню</b>\n\n"
-        "Используй кнопки для навигации по системе"
-    )
-    keyboard = get_mentor_inline_menu()
-    photo_source = None
-    if MENTOR_MENU_IMAGE_FILE_ID:
-        photo_source = MENTOR_MENU_IMAGE_FILE_ID
-    elif MENTOR_MENU_IMAGE_PATH:
-        try:
-            photo_source = FSInputFile(MENTOR_MENU_IMAGE_PATH)
-        except Exception:
-            pass
-    if photo_source:
-        try:
-            await message.answer_photo(photo=photo_source, caption=menu_text, parse_mode="HTML", reply_markup=keyboard)
-            return
-        except Exception:
-            pass
-    await message.answer(menu_text, parse_mode="HTML", reply_markup=keyboard)
-
-
-async def _send_trainee_menu_photo(message: Message):
-    """Отправляет главное меню стажера с баннером"""
-    menu_text = (
-        "☰ <b>Главное меню</b>\n\n"
-        "Используй кнопки для навигации по системе"
-    )
-    keyboard = get_trainee_inline_menu()
-    photo_source = None
-    if TRAINEE_MENU_IMAGE_FILE_ID:
-        photo_source = TRAINEE_MENU_IMAGE_FILE_ID
-    elif TRAINEE_MENU_IMAGE_PATH:
-        try:
-            photo_source = FSInputFile(TRAINEE_MENU_IMAGE_PATH)
-        except Exception as e:
-            logger.warning(f"Не удалось загрузить изображение меню стажера: {e}")
-    if photo_source:
-        try:
-            await message.answer_photo(photo=photo_source, caption=menu_text, parse_mode="HTML", reply_markup=keyboard)
-            return
-        except Exception as e:
-            logger.warning(f"Не удалось отправить фото меню стажера: {e}")
-    await message.answer(menu_text, parse_mode="HTML", reply_markup=keyboard)
 
 
 # ==============================================================================
@@ -364,9 +314,9 @@ async def finalize_company_creation(message: Message, state: FSMContext, session
                         reply_markup=ReplyKeyboardRemove()
                     )
                     if primary_role == "Наставник":
-                        await _send_mentor_menu_photo(message)
+                        await send_mentor_menu(message)
                     if primary_role == "Стажер":
-                        await _send_trainee_menu_photo(message)
+                        await send_trainee_menu(message)
                 else:
                     await message.answer(
                         f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
