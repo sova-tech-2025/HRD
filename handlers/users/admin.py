@@ -21,7 +21,7 @@ from keyboards.keyboards import (
 )
 from states.states import AdminStates, RecruiterAttestationStates
 from utils.logger import log_user_action, log_user_error, logger
-from handlers.core.auth import check_auth
+from utils.auth.auth import check_auth
 
 router = Router()
 

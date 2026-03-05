@@ -13,7 +13,7 @@ from database.db import (
     assign_mentor_to_trainee, check_user_permission, get_user_by_tg_id,
     ensure_company_id
 )
-from handlers.core.auth import check_auth
+from utils.auth.auth import check_auth
 from states.states import MentorAssignmentStates
 from keyboards.keyboards import get_main_menu_keyboard, get_keyboard_by_role
 from utils.logger import log_user_action, log_user_error
