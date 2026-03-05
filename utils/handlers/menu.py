@@ -1,12 +1,30 @@
 """Хелперы для отправки меню с баннерами."""
-from aiogram.types import Message, FSInputFile
+from aiogram.types import Message, FSInputFile, ReplyKeyboardRemove
 
 from config import (
     MENTOR_MENU_IMAGE_FILE_ID, MENTOR_MENU_IMAGE_PATH,
     TRAINEE_MENU_IMAGE_FILE_ID, TRAINEE_MENU_IMAGE_PATH,
 )
-from keyboards.keyboards import get_mentor_inline_menu, get_trainee_inline_menu
+from keyboards.keyboards import get_keyboard_by_role, get_mentor_inline_menu, get_trainee_inline_menu
 from utils.logger import logger
+
+
+async def send_role_welcome(message: Message, user, primary_role: str):
+    """Отправляет приветствие с меню по роли пользователя."""
+    if primary_role in ("Наставник", "Стажер"):
+        await message.answer(
+            f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        if primary_role == "Наставник":
+            await send_mentor_menu(message)
+        if primary_role == "Стажер":
+            await send_trainee_menu(message)
+    else:
+        await message.answer(
+            f"Добро пожаловать, {user.full_name}! Ты вошел как {primary_role}.",
+            reply_markup=get_keyboard_by_role(primary_role)
+        )
 
 
 async def send_mentor_menu(message: Message):
