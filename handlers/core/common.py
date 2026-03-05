@@ -11,7 +11,7 @@ from utils.handlers.user import get_validated_user
 from utils.handlers.callback import cleanup_callback
 from utils.logger import logger, log_user_action
 from utils.messages.common import format_profile_text, get_main_menu_text, get_reload_menu_text, get_reload_inline_menu_text
-from utils.roles import get_primary_role
+from utils.bot.roles import get_primary_role
 
 router = Router()
 

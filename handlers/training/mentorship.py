@@ -35,8 +35,8 @@ from keyboards.keyboards import (
     get_mentors_main_keyboard, get_mentors_pagination_keyboard,
     get_mentor_assignment_management_keyboard, get_trainees_with_mentors_keyboard
 )
-from utils.test_progress_formatters import get_test_status_icon, format_test_with_percentage
-from utils.trajectory_formatters import generate_trajectory_progress_with_attestation_status
+from utils.formatters.test_progress import get_test_status_icon, format_test_with_percentage
+from utils.formatters.trajectory import generate_trajectory_progress_with_attestation_status
 
 
 def get_days_word(days: int) -> str:

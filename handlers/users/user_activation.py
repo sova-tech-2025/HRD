@@ -17,8 +17,8 @@ from utils.logger import logger
 from keyboards.keyboards import get_main_menu_keyboard, get_new_users_list_keyboard
 from states.states import UserActivationStates
 from utils.logger import log_user_action, log_user_error
-from utils.bot_commands import set_bot_commands
-from handlers.core.auth import check_auth
+from utils.bot.commands import set_bot_commands
+from utils.auth.auth import check_auth
 
 router = Router()
 

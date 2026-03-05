@@ -20,7 +20,7 @@ from keyboards.keyboards import (
 from states.states import CompanyCreationStates, CompanyJoinStates, CompanyManagementStates
 from utils.logger import logger, log_user_action, log_user_error
 from utils.handlers.menu import send_mentor_menu, send_trainee_menu
-from utils.validators import validate_full_name, validate_phone_number
+from utils.validation.input import validate_full_name, validate_phone_number
 
 router = Router()
 
@@ -288,7 +288,7 @@ async def finalize_company_creation(message: Message, state: FSMContext, session
             # Автоматический вход в личный кабинет рекрутера
             from database.db import get_user_roles
             from keyboards.keyboards import get_keyboard_by_role
-            from utils.bot_commands import set_bot_commands
+            from utils.bot.commands import set_bot_commands
             
             roles = await get_user_roles(session, user.id)
             if roles:

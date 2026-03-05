@@ -20,7 +20,7 @@ from database.models import (
     Company
 )
 from utils.logger import logger
-from utils.trajectory_formatters import generate_trajectory_progress_with_attestation_status
+from utils.formatters.trajectory import generate_trajectory_progress_with_attestation_status
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import json
 import os

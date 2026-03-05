@@ -34,7 +34,7 @@ from keyboards.keyboards import (
     get_employee_folder_materials_keyboard, get_employee_material_view_keyboard
 )
 from utils.logger import log_user_action, log_user_error, logger
-from utils.validators import validate_name
+from utils.validation.input import validate_name
 
 router = Router()
 

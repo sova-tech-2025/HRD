@@ -7,7 +7,7 @@
 - format_test_with_percentage() - форматирование с процентами
 
 Использование:
-    from utils.test_progress_formatters import (
+    from utils.formatters.test_progress import (
         get_test_status_icon,
         format_test_line,
         format_test_with_percentage,

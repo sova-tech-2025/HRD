@@ -13,7 +13,7 @@ from database.db import (
     get_all_groups, check_user_permission, get_user_by_tg_id, get_user_roles,
     get_trajectories_using_attestation, get_trajectory_usage_info, ensure_company_id
 )
-from handlers.core.auth import check_auth
+from utils.auth.auth import check_auth
 from states.states import LearningPathStates, AttestationStates
 from keyboards.keyboards import (
     get_learning_paths_main_keyboard, get_trajectory_creation_start_keyboard,
@@ -29,7 +29,7 @@ from keyboards.keyboards import (
     get_trajectory_deletion_confirmation_keyboard, is_main_menu_text
 )
 from utils.logger import log_user_action, log_user_error
-from utils.validators import validate_name
+from utils.validation.input import validate_name
 
 router = Router()
 

@@ -8,7 +8,7 @@ from database.db import (
     update_group_name, get_group_users, get_user_roles,
     check_user_permission, get_user_by_tg_id, delete_group, ensure_company_id
 )
-from handlers.core.auth import check_auth
+from utils.auth.auth import check_auth
 from states.states import GroupManagementStates
 from keyboards.keyboards import (
     get_group_management_keyboard, get_group_selection_keyboard,
@@ -17,7 +17,7 @@ from keyboards.keyboards import (
     get_keyboard_by_role
 )
 from utils.logger import log_user_action, log_user_error
-from utils.validators import validate_name
+from utils.validation.input import validate_name
 
 router = Router()
 

@@ -13,7 +13,7 @@ from database.db import (
     update_object_name, get_object_users, get_user_roles,
     check_user_permission, get_user_by_tg_id, delete_object, ensure_company_id
 )
-from handlers.core.auth import check_auth
+from utils.auth.auth import check_auth
 from states.states import ObjectManagementStates
 from keyboards.keyboards import (
     get_object_management_keyboard, get_object_selection_keyboard,
@@ -22,7 +22,7 @@ from keyboards.keyboards import (
     get_object_delete_confirmation_keyboard
 )
 from utils.logger import log_user_action, log_user_error
-from utils.validators import validate_object_name
+from utils.validation.input import validate_object_name
 
 router = Router()
 

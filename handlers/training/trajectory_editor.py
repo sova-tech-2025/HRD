@@ -28,12 +28,12 @@ from keyboards.keyboards import (
     get_trajectory_attestation_management_keyboard, get_stage_deletion_confirmation_keyboard,
     get_session_deletion_confirmation_keyboard, get_back_to_editor_keyboard
 )
-from utils.trajectory_formatters import (
+from utils.formatters.trajectory import (
     format_trajectory_structure, format_stage_editor_view, format_session_tests_editor_view,
     format_trajectory_structure_with_new_stage
 )
 from utils.logger import log_user_action, log_user_error
-from utils.validators import validate_name
+from utils.validation.input import validate_name
 
 router = Router()
 

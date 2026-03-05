@@ -9,7 +9,7 @@ from database.db import get_user_by_tg_id, get_user_roles, get_company_by_id
 from keyboards.keyboards import get_keyboard_by_role, get_welcome_keyboard
 from states.states import RegistrationStates
 from utils.logger import log_user_action, log_user_error
-from utils.bot_commands import set_bot_commands
+from utils.bot.commands import set_bot_commands
 from utils.handlers.menu import send_mentor_menu, send_trainee_menu
 
 router = Router()

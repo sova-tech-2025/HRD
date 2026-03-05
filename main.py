@@ -19,10 +19,10 @@ from middlewares.db_middleware import DatabaseMiddleware
 from middlewares.role_middleware import RoleMiddleware
 from middlewares.bot_middleware import BotMiddleware
 from middlewares.company_middleware import CompanyMiddleware
-from utils.errors import router as error_router
-from utils.config_validator import validate_env_vars
+from utils.bot.errors import router as error_router
+from utils.validation.config import validate_env_vars
 from utils.logger import logger, log_format
-from utils.bot_commands import set_bot_commands
+from utils.bot.commands import set_bot_commands
 
 # Настраиваем root logger с московским временем (для aiogram и других библиотек)
 root_logger = logging.getLogger()
@@ -90,7 +90,7 @@ async def main():
         
         # Запуск планировщика задач для проверки подписок
         logger.info("Запуск планировщика задач...")
-        from utils.scheduler import start_scheduler
+        from utils.bot.scheduler import start_scheduler
         scheduler = start_scheduler(bot)
         
         # Запуск бота

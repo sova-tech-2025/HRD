@@ -2,7 +2,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.db import get_user_roles
-from utils.roles import get_primary_role
+from utils.bot.roles import get_primary_role
 
 
 async def format_profile_text(user, session: AsyncSession) -> str:

@@ -2,7 +2,7 @@
 
 from typing import Optional, List
 from database.models import LearningPath, LearningStage, LearningSession, Test, Group, Attestation
-from utils.test_progress_formatters import get_test_status_icon, format_test_with_percentage
+from utils.formatters.test_progress import get_test_status_icon, format_test_with_percentage
 
 
 async def generate_trajectory_progress_with_attestation_status(session, trainee_path, stages_progress, test_results=None):

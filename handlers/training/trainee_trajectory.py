@@ -23,7 +23,7 @@ from utils.handlers.user import get_current_user
 from utils.handlers.callback import ensure_callback_auth
 from keyboards.keyboards import get_main_menu_keyboard, get_mentor_contact_keyboard
 from utils.logger import logger, log_user_action, log_user_error
-from utils.test_progress_formatters import get_test_status_icon, format_test_line_figma
+from utils.formatters.test_progress import get_test_status_icon, format_test_line_figma
 
 router = Router()
 

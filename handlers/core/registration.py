@@ -8,7 +8,7 @@ import os
 from database.db import get_user_by_tg_id, create_user, create_user_without_role, check_phone_exists, create_initial_admin_with_token, get_users_by_role, validate_admin_token
 from keyboards.keyboards import get_contact_keyboard, get_role_selection_keyboard
 from states.states import RegistrationStates
-from utils.validators import validate_full_name, validate_phone_number
+from utils.validation.input import validate_full_name, validate_phone_number
 from utils.logger import log_user_action, log_user_error
 
 router = Router()
@@ -34,7 +34,7 @@ async def cmd_register(message: Message, state: FSMContext, session: AsyncSessio
         return
     
     # Для незарегистрированных пользователей показываем выбор: создать или присоединиться к компании
-    from utils.bot_commands import set_bot_commands
+    from utils.bot.commands import set_bot_commands
     from keyboards.keyboards import get_company_selection_keyboard
     await set_bot_commands(bot)
     await message.answer(
