@@ -18,8 +18,9 @@ from database.db import (
     get_trainee_attestation_status
 )
 from config import TRAINEE_TRAJECTORY_IMAGE_FILE_ID, TRAINEE_TRAJECTORY_IMAGE_PATH
-from handlers.core.auth import check_auth, ensure_callback_auth
-from utils.handlers.helpers import get_current_user
+from utils.auth.auth import check_auth
+from utils.handlers.user import get_current_user
+from utils.handlers.callback import ensure_callback_auth
 from keyboards.keyboards import get_main_menu_keyboard, get_mentor_contact_keyboard
 from utils.logger import logger, log_user_action, log_user_error
 from utils.test_progress_formatters import get_test_status_icon, format_test_line_figma

@@ -50,8 +50,9 @@ def get_days_word(days: int) -> str:
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import MentorshipStates, AttestationAssignmentStates, TraineeManagementStates
 from utils.logger import logger, log_user_action, log_user_error
-from handlers.core.auth import check_auth, ensure_callback_auth
-from utils.handlers.helpers import get_current_user
+from utils.auth.auth import check_auth
+from utils.handlers.user import get_current_user
+from utils.handlers.callback import ensure_callback_auth
 
 router = Router()
 

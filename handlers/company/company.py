@@ -19,7 +19,7 @@ from keyboards.keyboards import (
 )
 from states.states import CompanyCreationStates, CompanyJoinStates, CompanyManagementStates
 from utils.logger import logger, log_user_action, log_user_error
-from utils.handlers.helpers import send_mentor_menu, send_trainee_menu
+from utils.handlers.menu import send_mentor_menu, send_trainee_menu
 from utils.validators import validate_full_name, validate_phone_number
 
 router = Router()

@@ -28,8 +28,9 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from states.states import TestTakingStates
 from utils.logger import log_user_action, log_user_error, logger
 from utils.test_progress_formatters import get_test_status_icon
-from handlers.core.auth import check_auth, ensure_callback_auth
-from utils.handlers.helpers import get_current_user
+from utils.auth.auth import check_auth
+from utils.handlers.user import get_current_user
+from utils.handlers.callback import ensure_callback_auth
 
 router = Router()
 
