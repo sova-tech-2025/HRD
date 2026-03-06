@@ -8,14 +8,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.db import (
     check_phone_exists,
+    create_admin_with_role,
     create_user,
     create_user_without_role,
     get_user_by_tg_id,
     get_users_by_role,
     validate_admin_token,
 )
-from keyboards.keyboards import get_contact_keyboard
+from keyboards.keyboards import get_company_selection_keyboard, get_contact_keyboard
 from states.states import RegistrationStates
+from utils.bot.commands import set_bot_commands
 from utils.logger import log_user_action, log_user_error
 from utils.validation.input import validate_full_name, validate_phone_number
 
@@ -29,7 +31,105 @@ async def get_admin_settings() -> tuple[int, str]:
     return max_admins, admin_tokens_str
 
 
-# Функция show_admin_token_prompt удалена - не используется
+async def _clear_state_if_no_company(state: FSMContext, user_data: dict) -> None:
+    """Очищает FSM-состояние, только если пользователь не присоединяется к компании."""
+    if not user_data.get("company_id"):
+        await state.clear()
+
+
+def _admin_success_message(role_name: str, company_name: str | None) -> str:
+    """Формирует сообщение об успешном создании администратора."""
+    role_display = "👑 Руководителем" if role_name == "Руководитель" else "👨‍💼 Рекрутером"
+    if company_name:
+        return (
+            f"🎉 <b>Поздравляем!</b>\n\n"
+            f"Ты успешно стал {role_display} компании <b>{company_name}</b>.\n"
+            "Используй команду /login для входа."
+        )
+    return (
+        f"🎉 <b>Поздравляем!</b>\n\n"
+        f"Ты успешно стал {role_display} системы.\n"
+        "Используй команду /login для входа."
+    )
+
+
+async def _complete_phone_registration(message: Message, state: FSMContext, session: AsyncSession, bot) -> None:
+    """Завершает регистрацию после успешной валидации телефона.
+
+    Общая логика для process_contact и process_phone_manually.
+    """
+    user_data = await state.get_data()
+    user_data["tg_id"] = message.from_user.id
+    user_data["username"] = message.from_user.username
+
+    if user_data.get("registration_flow") == "code_first":
+        try:
+            if user_data.get("selected_admin_role"):
+                success = await create_admin_with_role(session, user_data, user_data["selected_admin_role"])
+
+                if success:
+                    await message.answer(
+                        _admin_success_message(user_data["selected_admin_role"], user_data.get("company_name")),
+                        parse_mode="HTML",
+                    )
+                    log_user_action(
+                        message.from_user.id,
+                        message.from_user.username,
+                        f"admin_created_with_role_{user_data['selected_admin_role']}_from_code_first",
+                        {
+                            "full_name": user_data["full_name"],
+                            "phone": user_data["phone_number"],
+                            "role": user_data["selected_admin_role"],
+                            "company_id": user_data.get("company_id"),
+                        },
+                    )
+                    await state.clear()
+                else:
+                    await message.answer("❌ Произошла ошибка при создании администратора. Попробуй еще раз позже.")
+                    await _clear_state_if_no_company(state, user_data)
+            else:
+                await create_user_without_role(session, user_data, bot)
+                await message.answer(
+                    "✅Регистрация завершена!\n\n"
+                    "Данные отправлены рекрутеру на проверку. Тебе придет уведомление, как только доступ активируют, и дальше сразу можно будет пользоваться ботом"
+                )
+                log_user_action(
+                    message.from_user.id,
+                    message.from_user.username,
+                    "registration completed from code_first flow",
+                    {"full_name": user_data["full_name"], "phone": user_data["phone_number"]},
+                )
+                await state.clear()
+        except Exception as e:
+            log_user_error(
+                message.from_user.id, message.from_user.username, "registration error from code_first flow", str(e)
+            )
+            await message.answer(
+                "❌ Произошла ошибка при регистрации. Попробуй еще раз позже или обратись к администратору."
+            )
+            await _clear_state_if_no_company(state, user_data)
+        return
+
+    # Стандартная регистрация (не code_first)
+    try:
+        await create_user_without_role(session, user_data, bot)
+        await message.answer(
+            "✅Регистрация завершена!\n\n"
+            "Данные отправлены рекрутеру на проверку. Тебе придет уведомление, как только доступ активируют, и дальше сразу можно будет пользоваться ботом"
+        )
+        log_user_action(
+            message.from_user.id,
+            message.from_user.username,
+            "registration completed (waiting activation)",
+            {"full_name": user_data["full_name"], "phone": user_data["phone_number"]},
+        )
+        await state.clear()
+    except Exception as e:
+        log_user_error(message.from_user.id, message.from_user.username, "registration error", str(e))
+        await message.answer(
+            "❌ Произошла ошибка при регистрации. Попробуй еще раз позже или обратись к администратору."
+        )
+        await _clear_state_if_no_company(state, user_data)
 
 
 @router.message(Command("register"))
@@ -45,9 +145,6 @@ async def cmd_register(message: Message, state: FSMContext, session: AsyncSessio
         return
 
     # Для незарегистрированных пользователей показываем выбор: создать или присоединиться к компании
-    from keyboards.keyboards import get_company_selection_keyboard
-    from utils.bot.commands import set_bot_commands
-
     await set_bot_commands(bot)
     await message.answer(
         "Привет! Добро пожаловать в чат-бот.\n\n🏢 Выбери действие:", reply_markup=get_company_selection_keyboard()
@@ -102,11 +199,7 @@ async def process_contact(message: Message, state: FSMContext, session: AsyncSes
             message.from_user.username,
             f"attempted to register with existing phone: {normalized_phone}",
         )
-        # КРИТИЧНО: Не очищаем состояние полностью, если пользователь присоединяется к компании
-        user_data = await state.get_data()
-        company_id = user_data.get("company_id")
-        if not company_id:
-            await state.clear()
+        await _clear_state_if_no_company(state, await state.get_data())
         return
 
     await state.update_data(phone_number=normalized_phone)
@@ -114,154 +207,7 @@ async def process_contact(message: Message, state: FSMContext, session: AsyncSes
         message.from_user.id, message.from_user.username, "provided phone via contact", {"phone": normalized_phone}
     )
 
-    # Проверяем, пришел ли пользователь через сценарий "У меня есть код"
-    user_data = await state.get_data()
-
-    if user_data.get("registration_flow") == "code_first":
-        # Пользователь из сценария "code_first"
-        user_data["tg_id"] = message.from_user.id
-        user_data["username"] = message.from_user.username
-
-        try:
-            if user_data.get("selected_admin_role"):
-                # Роль администратора уже выбрана - создаем администратора
-                # КРИТИЧНО: Убеждаемся, что company_id из состояния попадает в user_data
-                if "company_id" not in user_data:
-                    state_data = await state.get_data()
-                    if "company_id" in state_data:
-                        user_data["company_id"] = state_data["company_id"]
-                        if "company_name" not in user_data and "company_name" in state_data:
-                            user_data["company_name"] = state_data["company_name"]
-
-                from database.db import create_admin_with_role
-
-                success = await create_admin_with_role(session, user_data, user_data["selected_admin_role"])
-
-                if success:
-                    role_display = (
-                        "👑 Руководителем" if user_data["selected_admin_role"] == "Руководитель" else "👨‍💼 Рекрутером"
-                    )
-
-                    # Проверяем, присоединяется ли к компании
-                    if "company_name" in user_data:
-                        company_name = user_data["company_name"]
-                        await message.answer(
-                            f"🎉 <b>Поздравляем!</b>\n\n"
-                            f"Ты успешно стал {role_display} компании <b>{company_name}</b>.\n"
-                            "Используй команду /login для входа.",
-                            parse_mode="HTML",
-                        )
-                    else:
-                        await message.answer(
-                            f"🎉 <b>Поздравляем!</b>\n\n"
-                            f"Ты успешно стал {role_display} системы.\n"
-                            "Используй команду /login для входа.",
-                            parse_mode="HTML",
-                        )
-
-                    log_user_action(
-                        message.from_user.id,
-                        message.from_user.username,
-                        f"admin_created_with_role_{user_data['selected_admin_role']}_from_code_first",
-                        {
-                            "full_name": user_data["full_name"],
-                            "phone": user_data["phone_number"],
-                            "role": user_data["selected_admin_role"],
-                            "company_id": user_data.get("company_id"),
-                        },
-                    )
-                    await state.clear()
-                    return
-                else:
-                    await message.answer("❌ Произошла ошибка при создании администратора. Попробуй еще раз позже.")
-                    # КРИТИЧНО: Не очищаем состояние полностью, если пользователь присоединяется к компании
-                    company_id = user_data.get("company_id")
-                    if not company_id:
-                        await state.clear()
-                    return
-            else:
-                # Роль не выбрана (токен был неверный) - создаем пользователя без роли
-                # КРИТИЧНО: Убеждаемся, что company_id из состояния попадает в user_data
-                if "company_id" not in user_data:
-                    state_data = await state.get_data()
-                    if "company_id" in state_data:
-                        user_data["company_id"] = state_data["company_id"]
-                        if "company_name" not in user_data and "company_name" in state_data:
-                            user_data["company_name"] = state_data["company_name"]
-
-                await create_user_without_role(session, user_data, bot)
-
-                # Адаптируем сообщение под компании
-                await message.answer(
-                    "✅Регистрация завершена!\n\n"
-                    "Данные отправлены рекрутеру на проверку. Тебе придет уведомление, как только доступ активируют, и дальше сразу можно будет пользоваться ботом"
-                )
-
-                log_user_action(
-                    message.from_user.id,
-                    message.from_user.username,
-                    "registration completed from code_first flow",
-                    {"full_name": user_data["full_name"], "phone": user_data["phone_number"]},
-                )
-                await state.clear()
-                return
-
-        except Exception as e:
-            log_user_error(
-                message.from_user.id, message.from_user.username, "registration error from code_first flow", str(e)
-            )
-            await message.answer(
-                "❌ Произошла ошибка при регистрации. Попробуй еще раз позже или обратись к администратору."
-            )
-            # КРИТИЧНО: Не очищаем состояние полностью, если пользователь присоединяется к компании
-            company_id = user_data.get("company_id")
-            if not company_id:
-                await state.clear()
-            return
-
-    # Создаем пользователя без роли для последующей активации рекрутером
-    user_data = await state.get_data()
-    user_data["tg_id"] = message.from_user.id
-    user_data["username"] = message.from_user.username
-
-    # КРИТИЧНО: Убеждаемся, что company_id из состояния попадает в user_data
-    # Это важно для пользователей, которые присоединяются к компании по коду
-    if "company_id" not in user_data:
-        # Проверяем состояние еще раз на случай, если company_id был добавлен после получения user_data
-        state_data = await state.get_data()
-        if "company_id" in state_data:
-            user_data["company_id"] = state_data["company_id"]
-            if "company_name" not in user_data and "company_name" in state_data:
-                user_data["company_name"] = state_data["company_name"]
-
-    try:
-        await create_user_without_role(session, user_data, bot)
-
-        # Адаптируем сообщение под компании
-        await message.answer(
-            "✅Регистрация завершена!\n\n"
-            "Данные отправлены рекрутеру на проверку. Тебе придет уведомление, как только доступ активируют, и дальше сразу можно будет пользоваться ботом"
-        )
-
-        log_user_action(
-            message.from_user.id,
-            message.from_user.username,
-            "registration completed (waiting activation)",
-            {"full_name": user_data["full_name"], "phone": user_data["phone_number"]},
-        )
-
-        await state.clear()
-
-    except Exception as e:
-        log_user_error(message.from_user.id, message.from_user.username, "registration error", str(e))
-        await message.answer(
-            "❌ Произошла ошибка при регистрации. Попробуй еще раз позже или обратись к администратору."
-        )
-        # КРИТИЧНО: Не очищаем состояние полностью, если пользователь присоединяется к компании
-        user_data = await state.get_data()
-        company_id = user_data.get("company_id")
-        if not company_id:
-            await state.clear()
+    await _complete_phone_registration(message, state, session, bot)
 
 
 @router.message(RegistrationStates.waiting_for_phone)
@@ -286,11 +232,7 @@ async def process_phone_manually(message: Message, state: FSMContext, session: A
             message.from_user.username,
             f"attempted to register with existing phone: {normalized_phone}",
         )
-        # КРИТИЧНО: Не очищаем состояние полностью, если пользователь присоединяется к компании
-        user_data = await state.get_data()
-        company_id = user_data.get("company_id")
-        if not company_id:
-            await state.clear()
+        await _clear_state_if_no_company(state, await state.get_data())
         return
 
     await state.update_data(phone_number=normalized_phone)
@@ -298,157 +240,7 @@ async def process_phone_manually(message: Message, state: FSMContext, session: A
         message.from_user.id, message.from_user.username, "provided phone manually", {"phone": normalized_phone}
     )
 
-    # Проверяем, пришел ли пользователь через сценарий "У меня есть код"
-    user_data = await state.get_data()
-
-    if user_data.get("registration_flow") == "code_first":
-        # Пользователь из сценария "code_first"
-        user_data["tg_id"] = message.from_user.id
-        user_data["username"] = message.from_user.username
-
-        try:
-            if user_data.get("selected_admin_role"):
-                # Роль администратора уже выбрана - создаем администратора
-                # КРИТИЧНО: Убеждаемся, что company_id из состояния попадает в user_data
-                if "company_id" not in user_data:
-                    state_data = await state.get_data()
-                    if "company_id" in state_data:
-                        user_data["company_id"] = state_data["company_id"]
-                        if "company_name" not in user_data and "company_name" in state_data:
-                            user_data["company_name"] = state_data["company_name"]
-
-                from database.db import create_admin_with_role
-
-                success = await create_admin_with_role(session, user_data, user_data["selected_admin_role"])
-
-                if success:
-                    role_display = (
-                        "👑 Руководителем" if user_data["selected_admin_role"] == "Руководитель" else "👨‍💼 Рекрутером"
-                    )
-
-                    # Проверяем, присоединяется ли к компании
-                    if "company_name" in user_data:
-                        company_name = user_data["company_name"]
-                        await message.answer(
-                            f"🎉 <b>Поздравляем!</b>\n\n"
-                            f"Ты успешно стал {role_display} компании <b>{company_name}</b>.\n"
-                            "Используй команду /login для входа.",
-                            parse_mode="HTML",
-                        )
-                    else:
-                        await message.answer(
-                            f"🎉 <b>Поздравляем!</b>\n\n"
-                            f"Ты успешно стал {role_display} системы.\n"
-                            "Используй команду /login для входа.",
-                            parse_mode="HTML",
-                        )
-
-                    log_user_action(
-                        message.from_user.id,
-                        message.from_user.username,
-                        f"admin_created_with_role_{user_data['selected_admin_role']}_from_code_first",
-                        {
-                            "full_name": user_data["full_name"],
-                            "phone": user_data["phone_number"],
-                            "role": user_data["selected_admin_role"],
-                            "company_id": user_data.get("company_id"),
-                        },
-                    )
-                    await state.clear()
-                    return
-                else:
-                    await message.answer("❌ Произошла ошибка при создании администратора. Попробуй еще раз позже.")
-                    # КРИТИЧНО: Не очищаем состояние полностью, если пользователь присоединяется к компании
-                    company_id = user_data.get("company_id")
-                    if not company_id:
-                        await state.clear()
-                    return
-            else:
-                # Роль не выбрана (токен был неверный) - создаем пользователя без роли
-                # КРИТИЧНО: Убеждаемся, что company_id из состояния попадает в user_data
-                if "company_id" not in user_data:
-                    state_data = await state.get_data()
-                    if "company_id" in state_data:
-                        user_data["company_id"] = state_data["company_id"]
-                        if "company_name" not in user_data and "company_name" in state_data:
-                            user_data["company_name"] = state_data["company_name"]
-
-                await create_user_without_role(session, user_data, bot)
-
-                # Адаптируем сообщение под компании
-                await message.answer(
-                    "✅Регистрация завершена!\n\n"
-                    "Данные отправлены рекрутеру на проверку. Тебе придет уведомление, как только доступ активируют, и дальше сразу можно будет пользоваться ботом"
-                )
-
-                log_user_action(
-                    message.from_user.id,
-                    message.from_user.username,
-                    "registration completed from code_first flow",
-                    {"full_name": user_data["full_name"], "phone": user_data["phone_number"]},
-                )
-                await state.clear()
-                return
-
-        except Exception as e:
-            log_user_error(
-                message.from_user.id, message.from_user.username, "registration error from code_first flow", str(e)
-            )
-            await message.answer(
-                "❌ Произошла ошибка при регистрации. Попробуй еще раз позже или обратись к администратору."
-            )
-            # КРИТИЧНО: Не очищаем состояние полностью, если пользователь присоединяется к компании
-            company_id = user_data.get("company_id")
-            if not company_id:
-                await state.clear()
-            return
-
-    # Создаем пользователя без роли для последующей активации рекрутером
-    user_data = await state.get_data()
-    user_data["tg_id"] = message.from_user.id
-    user_data["username"] = message.from_user.username
-
-    # КРИТИЧНО: Убеждаемся, что company_id из состояния попадает в user_data
-    # Это важно для пользователей, которые присоединяются к компании по коду
-    if "company_id" not in user_data:
-        # Проверяем состояние еще раз на случай, если company_id был добавлен после получения user_data
-        state_data = await state.get_data()
-        if "company_id" in state_data:
-            user_data["company_id"] = state_data["company_id"]
-            if "company_name" not in user_data and "company_name" in state_data:
-                user_data["company_name"] = state_data["company_name"]
-
-    try:
-        await create_user_without_role(session, user_data, bot)
-
-        # Адаптируем сообщение под компании
-        await message.answer(
-            "✅Регистрация завершена!\n\n"
-            "Данные отправлены рекрутеру на проверку. Тебе придет уведомление, как только доступ активируют, и дальше сразу можно будет пользоваться ботом"
-        )
-
-        log_user_action(
-            message.from_user.id,
-            message.from_user.username,
-            "registration completed (waiting activation)",
-            {"full_name": user_data["full_name"], "phone": user_data["phone_number"]},
-        )
-
-        await state.clear()
-
-    except Exception as e:
-        log_user_error(message.from_user.id, message.from_user.username, "registration error", str(e))
-        await message.answer(
-            "❌ Произошла ошибка при регистрации. Попробуй еще раз позже или обратись к администратору."
-        )
-        # КРИТИЧНО: Не очищаем состояние полностью, если пользователь присоединяется к компании
-        user_data = await state.get_data()
-        company_id = user_data.get("company_id")
-        if not company_id:
-            await state.clear()
-
-
-# Обработчик admin_token:skip удален - кнопка "Пропустить" не используется в регистрации с кодом
+    await _complete_phone_registration(message, state, session, bot)
 
 
 @router.message(RegistrationStates.waiting_for_admin_token)
@@ -457,8 +249,7 @@ async def process_admin_token(message: Message, state: FSMContext, session: Asyn
     user_data = await state.get_data()
 
     # Проверяем, присоединяется ли пользователь к компании
-    is_company_join = "company_id" in user_data
-    back_callback = "back_to_company_join_welcome" if is_company_join else "back_to_welcome"
+    back_callback = "back_to_company_join_welcome" if user_data.get("company_id") else "back_to_welcome"
 
     # Этот обработчик только для регистрации с кодом (code_first)
     # Обычная регистрация не должна доходить до этого состояния
@@ -470,9 +261,7 @@ async def process_admin_token(message: Message, state: FSMContext, session: Asyn
                 inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback)]]
             ),
         )
-        # КРИТИЧНО: Не очищаем состояние полностью, если пользователь присоединяется к компании
-        if not is_company_join:
-            await state.clear()
+        await _clear_state_if_no_company(state, user_data)
         return
 
     user_data["tg_id"] = message.from_user.id
@@ -634,8 +423,6 @@ async def role_selection_error(message: Message, state: FSMContext, session: Asy
         user_data["username"] = message.from_user.username
 
         # Проверяем токен
-        from database.db import validate_admin_token
-
         if await validate_admin_token(session, message.text.strip()):
             # Токен верный, предлагаем выбрать роль
             await message.answer(
@@ -710,38 +497,13 @@ async def callback_select_admin_role(callback: CallbackQuery, state: FSMContext,
         user_data["tg_id"] = callback.from_user.id
         user_data["username"] = callback.from_user.username
 
-        # КРИТИЧНО: Убеждаемся, что company_id из состояния попадает в user_data
-        if "company_id" not in user_data:
-            state_data = await state.get_data()
-            if "company_id" in state_data:
-                user_data["company_id"] = state_data["company_id"]
-                if "company_name" not in user_data and "company_name" in state_data:
-                    user_data["company_name"] = state_data["company_name"]
-
-        # Создаем администратора с выбранной ролью (company_id уже в user_data, если присоединяется к компании)
-        from database.db import create_admin_with_role
-
         success = await create_admin_with_role(session, user_data, role_name)
 
         if success:
-            role_display = "👑 Руководителем" if role_name == "Руководитель" else "👨‍💼 Рекрутером"
-
-            # Проверяем, присоединяется ли к компании
-            if "company_name" in user_data:
-                company_name = user_data["company_name"]
-                await callback.message.edit_text(
-                    f"🎉 <b>Поздравляем!</b>\n\n"
-                    f"Ты успешно стал {role_display} компании <b>{company_name}</b>.\n"
-                    "Используй команду /login для входа.",
-                    parse_mode="HTML",
-                )
-            else:
-                await callback.message.edit_text(
-                    f"🎉 <b>Поздравляем!</b>\n\n"
-                    f"Ты успешно стал {role_display} системы.\n"
-                    "Используй команду /login для входа.",
-                    parse_mode="HTML",
-                )
+            await callback.message.edit_text(
+                _admin_success_message(role_name, user_data.get("company_name")),
+                parse_mode="HTML",
+            )
 
             log_user_action(
                 callback.from_user.id,
@@ -757,10 +519,7 @@ async def callback_select_admin_role(callback: CallbackQuery, state: FSMContext,
                 "Попробуй позже или обратись к разработчику.",
                 parse_mode="HTML",
             )
-            # КРИТИЧНО: Не очищаем состояние полностью, если пользователь присоединяется к компании
-            company_id = user_data.get("company_id")
-            if not company_id:
-                await state.clear()
+            await _clear_state_if_no_company(state, user_data)
 
         await callback.answer()
 

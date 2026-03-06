@@ -46,7 +46,8 @@ services:
         python main.py
       '
     volumes:
-      - ./logs:/app/logs
+      - .:/app
+      - /app/__pycache__
     networks:
       - hrbot_e2e_network
 
