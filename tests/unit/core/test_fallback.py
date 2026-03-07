@@ -53,12 +53,12 @@ class TestSendFallbackMessage:
     @pytest.mark.asyncio
     async def test_sends_fallback_with_keyboard(self):
         """send_fallback_message отправляет сообщение с клавиатурой"""
-        from handlers.core.fallback import send_fallback_message
+        from utils.messages.fallback import send_fallback_message
 
         msg = make_message()
         state = make_state()
 
-        with patch("handlers.core.fallback.get_fallback_keyboard", return_value="kb_mock"):
+        with patch("utils.messages.fallback.get_fallback_keyboard", return_value="kb_mock"):
             await send_fallback_message(msg, state)
 
         msg.answer.assert_awaited_once()
@@ -77,7 +77,7 @@ class TestSendUseButtonsMessage:
     @pytest.mark.asyncio
     async def test_sends_use_buttons(self):
         """send_use_buttons_message отправляет подсказку про кнопки"""
-        from handlers.core.fallback import send_use_buttons_message
+        from utils.messages.fallback import send_use_buttons_message
 
         msg = make_message()
         await send_use_buttons_message(msg)
@@ -97,7 +97,7 @@ class TestUnexpectedNameInput:
     @pytest.mark.asyncio
     async def test_short_name_shows_error(self):
         """Имя < 2 символов — ошибка валидации"""
-        from handlers.core.fallback import handle_unexpected_name_input
+        from handlers.fallback.registration import handle_unexpected_name_input
 
         msg = make_message(text="А")
         state = make_state()
@@ -111,7 +111,7 @@ class TestUnexpectedNameInput:
     @pytest.mark.asyncio
     async def test_empty_text_shows_error(self):
         """Пустой текст — ошибка валидации"""
-        from handlers.core.fallback import handle_unexpected_name_input
+        from handlers.fallback.registration import handle_unexpected_name_input
 
         msg = make_message(text=None)
         state = make_state()
@@ -124,12 +124,12 @@ class TestUnexpectedNameInput:
     @pytest.mark.asyncio
     async def test_valid_name_gets_fallback(self):
         """Имя >= 2 символов — стандартный fallback"""
-        from handlers.core.fallback import handle_unexpected_name_input
+        from handlers.fallback.registration import handle_unexpected_name_input
 
         msg = make_message(text="Иван Петров")
         state = make_state()
 
-        with patch("handlers.core.fallback.get_fallback_keyboard", return_value="kb"):
+        with patch("utils.messages.fallback.get_fallback_keyboard", return_value="kb"):
             await handle_unexpected_name_input(msg, state)
 
         text = msg.answer.call_args[0][0]
@@ -145,7 +145,7 @@ class TestUnexpectedMaterialsInput:
     @pytest.mark.asyncio
     async def test_photo_rejected(self):
         """Фото — специфическое сообщение об ошибке"""
-        from handlers.core.fallback import handle_unexpected_materials_input
+        from handlers.fallback.tests import handle_unexpected_materials_input
 
         msg = make_message(photo=[MagicMock()])
         state = make_state()
@@ -158,7 +158,7 @@ class TestUnexpectedMaterialsInput:
     @pytest.mark.asyncio
     async def test_audio_rejected(self):
         """Аудио — специфическое сообщение"""
-        from handlers.core.fallback import handle_unexpected_materials_input
+        from handlers.fallback.tests import handle_unexpected_materials_input
 
         msg = make_message(audio=MagicMock())
         state = make_state()
@@ -171,7 +171,7 @@ class TestUnexpectedMaterialsInput:
     @pytest.mark.asyncio
     async def test_voice_rejected(self):
         """Голосовое сообщение — специфическое сообщение"""
-        from handlers.core.fallback import handle_unexpected_materials_input
+        from handlers.fallback.tests import handle_unexpected_materials_input
 
         msg = make_message(voice=MagicMock())
         state = make_state()
@@ -184,7 +184,7 @@ class TestUnexpectedMaterialsInput:
     @pytest.mark.asyncio
     async def test_sticker_rejected(self):
         """Стикер — специфическое сообщение"""
-        from handlers.core.fallback import handle_unexpected_materials_input
+        from handlers.fallback.tests import handle_unexpected_materials_input
 
         msg = make_message(sticker=MagicMock())
         state = make_state()
@@ -197,7 +197,7 @@ class TestUnexpectedMaterialsInput:
     @pytest.mark.asyncio
     async def test_unknown_input_retry(self):
         """Прочий ввод — просьба повторить"""
-        from handlers.core.fallback import handle_unexpected_materials_input
+        from handlers.fallback.tests import handle_unexpected_materials_input
 
         msg = make_message()
         state = make_state()
@@ -217,7 +217,7 @@ class TestUnexpectedTestNameInput:
     @pytest.mark.asyncio
     async def test_short_name_error(self):
         """Название < 3 символов — ошибка"""
-        from handlers.core.fallback import handle_unexpected_test_name_input
+        from handlers.fallback.tests import handle_unexpected_test_name_input
 
         msg = make_message(text="АБ")
         state = make_state()
@@ -231,7 +231,7 @@ class TestUnexpectedTestNameInput:
     @pytest.mark.asyncio
     async def test_empty_name_error(self):
         """Пустое название — ошибка"""
-        from handlers.core.fallback import handle_unexpected_test_name_input
+        from handlers.fallback.tests import handle_unexpected_test_name_input
 
         msg = make_message(text=None)
         state = make_state()
@@ -244,7 +244,7 @@ class TestUnexpectedTestNameInput:
     @pytest.mark.asyncio
     async def test_valid_name_retry(self):
         """Валидное название — просьба повторить"""
-        from handlers.core.fallback import handle_unexpected_test_name_input
+        from handlers.fallback.tests import handle_unexpected_test_name_input
 
         msg = make_message(text="Хороший тест")
         state = make_state()
@@ -264,7 +264,7 @@ class TestUnexpectedQuestionTextInput:
     @pytest.mark.asyncio
     async def test_short_question_error(self):
         """Вопрос < 5 символов — ошибка"""
-        from handlers.core.fallback import handle_unexpected_question_text_input
+        from handlers.fallback.tests import handle_unexpected_question_text_input
 
         msg = make_message(text="Кто?")
         state = make_state()
@@ -277,7 +277,7 @@ class TestUnexpectedQuestionTextInput:
     @pytest.mark.asyncio
     async def test_valid_question_retry(self):
         """Валидный вопрос — просьба повторить"""
-        from handlers.core.fallback import handle_unexpected_question_text_input
+        from handlers.fallback.tests import handle_unexpected_question_text_input
 
         msg = make_message(text="Какой правильный ответ?")
         state = make_state()
@@ -297,7 +297,7 @@ class TestUnexpectedAnswerInput:
     @pytest.mark.asyncio
     async def test_single_choice_hint(self):
         """single_choice — подсказка ввести номер"""
-        from handlers.core.fallback import handle_unexpected_answer_input
+        from handlers.fallback.tests import handle_unexpected_answer_input
 
         msg = make_message()
         state = make_state(data={"current_question_type": "single_choice"})
@@ -310,7 +310,7 @@ class TestUnexpectedAnswerInput:
     @pytest.mark.asyncio
     async def test_multiple_choice_hint(self):
         """multiple_choice — подсказка ввести номера через запятую"""
-        from handlers.core.fallback import handle_unexpected_answer_input
+        from handlers.fallback.tests import handle_unexpected_answer_input
 
         msg = make_message()
         state = make_state(data={"current_question_type": "multiple_choice"})
@@ -323,7 +323,7 @@ class TestUnexpectedAnswerInput:
     @pytest.mark.asyncio
     async def test_unknown_type_retry(self):
         """Неизвестный тип — общая просьба повторить"""
-        from handlers.core.fallback import handle_unexpected_answer_input
+        from handlers.fallback.tests import handle_unexpected_answer_input
 
         msg = make_message()
         state = make_state(data={"current_question_type": "open_text"})
@@ -343,7 +343,7 @@ class TestUnexpectedPointsInput:
     @pytest.mark.asyncio
     async def test_negative_points_error(self):
         """Отрицательные баллы — ошибка"""
-        from handlers.core.fallback import handle_unexpected_points_input
+        from handlers.fallback.tests import handle_unexpected_points_input
 
         msg = make_message(text="-5")
         state = make_state()
@@ -356,7 +356,7 @@ class TestUnexpectedPointsInput:
     @pytest.mark.asyncio
     async def test_zero_points_error(self):
         """Ноль баллов — ошибка"""
-        from handlers.core.fallback import handle_unexpected_points_input
+        from handlers.fallback.tests import handle_unexpected_points_input
 
         msg = make_message(text="0")
         state = make_state()
@@ -369,7 +369,7 @@ class TestUnexpectedPointsInput:
     @pytest.mark.asyncio
     async def test_non_numeric_error(self):
         """Не число — ошибка"""
-        from handlers.core.fallback import handle_unexpected_points_input
+        from handlers.fallback.tests import handle_unexpected_points_input
 
         msg = make_message(text="abc")
         state = make_state()
@@ -382,7 +382,7 @@ class TestUnexpectedPointsInput:
     @pytest.mark.asyncio
     async def test_empty_text_error(self):
         """Пустое сообщение — ошибка"""
-        from handlers.core.fallback import handle_unexpected_points_input
+        from handlers.fallback.tests import handle_unexpected_points_input
 
         msg = make_message(text=None)
         state = make_state()
@@ -395,7 +395,7 @@ class TestUnexpectedPointsInput:
     @pytest.mark.asyncio
     async def test_valid_positive_points(self):
         """Корректные баллы — неожиданная ошибка (повтор)"""
-        from handlers.core.fallback import handle_unexpected_points_input
+        from handlers.fallback.tests import handle_unexpected_points_input
 
         msg = make_message(text="5")
         state = make_state()
@@ -408,7 +408,7 @@ class TestUnexpectedPointsInput:
     @pytest.mark.asyncio
     async def test_comma_decimal_parsed(self):
         """Запятая как десятичный разделитель — парсится корректно"""
-        from handlers.core.fallback import handle_unexpected_points_input
+        from handlers.fallback.tests import handle_unexpected_points_input
 
         msg = make_message(text="2,5")
         state = make_state()
@@ -429,7 +429,7 @@ class TestUnexpectedThresholdInput:
     @pytest.mark.asyncio
     async def test_shows_max_score(self):
         """Показывает максимальный балл из вопросов"""
-        from handlers.core.fallback import handle_unexpected_threshold_input
+        from handlers.fallback.tests import handle_unexpected_threshold_input
 
         msg = make_message(text="abc")
         state = make_state(data={"questions": [{"points": 5}, {"points": 10}]})
@@ -442,7 +442,7 @@ class TestUnexpectedThresholdInput:
     @pytest.mark.asyncio
     async def test_empty_questions_default_100(self):
         """Нет вопросов — max_score = 100"""
-        from handlers.core.fallback import handle_unexpected_threshold_input
+        from handlers.fallback.tests import handle_unexpected_threshold_input
 
         msg = make_message(text="abc")
         state = make_state(data={})
@@ -462,7 +462,7 @@ class TestUnexpectedTestInput:
     @pytest.mark.asyncio
     async def test_no_questions_clears_state(self):
         """Нет вопросов — ошибка и очистка state"""
-        from handlers.core.fallback import handle_unexpected_test_input
+        from handlers.fallback.tests import handle_unexpected_test_input
 
         msg = make_message()
         state = make_state(data={"questions": []})
@@ -476,7 +476,7 @@ class TestUnexpectedTestInput:
     @pytest.mark.asyncio
     async def test_index_beyond_questions_completed(self):
         """Индекс >= длины вопросов — тест завершен"""
-        from handlers.core.fallback import handle_unexpected_test_input
+        from handlers.fallback.tests import handle_unexpected_test_input
 
         q = MagicMock()
         msg = make_message()
@@ -490,7 +490,7 @@ class TestUnexpectedTestInput:
     @pytest.mark.asyncio
     async def test_text_question_retry(self):
         """Текстовый вопрос — просьба повторить"""
-        from handlers.core.fallback import handle_unexpected_test_input
+        from handlers.fallback.tests import handle_unexpected_test_input
 
         q = MagicMock()
         q.question_type = "text"
@@ -505,7 +505,7 @@ class TestUnexpectedTestInput:
     @pytest.mark.asyncio
     async def test_number_question_error(self):
         """Числовой вопрос — подсказка ввести число"""
-        from handlers.core.fallback import handle_unexpected_test_input
+        from handlers.fallback.tests import handle_unexpected_test_input
 
         q = MagicMock()
         q.question_type = "number"
@@ -520,7 +520,7 @@ class TestUnexpectedTestInput:
     @pytest.mark.asyncio
     async def test_multiple_choice_question_hint(self):
         """Вопрос multiple_choice — подсказка с форматом"""
-        from handlers.core.fallback import handle_unexpected_test_input
+        from handlers.fallback.tests import handle_unexpected_test_input
 
         q = MagicMock()
         q.question_type = "multiple_choice"
@@ -535,14 +535,14 @@ class TestUnexpectedTestInput:
     @pytest.mark.asyncio
     async def test_unknown_question_type_fallback(self):
         """Неизвестный тип вопроса — стандартный fallback"""
-        from handlers.core.fallback import handle_unexpected_test_input
+        from handlers.fallback.tests import handle_unexpected_test_input
 
         q = MagicMock()
         q.question_type = "exotic_type"
         msg = make_message()
         state = make_state(data={"questions": [q], "current_question_index": 0})
 
-        with patch("handlers.core.fallback.get_fallback_keyboard", return_value="kb"):
+        with patch("utils.messages.fallback.get_fallback_keyboard", return_value="kb"):
             await handle_unexpected_test_input(msg, state)
 
         text = msg.answer.call_args[0][0]
@@ -558,7 +558,7 @@ class TestUnexpectedQuestionEdit:
     @pytest.mark.asyncio
     async def test_short_question_error(self):
         """Короткий текст вопроса — ошибка"""
-        from handlers.core.fallback import handle_unexpected_question_edit
+        from handlers.fallback.tests import handle_unexpected_question_edit
 
         msg = make_message(text="Кто")
         state = make_state()
@@ -571,7 +571,7 @@ class TestUnexpectedQuestionEdit:
     @pytest.mark.asyncio
     async def test_valid_question_retry(self):
         """Валидный текст — просьба повторить"""
-        from handlers.core.fallback import handle_unexpected_question_edit
+        from handlers.fallback.tests import handle_unexpected_question_edit
 
         msg = make_message(text="Какой ответ правильный?")
         state = make_state()
@@ -591,7 +591,7 @@ class TestUnexpectedNewThreshold:
     @pytest.mark.asyncio
     async def test_zero_threshold_error(self):
         """Ноль — ошибка"""
-        from handlers.core.fallback import handle_unexpected_new_threshold
+        from handlers.fallback.tests import handle_unexpected_new_threshold
 
         msg = make_message(text="0")
         state = make_state()
@@ -604,7 +604,7 @@ class TestUnexpectedNewThreshold:
     @pytest.mark.asyncio
     async def test_not_a_number_error(self):
         """Не число — ошибка"""
-        from handlers.core.fallback import handle_unexpected_new_threshold
+        from handlers.fallback.tests import handle_unexpected_new_threshold
 
         msg = make_message(text="abc")
         state = make_state()
@@ -617,7 +617,7 @@ class TestUnexpectedNewThreshold:
     @pytest.mark.asyncio
     async def test_valid_number_retry(self):
         """Валидное число — повтор"""
-        from handlers.core.fallback import handle_unexpected_new_threshold
+        from handlers.fallback.tests import handle_unexpected_new_threshold
 
         msg = make_message(text="7.5")
         state = make_state()
@@ -630,7 +630,7 @@ class TestUnexpectedNewThreshold:
     @pytest.mark.asyncio
     async def test_empty_text_error(self):
         """Пустой текст — ошибка"""
-        from handlers.core.fallback import handle_unexpected_new_threshold
+        from handlers.fallback.tests import handle_unexpected_new_threshold
 
         msg = make_message(text=None)
         state = make_state()
@@ -650,7 +650,7 @@ class TestKnowledgeBaseFolderName:
     @pytest.mark.asyncio
     async def test_non_text_shows_error(self):
         """Не текст — ошибка формата"""
-        from handlers.core.fallback import handle_unexpected_folder_name_input
+        from handlers.fallback.knowledge import handle_unexpected_folder_name_input
 
         msg = make_message(text=None)
         state = make_state()
@@ -664,7 +664,7 @@ class TestKnowledgeBaseFolderName:
     @pytest.mark.asyncio
     async def test_text_input_no_answer(self):
         """Текстовый ввод — обработчик пропускает (обрабатывается основным handler)"""
-        from handlers.core.fallback import handle_unexpected_folder_name_input
+        from handlers.fallback.knowledge import handle_unexpected_folder_name_input
 
         msg = make_message(text="Моя папка")
         state = make_state()
@@ -683,15 +683,15 @@ class TestUnexpectedInputWithState:
     @pytest.mark.asyncio
     async def test_unregistered_user_gets_welcome(self):
         """Незарегистрированный пользователь — приветствие с выбором компании"""
-        from handlers.core.fallback import handle_unexpected_input_with_state
+        from handlers.fallback.universal import handle_unexpected_input_with_state
 
         msg = make_message(text="Привет")
         state = make_state()
         session = AsyncMock()
 
         with (
-            patch("handlers.core.fallback.get_user_by_tg_id", return_value=None),
-            patch("handlers.core.fallback.log_user_action"),
+            patch("handlers.fallback.universal.get_user_by_tg_id", return_value=None),
+            patch("handlers.fallback.universal.log_user_action"),
         ):
             await handle_unexpected_input_with_state(msg, state, session)
 
@@ -701,7 +701,7 @@ class TestUnexpectedInputWithState:
     @pytest.mark.asyncio
     async def test_registered_user_with_state_gets_fallback(self):
         """Зарегистрированный пользователь в FSM-состоянии — fallback"""
-        from handlers.core.fallback import handle_unexpected_input_with_state
+        from handlers.fallback.universal import handle_unexpected_input_with_state
 
         msg = make_message(text="Что-то")
         state = make_state(state_name="SomeStates:some_state")
@@ -709,9 +709,9 @@ class TestUnexpectedInputWithState:
         user = MagicMock()
 
         with (
-            patch("handlers.core.fallback.get_user_by_tg_id", return_value=user),
-            patch("handlers.core.fallback.get_fallback_keyboard", return_value="kb"),
-            patch("handlers.core.fallback.log_user_action"),
+            patch("handlers.fallback.universal.get_user_by_tg_id", return_value=user),
+            patch("handlers.fallback.universal.get_fallback_keyboard", return_value="kb"),
+            patch("handlers.fallback.universal.log_user_action"),
         ):
             await handle_unexpected_input_with_state(msg, state, session)
 
@@ -721,7 +721,7 @@ class TestUnexpectedInputWithState:
     @pytest.mark.asyncio
     async def test_registered_user_no_state_gets_fallback(self):
         """Зарегистрированный пользователь без FSM-состояния — стандартный fallback"""
-        from handlers.core.fallback import handle_unexpected_input_with_state
+        from handlers.fallback.universal import handle_unexpected_input_with_state
 
         msg = make_message(text="Что-то")
         state = make_state(state_name=None)
@@ -729,8 +729,8 @@ class TestUnexpectedInputWithState:
         user = MagicMock()
 
         with (
-            patch("handlers.core.fallback.get_user_by_tg_id", return_value=user),
-            patch("handlers.core.fallback.get_fallback_keyboard", return_value="kb"),
+            patch("handlers.fallback.universal.get_user_by_tg_id", return_value=user),
+            patch("utils.messages.fallback.get_fallback_keyboard", return_value="kb"),
         ):
             await handle_unexpected_input_with_state(msg, state, session)
 
@@ -747,7 +747,7 @@ class TestUnexpectedCallback:
     @pytest.mark.asyncio
     async def test_callback_answered_and_edited(self):
         """Неожиданный callback — edit_text + answer"""
-        from handlers.core.fallback import handle_unexpected_callback
+        from handlers.fallback.universal import handle_unexpected_callback
 
         callback = AsyncMock()
         callback.from_user = MagicMock()
@@ -761,8 +761,8 @@ class TestUnexpectedCallback:
         state = make_state(state_name="SomeState")
 
         with (
-            patch("handlers.core.fallback.get_fallback_keyboard", return_value="kb"),
-            patch("handlers.core.fallback.log_user_action"),
+            patch("handlers.fallback.universal.get_fallback_keyboard", return_value="kb"),
+            patch("handlers.fallback.universal.log_user_action"),
         ):
             await handle_unexpected_callback(callback, state)
 
@@ -783,7 +783,7 @@ class TestUnexpectedOptionInput:
     @pytest.mark.asyncio
     async def test_empty_option_error(self):
         """Пустой вариант ответа — ошибка"""
-        from handlers.core.fallback import handle_unexpected_option_input
+        from handlers.fallback.tests import handle_unexpected_option_input
 
         msg = make_message(text=None)
         state = make_state()
@@ -796,7 +796,7 @@ class TestUnexpectedOptionInput:
     @pytest.mark.asyncio
     async def test_valid_option_retry(self):
         """Валидный вариант — повтор"""
-        from handlers.core.fallback import handle_unexpected_option_input
+        from handlers.fallback.tests import handle_unexpected_option_input
 
         msg = make_message(text="Москва")
         state = make_state()
@@ -805,3 +805,567 @@ class TestUnexpectedOptionInput:
 
         text = msg.answer.call_args[0][0]
         assert "Повтори ввод" in text
+
+
+# =================================
+# Регистрация: ввод телефона
+# =================================
+
+
+class TestUnexpectedPhoneInput:
+    @pytest.mark.asyncio
+    async def test_shows_phone_format_hint(self):
+        """Некорректный телефон — подсказка формата"""
+        from handlers.fallback.registration import handle_unexpected_phone_input
+
+        msg = make_message(text="abc")
+        state = make_state()
+
+        await handle_unexpected_phone_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Некорректный формат телефона" in text
+
+
+# =================================
+# Регистрация: выбор роли
+# =================================
+
+
+class TestUnexpectedRoleInput:
+    @pytest.mark.asyncio
+    async def test_shows_role_error_with_keyboard(self):
+        """Некорректная роль — ошибка + клавиатура"""
+        from handlers.fallback.registration import handle_unexpected_role_input
+
+        msg = make_message(text="admin")
+        state = make_state()
+
+        with patch("handlers.fallback.registration.get_role_selection_keyboard", return_value="role_kb"):
+            await handle_unexpected_role_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Некорректный выбор роли" in text
+        assert msg.answer.call_args[1]["reply_markup"] == "role_kb"
+
+
+# =================================
+# Тест завершён
+# =================================
+
+
+class TestUnexpectedTestCompleted:
+    @pytest.mark.asyncio
+    async def test_shows_test_completed(self):
+        """Ввод после завершения теста — сообщение о завершении"""
+        from handlers.fallback.tests import handle_unexpected_test_completed
+
+        msg = make_message(text="ещё")
+        state = make_state()
+
+        await handle_unexpected_test_completed(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Тест уже завершен" in text
+
+
+# =================================
+# Аттестация: дата
+# =================================
+
+
+class TestUnexpectedDateInput:
+    @pytest.mark.asyncio
+    async def test_shows_date_format_hint(self):
+        """Некорректная дата — подсказка формата"""
+        from handlers.fallback.training import handle_unexpected_date_input
+
+        msg = make_message(text="завтра")
+        state = make_state()
+
+        await handle_unexpected_date_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Неправильный формат даты" in text
+
+
+# =================================
+# Аттестация: время
+# =================================
+
+
+class TestUnexpectedTimeInput:
+    @pytest.mark.asyncio
+    async def test_shows_time_format_hint(self):
+        """Некорректное время — подсказка формата"""
+        from handlers.fallback.training import handle_unexpected_time_input
+
+        msg = make_message(text="утром")
+        state = make_state()
+
+        await handle_unexpected_time_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Неправильный формат времени" in text
+
+
+# =================================
+# Аттестация: балл
+# =================================
+
+
+class TestUnexpectedScoreInput:
+    @pytest.mark.asyncio
+    async def test_shows_score_format_hint(self):
+        """Некорректный балл — подсказка формата"""
+        from handlers.fallback.training import handle_unexpected_score_input
+
+        msg = make_message(text="отлично")
+        state = make_state()
+
+        await handle_unexpected_score_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Неправильный формат балла" in text
+
+
+# =================================
+# Компания: редактирование названия
+# =================================
+
+
+class TestUnexpectedCompanyNameEditInput:
+    @pytest.mark.asyncio
+    async def test_shows_text_expected(self):
+        """Некорректный ввод — ожидается текст"""
+        from handlers.fallback.company import handle_unexpected_company_name_edit_input
+
+        msg = make_message(text=None)
+        state = make_state()
+
+        await handle_unexpected_company_name_edit_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Ожидается текстовое сообщение" in text
+
+
+# =================================
+# Компания: редактирование описания
+# =================================
+
+
+class TestUnexpectedCompanyDescriptionEditInput:
+    @pytest.mark.asyncio
+    async def test_shows_text_expected(self):
+        """Некорректный ввод — ожидается текст"""
+        from handlers.fallback.company import handle_unexpected_company_description_edit_input
+
+        msg = make_message(text=None)
+        state = make_state()
+
+        await handle_unexpected_company_description_edit_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Ожидается текстовое сообщение" in text
+
+
+# =================================
+# Подтверждение аттестации
+# =================================
+
+
+class TestUnexpectedAttestationConfirmationInput:
+    @pytest.mark.asyncio
+    async def test_shows_use_buttons(self):
+        """Текстовый ввод вместо кнопки — подсказка"""
+        from handlers.fallback.training import handle_unexpected_attestation_confirmation_input
+
+        msg = make_message(text="да")
+        state = make_state()
+
+        await handle_unexpected_attestation_confirmation_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "используй кнопки" in text
+
+
+# =================================
+# Новые материалы теста
+# =================================
+
+
+class TestUnexpectedNewMaterials:
+    @pytest.mark.asyncio
+    async def test_shows_retry(self):
+        """Некорректный ввод — просьба повторить"""
+        from handlers.fallback.tests import handle_unexpected_new_materials
+
+        msg = make_message()
+        state = make_state()
+
+        await handle_unexpected_new_materials(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Повтори ввод" in text
+
+
+# =================================
+# Вопрос аттестации
+# =================================
+
+
+class TestUnexpectedAttestationQuestionInput:
+    @pytest.mark.asyncio
+    async def test_shows_format_hint(self):
+        """Некорректный вопрос — подсказка формата"""
+        from handlers.fallback.training import handle_unexpected_attestation_question_input
+
+        msg = make_message(text="?")
+        state = make_state()
+
+        await handle_unexpected_attestation_question_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Некорректный вопрос аттестации" in text
+
+
+# =================================
+# Материалы теста в траектории
+# =================================
+
+
+class TestUnexpectedTestMaterialsInput:
+    @pytest.mark.asyncio
+    async def test_shows_format_hint(self):
+        """Некорректные материалы — подсказка"""
+        from handlers.fallback.training import handle_unexpected_test_materials_input
+
+        msg = make_message()
+        state = make_state()
+
+        await handle_unexpected_test_materials_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Некорректные материалы" in text
+
+
+# =================================
+# БЗ: название материала (ветвление по text)
+# =================================
+
+
+class TestUnexpectedMaterialNameInput:
+    @pytest.mark.asyncio
+    async def test_non_text_shows_error(self):
+        """Не текст — ошибка формата"""
+        from handlers.fallback.knowledge import handle_unexpected_material_name_input
+
+        msg = make_message(text=None)
+        state = make_state()
+
+        await handle_unexpected_material_name_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Неправильный формат" in text
+
+    @pytest.mark.asyncio
+    async def test_text_input_no_answer(self):
+        """Текстовый ввод — пропускает"""
+        from handlers.fallback.knowledge import handle_unexpected_material_name_input
+
+        msg = make_message(text="Инструкция")
+        state = make_state()
+
+        await handle_unexpected_material_name_input(msg, state)
+
+        msg.answer.assert_not_awaited()
+
+
+# =================================
+# БЗ: содержимое материала (ветвление по text/document)
+# =================================
+
+
+class TestUnexpectedMaterialContentInput:
+    @pytest.mark.asyncio
+    async def test_non_text_non_doc_shows_error(self):
+        """Не текст и не документ — ошибка"""
+        from handlers.fallback.knowledge import handle_unexpected_material_content_input
+
+        msg = make_message(text=None, document=None)
+        state = make_state()
+
+        await handle_unexpected_material_content_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Неправильный формат" in text
+
+    @pytest.mark.asyncio
+    async def test_text_input_no_answer(self):
+        """Текстовый ввод — пропускает"""
+        from handlers.fallback.knowledge import handle_unexpected_material_content_input
+
+        msg = make_message(text="https://example.com")
+        state = make_state()
+
+        await handle_unexpected_material_content_input(msg, state)
+
+        msg.answer.assert_not_awaited()
+
+
+# =================================
+# БЗ: описание материала (ветвление по text)
+# =================================
+
+
+class TestUnexpectedMaterialDescriptionInput:
+    @pytest.mark.asyncio
+    async def test_non_text_shows_error(self):
+        """Не текст — ошибка"""
+        from handlers.fallback.knowledge import handle_unexpected_material_description_input
+
+        msg = make_message(text=None)
+        state = make_state()
+
+        await handle_unexpected_material_description_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Неправильный формат" in text
+
+    @pytest.mark.asyncio
+    async def test_text_input_no_answer(self):
+        """Текстовый ввод — пропускает"""
+        from handlers.fallback.knowledge import handle_unexpected_material_description_input
+
+        msg = make_message(text="Описание материала")
+        state = make_state()
+
+        await handle_unexpected_material_description_input(msg, state)
+
+        msg.answer.assert_not_awaited()
+
+
+# =================================
+# БЗ: фото материала (ветвление по photo)
+# =================================
+
+
+class TestUnexpectedMaterialPhotosInput:
+    @pytest.mark.asyncio
+    async def test_non_photo_shows_error(self):
+        """Не фото — ошибка"""
+        from handlers.fallback.knowledge import handle_unexpected_material_photos_input
+
+        msg = make_message(text="текст", photo=None, media_group_id=None)
+        state = make_state()
+
+        await handle_unexpected_material_photos_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Неправильный формат" in text
+
+    @pytest.mark.asyncio
+    async def test_photo_input_no_answer(self):
+        """Фото — пропускает"""
+        from handlers.fallback.knowledge import handle_unexpected_material_photos_input
+
+        msg = make_message(photo=[MagicMock()])
+        state = make_state()
+
+        await handle_unexpected_material_photos_input(msg, state)
+
+        msg.answer.assert_not_awaited()
+
+
+# =================================
+# Новое название теста (ветвление по длине)
+# =================================
+
+
+class TestUnexpectedNewTestName:
+    @pytest.mark.asyncio
+    async def test_short_name_error(self):
+        """Название < 3 символов — ошибка"""
+        from handlers.fallback.tests import handle_unexpected_new_test_name
+
+        msg = make_message(text="АБ")
+        state = make_state()
+
+        await handle_unexpected_new_test_name(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Некорректное название" in text
+
+    @pytest.mark.asyncio
+    async def test_valid_name_retry(self):
+        """Валидное название — просьба повторить"""
+        from handlers.fallback.tests import handle_unexpected_new_test_name
+
+        msg = make_message(text="Новый тест")
+        state = make_state()
+
+        await handle_unexpected_new_test_name(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Повтори ввод" in text
+
+
+# =================================
+# Групповые обработчики: кнопки
+# =================================
+
+
+class TestUseButtonsStates:
+    @pytest.mark.asyncio
+    async def test_sends_use_buttons(self):
+        """Текстовый ввод — подсказка про кнопки"""
+        from handlers.fallback.grouped import handle_use_buttons_states
+
+        msg = make_message(text="текст")
+        state = make_state()
+
+        await handle_use_buttons_states(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "кнопки" in text
+
+
+# =================================
+# Групповые обработчики: повтор текста
+# =================================
+
+
+class TestTextRetryStates:
+    @pytest.mark.asyncio
+    async def test_sends_retry(self):
+        """Ввод текста — просьба повторить"""
+        from handlers.fallback.grouped import handle_text_retry_states
+
+        msg = make_message(text="текст")
+        state = make_state()
+
+        await handle_text_retry_states(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Повтори ввод" in text
+
+
+# =================================
+# Групповые: название группы
+# =================================
+
+
+class TestUnexpectedGroupNameInput:
+    @pytest.mark.asyncio
+    async def test_shows_error(self):
+        """Некорректное название группы"""
+        from handlers.fallback.grouped import handle_unexpected_group_name_input
+
+        msg = make_message(text=None)
+        state = make_state()
+
+        await handle_unexpected_group_name_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Некорректное название группы" in text
+
+
+# =================================
+# Групповые: название объекта
+# =================================
+
+
+class TestUnexpectedObjectNameInput:
+    @pytest.mark.asyncio
+    async def test_shows_error(self):
+        """Некорректное название объекта"""
+        from handlers.fallback.grouped import handle_unexpected_object_name_input
+
+        msg = make_message(text=None)
+        state = make_state()
+
+        await handle_unexpected_object_name_input(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Некорректное название объекта" in text
+
+
+# =================================
+# Групповые: названия сущностей
+# =================================
+
+
+class TestUnexpectedNameInputs:
+    @pytest.mark.asyncio
+    async def test_shows_error(self):
+        """Некорректное название сущности"""
+        from handlers.fallback.grouped import handle_unexpected_name_inputs
+
+        msg = make_message(text=None)
+        state = make_state()
+
+        await handle_unexpected_name_inputs(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Некорректное название" in text
+
+
+# =================================
+# Групповые: числовой ввод
+# =================================
+
+
+class TestUnexpectedNumericInputs:
+    @pytest.mark.asyncio
+    async def test_shows_error(self):
+        """Некорректное число"""
+        from handlers.fallback.grouped import handle_unexpected_numeric_inputs
+
+        msg = make_message(text="abc")
+        state = make_state()
+
+        await handle_unexpected_numeric_inputs(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Некорректное число" in text
+
+
+# =================================
+# Групповые: текст теста в траектории
+# =================================
+
+
+class TestUnexpectedLpTestTextInputs:
+    @pytest.mark.asyncio
+    async def test_shows_error(self):
+        """Некорректный текстовый ввод"""
+        from handlers.fallback.grouped import handle_unexpected_lp_test_text_inputs
+
+        msg = make_message(text=None)
+        state = make_state()
+
+        await handle_unexpected_lp_test_text_inputs(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Некорректный ввод" in text
+
+
+# =================================
+# Групповые: generic fallback
+# =================================
+
+
+class TestGenericFallbackStates:
+    @pytest.mark.asyncio
+    async def test_sends_fallback(self):
+        """Стандартный fallback"""
+        from handlers.fallback.grouped import handle_generic_fallback_states
+
+        msg = make_message(text="что-то")
+        state = make_state()
+
+        with patch("utils.messages.fallback.get_fallback_keyboard", return_value="kb"):
+            await handle_generic_fallback_states(msg, state)
+
+        text = msg.answer.call_args[0][0]
+        assert "Команда не распознана" in text

@@ -1,1 +1,1 @@
-from handlers.core import auth, common, fallback, registration
+from handlers.core import auth, common, registration

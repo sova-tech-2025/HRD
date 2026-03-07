@@ -46,11 +46,7 @@ def _admin_success_message(role_name: str, company_name: str | None) -> str:
             f"Ты успешно стал {role_display} компании <b>{company_name}</b>.\n"
             "Используй команду /login для входа."
         )
-    return (
-        f"🎉 <b>Поздравляем!</b>\n\n"
-        f"Ты успешно стал {role_display} системы.\n"
-        "Используй команду /login для входа."
-    )
+    return f"🎉 <b>Поздравляем!</b>\n\nТы успешно стал {role_display} системы.\nИспользуй команду /login для входа."
 
 
 async def _complete_phone_registration(message: Message, state: FSMContext, session: AsyncSession, bot) -> None:

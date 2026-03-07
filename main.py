@@ -9,8 +9,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN
 from database.db import init_db
+from handlers import fallback
 from handlers.company import company, groups, objects
-from handlers.core import auth, common, fallback, registration
+from handlers.core import auth, common, registration
 from handlers.knowledge import knowledge_base
 from handlers.management import employee_transition, manager_attestation, manager_menu
 from handlers.tests import broadcast, test_taking, tests
