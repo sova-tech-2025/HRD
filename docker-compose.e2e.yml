@@ -4,7 +4,7 @@ services:
     container_name: hrbot_postgres_e2e
     restart: unless-stopped
     env_file:
-      - tests/e2e/.env.e2e
+      - src/tests/e2e/.env.e2e
     environment:
       POSTGRES_DB: hrd_e2e_test
       POSTGRES_USER: hrd_test
@@ -26,7 +26,7 @@ services:
     container_name: hrbot_app_e2e
     restart: unless-stopped
     env_file:
-      - tests/e2e/.env.e2e
+      - src/tests/e2e/.env.e2e
     depends_on:
       postgres_e2e:
         condition: service_healthy
@@ -35,13 +35,14 @@ services:
       - POSTGRES_PORT=5432
       - LOG_LEVEL=DEBUG
       - DEFAULT_ROLE=Стажер
+      - PYTHONPATH=/app/src
     command: >
       sh -c '
         export BOT_TOKEN="$$E2E_BOT_TOKEN"
         export POSTGRES_USER="$$E2E_POSTGRES_USER"
         export POSTGRES_PASSWORD="$$E2E_POSTGRES_PASSWORD"
         export POSTGRES_DB="$$E2E_POSTGRES_DB"
-        python main.py
+        python -m bot
       '
     volumes:
       - .:/app
