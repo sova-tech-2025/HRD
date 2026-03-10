@@ -38,6 +38,10 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 # Роль по умолчанию для новых пользователей
 DEFAULT_ROLE = os.getenv("DEFAULT_ROLE", "Стажер")
 
+# Настройки администраторов
+MAX_ADMINS = int(os.getenv("MAX_ADMINS", "5"))
+ADMIN_INIT_TOKENS = os.getenv("ADMIN_INIT_TOKENS", os.getenv("ADMIN_INIT_TOKEN", ""))
+
 # =================================================================
 # НАСТРОЙКИ КОМПАНИЙ И ПОДПИСОК
 # =================================================================

@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 from typing import AsyncGenerator, List, Optional
 
 from aiogram.fsm.context import FSMContext
@@ -9,6 +8,7 @@ from sqlalchemy import and_, delete, func, insert, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import joinedload, selectinload, sessionmaker
 
+import config
 from config import DATABASE_URL
 from database.models import (
     Attestation,
@@ -2984,7 +2984,7 @@ async def validate_admin_token(session: AsyncSession, init_token: str) -> bool:
     """Проверка токена администратора без создания пользователя"""
 
     # Поддержка множественных токенов через запятую
-    admin_tokens_str = os.getenv("ADMIN_INIT_TOKENS", os.getenv("ADMIN_INIT_TOKEN", ""))
+    admin_tokens_str = config.ADMIN_INIT_TOKENS
 
     if not admin_tokens_str:
         logger.error("Не настроены токены инициализации администратора")
@@ -2998,7 +2998,7 @@ async def validate_admin_token(session: AsyncSession, init_token: str) -> bool:
         return False
 
     # Проверяем лимит администраторов (по умолчанию максимум 5)
-    max_admins = int(os.getenv("MAX_ADMINS", "5"))
+    max_admins = config.MAX_ADMINS
     existing_managers = await get_users_by_role(session, "Руководитель")
     existing_recruiters = await get_users_by_role(session, "Рекрутер")
 

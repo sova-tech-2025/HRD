@@ -33,8 +33,6 @@ services:
     environment:
       - POSTGRES_HOST=postgres_e2e
       - POSTGRES_PORT=5432
-      - ALLOW_AUTO_AUTH=true
-      - ALLOW_AUTO_ROLE_ASSIGNMENT=true
       - LOG_LEVEL=DEBUG
       - DEFAULT_ROLE=Стажер
     command: >

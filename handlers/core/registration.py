@@ -1,11 +1,10 @@
-import os
-
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import config
 from database.db import (
     check_phone_exists,
     create_admin_with_role,
@@ -25,10 +24,8 @@ router = Router()
 
 
 async def get_admin_settings() -> tuple[int, str]:
-    """Получает настройки администраторов из переменных окружения"""
-    max_admins = int(os.getenv("MAX_ADMINS", "5"))
-    admin_tokens_str = os.getenv("ADMIN_INIT_TOKENS", os.getenv("ADMIN_INIT_TOKEN", ""))
-    return max_admins, admin_tokens_str
+    """Получает настройки администраторов из конфигурации"""
+    return config.MAX_ADMINS, config.ADMIN_INIT_TOKENS
 
 
 async def _clear_state_if_no_company(state: FSMContext, user_data: dict) -> None:
@@ -313,15 +310,9 @@ async def process_role_selection(callback: CallbackQuery, state: FSMContext, ses
     try:
         await create_user(session, user_data, selected_role, bot)
 
-        auto_auth_allowed = os.getenv("ALLOW_AUTO_AUTH", "true").lower() == "true"
-        if auto_auth_allowed:
-            await callback.message.answer(
-                f"🎉 Поздравляем! Ты успешно зарегистрирован как {selected_role}.\n\nТы можешь сразу начать работу - авторизация произойдет автоматически."
-            )
-        else:
-            await callback.message.answer(
-                f"🎉 Поздравляем! Ты успешно зарегистрирован как {selected_role}.\n\nИспользуй команду /login для входа."
-            )
+        await callback.message.answer(
+            f"🎉 Поздравляем! Ты успешно зарегистрирован как {selected_role}.\n\nТы можешь сразу начать работу - авторизация произойдет автоматически."
+        )
 
         await callback.message.edit_reply_markup(reply_markup=None)
 

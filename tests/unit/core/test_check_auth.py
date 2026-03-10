@@ -287,27 +287,6 @@ class TestCheckAuthNotAuthenticated:
         assert "истекла" in msg.answer.call_args[0][0]
 
     @pytest.mark.asyncio
-    async def test_auto_auth_disabled(self):
-        """Авто-аутентификация отключена"""
-        from utils.auth.auth import check_auth
-
-        msg = make_message()
-        state = make_state({})
-        session = AsyncMock()
-        user = make_user()
-        company = make_company()
-
-        with (
-            patch(f"{AUTH_MODULE}.get_user_by_tg_id", return_value=user),
-            patch(f"{AUTH_MODULE}.get_company_by_id", return_value=company),
-            patch.dict("os.environ", {"ALLOW_AUTO_AUTH": "false"}),
-        ):
-            result = await check_auth(msg, state, session)
-
-        assert result is False
-        assert "/login" in msg.answer.call_args[0][0]
-
-    @pytest.mark.asyncio
     async def test_no_roles(self):
         """Пользователь без ролей"""
         from utils.auth.auth import check_auth
@@ -322,7 +301,6 @@ class TestCheckAuthNotAuthenticated:
             patch(f"{AUTH_MODULE}.get_user_by_tg_id", return_value=user),
             patch(f"{AUTH_MODULE}.get_company_by_id", return_value=company),
             patch(f"{AUTH_MODULE}.get_user_roles", return_value=[]),
-            patch.dict("os.environ", {"ALLOW_AUTO_AUTH": "true"}),
         ):
             result = await check_auth(msg, state, session)
 
@@ -346,7 +324,6 @@ class TestCheckAuthNotAuthenticated:
             patch(f"{AUTH_MODULE}.get_company_by_id", return_value=company),
             patch(f"{AUTH_MODULE}.get_user_roles", return_value=roles),
             patch(f"{AUTH_MODULE}.log_user_action"),
-            patch.dict("os.environ", {"ALLOW_AUTO_AUTH": "true"}),
         ):
             result = await check_auth(msg, state, session)
 
@@ -407,7 +384,6 @@ class TestCheckAuthFallbackUserId:
             patch(f"{AUTH_MODULE}.get_company_by_id", return_value=company),
             patch(f"{AUTH_MODULE}.get_user_roles", return_value=roles),
             patch(f"{AUTH_MODULE}.log_user_action"),
-            patch.dict("os.environ", {"ALLOW_AUTO_AUTH": "true"}),
         ):
             result = await check_auth(msg, state, session)
 

@@ -67,41 +67,25 @@ def get_contact_keyboard() -> ReplyKeyboardMarkup:
 
 
 def get_role_selection_keyboard(is_editing: bool = False) -> InlineKeyboardMarkup:
-    import os
-    allow_auto_role = os.getenv("ALLOW_AUTO_ROLE_ASSIGNMENT", "false").lower() == "true"
-    default_role = os.getenv("DEFAULT_ROLE", "Стажер")
-    
-    # Базовые роли
     all_roles = [
         ("Стажёр", "Стажер"),
-        ("Сотрудник", "Сотрудник"), 
+        ("Сотрудник", "Сотрудник"),
         ("Наставник", "Наставник"),
         ("Рекрутер", "Рекрутер"),
-        ("Руководитель", "Руководитель")
+        ("Руководитель", "Руководитель"),
     ]
-    
-    keyboard_buttons = []
-    
-    # Если включено автоназначение, добавляем рекомендуемую роль вверху
-    if allow_auto_role:
-        keyboard_buttons.append([InlineKeyboardButton(
-            text=f"🚀 {default_role} (рекомендуемая роль)", 
-            callback_data=f"role:{default_role}"
-        )])
-    
-    # Добавляем остальные роли, исключая дублирование с рекомендуемой
-    for display_name, role_name in all_roles:
-        if not (allow_auto_role and role_name == default_role):
-            keyboard_buttons.append([InlineKeyboardButton(text=display_name, callback_data=f"role:{role_name}")])
-    
-    # В режиме редактирования показываем "Назад", иначе "Отмена"
+
+    keyboard_buttons = [
+        [InlineKeyboardButton(text=display_name, callback_data=f"role:{role_name}")]
+        for display_name, role_name in all_roles
+    ]
+
     if is_editing:
         keyboard_buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_edit")])
     else:
         keyboard_buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_registration")])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-    return keyboard
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
 
 def get_trainee_inline_menu() -> InlineKeyboardMarkup:

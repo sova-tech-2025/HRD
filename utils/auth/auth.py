@@ -1,5 +1,3 @@
-import os
-
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -136,11 +134,6 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
                 "❌ Подписка компании истекла (заморожена).\n\n"
                 "Обратись к администратору компании для продления подписки."
             )
-            return False
-
-        auto_auth_allowed = os.getenv("ALLOW_AUTO_AUTH", "true").lower() == "true"
-        if not auto_auth_allowed:
-            await message.answer("Пожалуйста, выполни команду /login для входа.")
             return False
 
         roles = await get_user_roles(session, user.id)
