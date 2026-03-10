@@ -444,30 +444,6 @@ async def callback_register_normal_join(callback: CallbackQuery, state: FSMConte
     await callback.answer()
 
 
-@router.callback_query(CompanyJoinStates.waiting_for_registration_type, F.data == "register:with_code")
-async def callback_register_with_code_join(callback: CallbackQuery, state: FSMContext):
-    """Обработчик регистрации с кодом при присоединении к компании"""
-    # Помечаем, что это регистрация с кода (токен сначала)
-    await state.update_data(registration_flow="code_first")
-
-    await callback.message.edit_text(
-        "Если ты сюда попал случайно, просто вернись назад ⬅️\n"
-        "Этот шаг нужен только тем, кому рекрутер выдал специальный код\n\n"
-        "Если есть код, введи его ниже",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_company_join_welcome")]]
-        ),
-    )
-    # Используем RegistrationStates для обработки токена
-    from bot.states.states import RegistrationStates
-
-    await state.set_state(RegistrationStates.waiting_for_admin_token)
-    log_user_action(
-        callback.from_user.id, callback.from_user.username, "started registration with code for company join"
-    )
-    await callback.answer()
-
-
 @router.callback_query(F.data == "back_to_company_join_welcome")
 async def callback_back_to_company_join_welcome(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик возврата к выбору типа регистрации при присоединении к компании"""

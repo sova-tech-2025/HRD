@@ -8,7 +8,6 @@ from sqlalchemy import and_, delete, func, insert, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import joinedload, selectinload, sessionmaker
 
-from bot import config
 from bot.config import DATABASE_URL
 from bot.database.models import (
     Attestation,
@@ -2988,88 +2987,6 @@ async def get_question_analytics(session: AsyncSession, question_id: int, compan
         "correct_answers": correct_answers,
         "avg_time_seconds": total_time / total_answers if total_answers > 0 else 0,
     }
-
-
-async def validate_admin_token(session: AsyncSession, init_token: str) -> bool:
-    """Проверка токена администратора без создания пользователя"""
-
-    # Поддержка множественных токенов через запятую
-    admin_tokens_str = config.ADMIN_INIT_TOKENS
-
-    if not admin_tokens_str:
-        logger.error("Не настроены токены инициализации администратора")
-        return False
-
-    # Разбираем токены
-    valid_tokens = [token.strip() for token in admin_tokens_str.split(",") if token.strip()]
-
-    if init_token not in valid_tokens:
-        logger.error(f"Неверный токен инициализации администратора. Ожидался один из: {valid_tokens}")
-        return False
-
-    # Проверяем лимит администраторов (по умолчанию максимум 5)
-    max_admins = config.MAX_ADMINS
-    existing_managers = await get_users_by_role(session, "Руководитель")
-    existing_recruiters = await get_users_by_role(session, "Рекрутер")
-
-    total_admins = len(existing_managers) + len(existing_recruiters)
-
-    if total_admins >= max_admins:
-        logger.error(f"Достигнут лимит администраторов ({max_admins})")
-        return False
-
-    return True
-
-
-async def create_admin_with_role(session: AsyncSession, admin_data: dict, role_name: str) -> bool:
-    """Создание администратора с выбранной ролью (с изоляцией по компании)
-
-    Автоматически привязывает администратора к компании по умолчанию (ID=1), если company_id не указан.
-    """
-    try:
-        # Получаем company_id из admin_data, если не указан - используем компанию по умолчанию
-        company_id = admin_data.get("company_id", 1)
-
-        user = User(
-            tg_id=admin_data["tg_id"],
-            username=admin_data.get("username"),
-            full_name=admin_data["full_name"],
-            phone_number=admin_data["phone_number"],
-            is_active=True,  # Администраторы автоматически активны
-            is_activated=True,  # Администраторы автоматически активированы
-            company_id=company_id,  # КРИТИЧЕСКАЯ ИЗОЛЯЦИЯ ПО КОМПАНИИ!
-        )
-        session.add(user)
-        await session.flush()
-
-        role_result = await session.execute(select(Role).where(Role.name == role_name))
-        role = role_result.scalar_one()
-
-        stmt = insert(user_roles).values(user_id=user.id, role_id=role.id)
-        await session.execute(stmt)
-
-        # Обновляем количество пользователей в компании
-        if company_id:
-            await update_company_members_count(session, company_id)
-
-        await session.commit()
-
-        logger.info(f"Администратор {user.id} создан с ролью {role_name} и автоматически активирован")
-        return True
-    except Exception as e:
-        await session.rollback()
-        logger.error(f"Ошибка создания администратора: {e}")
-        return False
-
-
-async def create_initial_admin_with_token(session: AsyncSession, admin_data: dict, init_token: str) -> bool:
-    """УСТАРЕВШАЯ ФУНКЦИЯ - оставлена для обратной совместимости"""
-    # Сначала проверяем токен
-    if not await validate_admin_token(session, init_token):
-        return False
-
-    # Создаем администратора с ролью Руководитель (по умолчанию для обратной совместимости)
-    return await create_admin_with_role(session, admin_data, "Руководитель")
 
 
 # =================================

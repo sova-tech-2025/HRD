@@ -52,7 +52,6 @@ def get_welcome_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура для приветствия незарегистрированных пользователей"""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Зарегистрироваться", callback_data="register:normal")],
-        [InlineKeyboardButton(text="У меня есть код", callback_data="register:with_code")]
     ])
     return keyboard
 

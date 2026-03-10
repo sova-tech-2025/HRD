@@ -13,8 +13,6 @@ class RegistrationStates(StatesGroup):
     waiting_for_full_name = State()
     waiting_for_phone = State()
     waiting_for_role = State()
-    waiting_for_admin_token = State()
-    waiting_for_admin_role_selection = State()
 
 
 class AdminStates(StatesGroup):
@@ -386,7 +384,7 @@ class CompanyJoinStates(StatesGroup):
     """Состояния для присоединения к компании"""
 
     waiting_for_invite_code = State()
-    waiting_for_registration_type = State()  # Выбор типа регистрации (normal/with_code)
+    waiting_for_registration_type = State()  # Выбор типа регистрации
     waiting_for_full_name = State()
     waiting_for_phone = State()
     waiting_for_role_selection = State()

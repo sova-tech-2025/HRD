@@ -13,7 +13,6 @@ from bot.states.states import (
     MentorshipStates,
     ObjectManagementStates,
     RecruiterAttestationStates,
-    RegistrationStates,
     TestCreationStates,
     TestTakingStates,
     TraineeManagementStates,
@@ -33,8 +32,6 @@ USE_BUTTONS_FILTER = StateFilter(
     AdminStates.waiting_for_permission_action,
     AdminStates.waiting_for_permission_selection,
     AdminStates.waiting_for_permission_confirmation,
-    # Registration
-    RegistrationStates.waiting_for_admin_token,
     # TestCreation - button-based states
     TestCreationStates.waiting_for_more_questions,
     TestCreationStates.waiting_for_stage_selection,

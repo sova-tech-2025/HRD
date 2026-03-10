@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.db import get_user_by_tg_id
 from bot.handlers.company.company import callback_back_to_company_join_welcome
-from bot.keyboards.keyboards import get_company_selection_keyboard, get_welcome_keyboard
+from bot.keyboards.keyboards import get_company_selection_keyboard
 from bot.states.states import RegistrationStates
 from bot.utils.auth.auth import validate_user_access
 from bot.utils.bot.commands import set_bot_commands
@@ -174,36 +174,6 @@ async def callback_register_normal(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data == "register:with_code")
-async def callback_register_with_code(callback: CallbackQuery, state: FSMContext):
-    """Обработчик регистрации с кодом"""
-
-    await state.update_data(registration_flow="code_first")
-
-    # Проверяем, присоединяется ли пользователь к компании
-    user_data = await state.get_data()
-    company_id = user_data.get("company_id")
-
-    # Выбираем правильный callback для кнопки "Назад"
-    back_callback = "back_to_company_join_welcome" if company_id else "back_to_welcome"
-
-    await callback.message.edit_text(
-        "Если ты сюда попал случайно, просто вернись назад ⬅️\n"
-        "Этот шаг нужен только тем, кому рекрутер выдал специальный код\n\n"
-        "Если есть код, введи его ниже",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback)]]
-        ),
-    )
-    await state.set_state(RegistrationStates.waiting_for_admin_token)
-    log_user_action(
-        callback.from_user.id,
-        callback.from_user.username,
-        "started registration with code",
-    )
-    await callback.answer()
-
-
 @router.callback_query(F.data == "back_to_welcome")
 async def callback_back_to_welcome(callback: CallbackQuery, state: FSMContext):
     """Обработчик возврата к стартовому экрану"""
@@ -219,8 +189,8 @@ async def callback_back_to_welcome(callback: CallbackQuery, state: FSMContext):
     # Обычный возврат - очищаем состояние
     await state.clear()
     await callback.message.edit_text(
-        "Привет! Добро пожаловать в чат-бот.\n\nТы ещё не зарегистрирован. Давай подключим тебе доступ.",
-        reply_markup=get_welcome_keyboard(),
+        "Привет! Добро пожаловать в чат-бот.\n\n🏢 Выбери действие:",
+        reply_markup=get_company_selection_keyboard(),
     )
     log_user_action(callback.from_user.id, callback.from_user.username, "returned to welcome screen")
     await callback.answer()

@@ -28,13 +28,12 @@ BOT_TOKEN=your_telegram_bot_token
 POSTGRES_DB=hrd
 POSTGRES_USER=hrd_user
 POSTGRES_PASSWORD=your_secure_password
-ADMIN_INIT_TOKEN=your_admin_token
 EOF
 
 docker-compose up -d
 ```
 
-Откройте бота в Telegram и отправьте `/start`. Используйте `ADMIN_INIT_TOKEN` для создания первой компании.
+Откройте бота в Telegram и отправьте `/start`. Создайте компанию — вы автоматически станете Рекрутером с полными правами.
 
 ## Screenshots
 
