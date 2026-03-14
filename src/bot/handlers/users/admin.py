@@ -594,53 +594,36 @@ async def show_trainee_progress(callback: CallbackQuery, session: AsyncSession, 
     # Рассчитываем количество дней в статусе стажера
     days_as_trainee = (moscow_now() - trainee.role_assigned_date).days
 
-    # Формируем сообщение согласно ТЗ
-    message_text = f"🦸🏻‍♂️<b>Стажер:</b> {trainee.full_name}\n\n"
-    message_text += f"<b>Телефон:</b> {trainee.phone_number}\n"
-    message_text += f"<b>В статусе стажера:</b> {days_as_trainee} дней\n"
-    message_text += (
-        f"<b>Объект стажировки:</b> {trainee.internship_object.name if trainee.internship_object else 'Не указан'}\n"
-    )
-    message_text += f"<b>Объект работы:</b> {trainee.work_object.name if trainee.work_object else 'Не указан'}\n\n"
-    message_text += "━━━━━━━━━━━━\n\n"
-    message_text += "📊 <b>Общая статистика</b>\n"
+    # Формируем компактное сообщение (лимит Telegram 4096 символов)
+    message_text = f"🦸🏻‍♂️ <b>Стажер:</b> {trainee.full_name}\n"
+    message_text += f"📞 {trainee.phone_number} | 📅 {days_as_trainee} дн.\n"
+    intern_obj = trainee.internship_object.name if trainee.internship_object else "—"
+    work_obj = trainee.work_object.name if trainee.work_object else "—"
+    message_text += f"🏢 Стажировка: {intern_obj}\n"
+    message_text += f"🏢 Работа: {work_obj}\n\n"
 
     # Подсчитываем статистику тестов
     total_tests = len(test_results)
     passed_tests = sum(1 for result in test_results if result.is_passed)
     success_rate = (passed_tests / total_tests * 100) if total_tests > 0 else 0.0
 
-    message_text += f"• <b>Пройдено тестов:</b> {passed_tests}/{total_tests}\n"
-    message_text += f"• <b>Процент успеха:</b> {success_rate:.1f}%\n\n"
-
-    message_text += "🧾 <b>Детальные результаты</b>\n"
+    message_text += "━━━━━━━━━━━━\n"
+    message_text += "📊 <b>Общая статистика</b>\n\n"
+    message_text += f"• Пройдено тестов: {passed_tests}/{total_tests}\n"
+    message_text += f"• Процент успеха: {success_rate:.1f}%\n\n"
+    message_text += "━━━━━━━━━━━━\n"
+    message_text += "🧾 <b>Детальные результаты:</b>\n\n"
 
     if test_results:
         for result in test_results:
-            # Получаем информацию о тесте с изоляцией
             test = await get_test_by_id(session, result.test_id, company_id=company_id)
-            test_name = test.name if test else "Неизвестный тест"
-
-            # Рассчитываем процент
-            percentage = (result.score / result.max_possible_score * 100) if result.max_possible_score > 0 else 0.0
-
-            # Статус
-            status = "пройден" if result.is_passed else "не пройден"
-
-            # Время выполнения
-            if result.start_time and result.end_time:
-                time_spent = int((result.end_time - result.start_time).total_seconds())
-                time_str = f"{time_spent} сек"
-            else:
-                time_str = "неизвестно"
-
-            message_text += f"<b>Тест:</b> {test_name}\n"
-            message_text += f"• <b>Баллы:</b> {result.score:.1f}/{result.max_possible_score:.1f} ({percentage:.1f}%)\n"
-            message_text += f"• <b>Статус:</b> {status}\n"
-            message_text += f"• <b>Дата:</b> {result.created_date.strftime('%d.%m.%Y %H:%M')}\n"
-            message_text += f"• <b>Время:</b> {time_str}\n\n"
+            test_name = test.name if test else "?"
+            icon = "✅" if result.is_passed else "❌"
+            score_str = f"{int(result.score)}/{int(result.max_possible_score)}"
+            date_str = result.created_date.strftime("%d.%m.%Y")
+            message_text += f"{icon} {test_name} | {score_str} | {date_str}\n"
     else:
-        message_text += "Нет пройденных тестов\n\n"
+        message_text += "Нет пройденных тестов"
 
     await callback.message.edit_text(
         message_text, parse_mode="HTML", reply_markup=get_trainee_progress_keyboard(trainee_id)
