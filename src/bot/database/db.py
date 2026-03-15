@@ -5820,6 +5820,7 @@ async def assign_learning_path_to_trainee(
             LearningPath,
             LearningSession,
             LearningStage,
+            TraineeAttestation,
             TraineeLearningPath,
             TraineeSessionProgress,
             TraineeStageProgress,
@@ -5895,6 +5896,14 @@ async def assign_learning_path_to_trainee(
         await session.execute(
             update(TraineeLearningPath)
             .where(TraineeLearningPath.trainee_id == trainee_id, TraineeLearningPath.is_active == True)
+            .values(is_active=False)
+        )
+
+        # Деактивируем старые назначения аттестаций стажеру (чтобы при смене траектории
+        # руководитель не видел дубликаты от старой траектории)
+        await session.execute(
+            update(TraineeAttestation)
+            .where(TraineeAttestation.trainee_id == trainee_id, TraineeAttestation.is_active == True)
             .values(is_active=False)
         )
 
