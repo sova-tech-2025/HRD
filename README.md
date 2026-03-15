@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/images/readme_logo/photo_2026-02-23_07-41-40.jpg" alt="HRD" width="300" /></p>
+<p align="center"><img src="src/bot/assets/images/readme_logo/photo_2026-02-23_07-41-40.jpg" alt="HRD" width="300" /></p>
 <h3 align="center">Telegram-бот для управления персоналом и обучением в HoReCa</h3>
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white" alt="Python"></a>
@@ -34,20 +34,6 @@ docker-compose up -d
 ```
 
 Откройте бота в Telegram и отправьте `/start`. Создайте компанию — вы автоматически станете Рекрутером с полными правами.
-
-## Screenshots
-
-<!-- Добавьте скриншоты бота -->
-<table style="border-collapse: collapse; border: 1px solid black;">
-  <tr>
-    <td style="padding: 5px;background-color:#fff;"><img src="assets/images/screenshot_1.png" alt="HRD Screenshot 1" /></td>
-    <td style="padding: 5px;background-color:#fff;"><img src="assets/images/screenshot_2.png" alt="HRD Screenshot 2" /></td>
-  </tr>
-  <tr>
-    <td style="padding: 5px;background-color:#fff;"><img src="assets/images/screenshot_3.png" alt="HRD Screenshot 3" /></td>
-    <td style="padding: 5px;background-color:#fff;"><img src="assets/images/screenshot_4.png" alt="HRD Screenshot 4" /></td>
-  </tr>
-</table>
 
 ## Technical Stack
 

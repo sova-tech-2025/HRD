@@ -994,7 +994,7 @@ async def callback_show_new_users(callback: CallbackQuery, state: FSMContext, se
     unactivated_users = await get_unactivated_users(session, company_id)
 
     if not unactivated_users:
-        await callback.message.answer(
+        await callback.message.edit_text(
             "📋 <b>Новые пользователи</b>\n\n"
             "✅ Все пользователи активированы!\n"
             "Новых пользователей, ожидающих активации, нет.",
@@ -1006,7 +1006,7 @@ async def callback_show_new_users(callback: CallbackQuery, state: FSMContext, se
     # Формируем клавиатуру с пагинацией
     keyboard = get_new_users_list_keyboard(unactivated_users, 0, 5)
 
-    await callback.message.answer(
+    await callback.message.edit_text(
         f"📋 <b>Новые пользователи</b>\n\n"
         f"📊 <b>Всего новых пользователей:</b> {len(unactivated_users)}\n\n"
         "Выбери пользователя для активации:",
