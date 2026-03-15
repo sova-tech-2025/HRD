@@ -3,6 +3,11 @@ BotClient — обёртка над TelegramClient для E2E-тестов.
 
 Предоставляет удобные методы для взаимодействия с ботом:
 отправка сообщений, ожидание ответов, нажатие inline-кнопок.
+
+Ожидание ответов реализовано через event-driven подход (Telethon events)
+вместо polling — мгновенная реакция без лишних API-вызовов.
+При получении совпадения используется settling delay для захвата
+последнего сообщения в серии (аналог поведения polling get_messages).
 """
 
 import asyncio
@@ -10,16 +15,20 @@ import re
 import time
 from typing import Optional
 
-from telethon import TelegramClient
+from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 from telethon.tl.custom.message import Message
 
 # Минимальный интервал между API-вызовами (секунды)
-MIN_CALL_INTERVAL = 1.5
+MIN_CALL_INTERVAL = 0.8
 
 # Таймауты по умолчанию
 DEFAULT_TIMEOUT = 15.0
-POLL_INTERVAL = 0.5
+
+# Время ожидания более свежих сообщений после первого совпадения.
+# Бот может отправить несколько сообщений подряд (подтверждение + результат),
+# settling гарантирует возврат последнего из серии.
+SETTLE_DELAY = 0.3
 
 
 class BotClient:
@@ -44,6 +53,15 @@ class BotClient:
         # Убираем Markdown bold/italic маркеры
         text = text.replace("**", "").replace("__", "")
         return text
+
+    @staticmethod
+    def _matches(text: str, contains: Optional[str], pattern: Optional[str]) -> bool:
+        """Проверка текста на соответствие contains и/или pattern."""
+        if contains and contains not in text:
+            return False
+        if pattern and not re.search(pattern, text, re.IGNORECASE):
+            return False
+        return True
 
     async def _rate_limit(self) -> None:
         """Ожидание минимального интервала между API-вызовами."""
@@ -91,7 +109,10 @@ class BotClient:
         after_message_id: Optional[int] = None,
     ) -> Message:
         """
-        Ожидание ответа от бота с polling get_messages().
+        Ожидание ответа от бота через event-driven подписку.
+
+        После первого совпадения ждёт SETTLE_DELAY для захвата последнего
+        сообщения в серии (бот может отправить несколько сообщений подряд).
 
         Args:
             timeout: максимальное время ожидания
@@ -106,49 +127,41 @@ class BotClient:
             TimeoutError: если бот не ответил вовремя
         """
         reference_id = after_message_id or self._last_sent_message_id or 0
-        deadline = time.monotonic() + timeout
-        last_candidate = None
+        latest_match: list[Optional[Message]] = [None]
+        match_event = asyncio.Event()
 
-        while time.monotonic() < deadline:
-            messages = await self.get_messages(limit=10)
+        async def on_new_message(event):
+            msg = event.message
+            if msg.out:
+                return
+            if msg.id <= reference_id:
+                return
+            text = self._clean_text(msg.raw_text or "")
+            if self._matches(text, contains, pattern):
+                latest_match[0] = msg
+                match_event.set()
 
-            for msg in messages:
-                # Пропускаем свои сообщения
-                if msg.out:
-                    continue
-
-                # Ждём сообщение новее отправленного
-                if msg.id <= reference_id:
-                    continue
-
-                text = msg.raw_text or msg.message or ""
-                clean = self._clean_text(text)
-
-                if contains and contains not in clean:
-                    last_candidate = msg
-                    continue
-
-                if pattern and not re.search(pattern, clean, re.IGNORECASE):
-                    last_candidate = msg
-                    continue
-
-                return msg
-
-            await asyncio.sleep(POLL_INTERVAL)
-
-        # Если был кандидат без совпадения — покажем его для отладки
-        detail = ""
-        if last_candidate:
-            text = self._clean_text(last_candidate.text or "")[:200]
-            detail = f" Last bot message: '{text}'"
-
-        filter_info = ""
-        if contains:
-            filter_info += f" contains='{contains}'"
-        if pattern:
-            filter_info += f" pattern='{pattern}'"
-
-        raise TimeoutError(f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}{detail}")
+        self.client.add_event_handler(
+            on_new_message,
+            events.NewMessage(chats=self.bot_entity, incoming=True),
+        )
+        try:
+            await asyncio.wait_for(match_event.wait(), timeout=timeout)
+            # Settling: ждём возможные более свежие сообщения в серии
+            await asyncio.sleep(SETTLE_DELAY)
+            self._last_call_time = time.monotonic()
+            return latest_match[0]
+        except asyncio.TimeoutError:
+            filter_info = ""
+            if contains:
+                filter_info += f" contains='{contains}'"
+            if pattern:
+                filter_info += f" pattern='{pattern}'"
+            raise TimeoutError(
+                f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}"
+            )
+        finally:
+            self.client.remove_event_handler(on_new_message)
 
     async def send_and_wait(
         self,
@@ -215,56 +228,66 @@ class BotClient:
         Обрабатывает два варианта ответа бота:
         1. Бот отправляет новое сообщение (msg.id > original)
         2. Бот редактирует сообщение с кнопкой (edit_text)
+
+        После первого совпадения ждёт SETTLE_DELAY для захвата последнего
+        сообщения в серии.
         """
         original_text = message.raw_text or message.message or ""
         original_msg_id = message.id
+
+        latest_match: list[Optional[Message]] = [None]
+        match_event = asyncio.Event()
+
+        async def on_new(event):
+            msg = event.message
+            if msg.out or msg.id <= original_msg_id:
+                return
+            text_ = self._clean_text(msg.raw_text or "")
+            if self._matches(text_, wait_contains, wait_pattern):
+                latest_match[0] = msg
+                match_event.set()
+
+        async def on_edit(event):
+            msg = event.message
+            if msg.id != original_msg_id:
+                return
+            msg_text = msg.raw_text or ""
+            if msg_text == original_text:
+                return
+            clean = self._clean_text(msg_text)
+            if self._matches(clean, wait_contains, wait_pattern):
+                latest_match[0] = msg
+                match_event.set()
+
+        self.client.add_event_handler(
+            on_new,
+            events.NewMessage(chats=self.bot_entity, incoming=True),
+        )
+        self.client.add_event_handler(
+            on_edit,
+            events.MessageEdited(chats=self.bot_entity),
+        )
+
         await self.click_button(message, text=text, data=data)
 
-        deadline = time.monotonic() + timeout
-        last_candidate = None
-
-        while time.monotonic() < deadline:
-            messages = await self.get_messages(limit=10)
-
-            for msg in messages:
-                if msg.out:
-                    continue
-
-                msg_text = msg.raw_text or msg.message or ""
-                clean_text = self._clean_text(msg_text)
-
-                # Вариант 1: Бот отправил новое сообщение
-                is_new = msg.id > original_msg_id
-                # Вариант 2: Бот отредактировал сообщение с кнопкой
-                is_edited = msg.id == original_msg_id and msg_text != original_text
-
-                if not is_new and not is_edited:
-                    continue
-
-                if wait_contains and wait_contains not in clean_text:
-                    last_candidate = msg
-                    continue
-
-                if wait_pattern and not re.search(wait_pattern, clean_text, re.IGNORECASE):
-                    last_candidate = msg
-                    continue
-
-                return msg
-
-            await asyncio.sleep(POLL_INTERVAL)
-
-        detail = ""
-        if last_candidate:
-            preview = self._clean_text(last_candidate.text or "")[:200]
-            detail = f" Last bot message: '{preview}'"
-
-        filter_info = ""
-        if wait_contains:
-            filter_info += f" contains='{wait_contains}'"
-        if wait_pattern:
-            filter_info += f" pattern='{wait_pattern}'"
-
-        raise TimeoutError(f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}{detail}")
+        try:
+            await asyncio.wait_for(match_event.wait(), timeout=timeout)
+            # Settling: ждём возможные более свежие сообщения в серии
+            await asyncio.sleep(SETTLE_DELAY)
+            self._last_call_time = time.monotonic()
+            return latest_match[0]
+        except asyncio.TimeoutError:
+            filter_info = ""
+            if wait_contains:
+                filter_info += f" contains='{wait_contains}'"
+            if wait_pattern:
+                filter_info += f" pattern='{wait_pattern}'"
+            raise TimeoutError(
+                f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}"
+            )
+        finally:
+            self.client.remove_event_handler(on_new)
+            self.client.remove_event_handler(on_edit)
 
     @staticmethod
     def get_button_texts(message: Message) -> list[str]:

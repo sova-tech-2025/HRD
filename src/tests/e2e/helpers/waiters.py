@@ -98,6 +98,6 @@ def extract_score(text: str) -> Optional[int]:
     return None
 
 
-async def wait_between_actions(seconds: float = 2.0) -> None:
+async def wait_between_actions(seconds: float = 1.0) -> None:
     """Явная задержка между действиями для стабильности."""
     await asyncio.sleep(seconds)
