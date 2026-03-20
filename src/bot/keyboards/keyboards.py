@@ -2423,20 +2423,39 @@ def get_mentor_assignment_management_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_trainees_with_mentors_keyboard(trainees: list) -> InlineKeyboardMarkup:
-    """Клавиатура для выбора стажера с наставником для переназначения"""
+def get_trainees_with_mentors_keyboard(trainees: list, page: int = 0, per_page: int = 10) -> InlineKeyboardMarkup:
+    """Клавиатура для выбора стажера с наставником для переназначения (с пагинацией)"""
+    total_pages = max(1, (len(trainees) + per_page - 1) // per_page)
+    page = max(0, min(page, total_pages - 1))
+
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    page_trainees = trainees[start_idx:end_idx]
+
     keyboard = []
-    
-    for trainee in trainees:
+    for trainee in page_trainees:
+        mentor_name = getattr(trainee, "current_mentor", None)
+        label = f"👤 {trainee.full_name}"
+        if mentor_name and hasattr(mentor_name, "full_name"):
+            label += f" ({mentor_name.full_name})"
         keyboard.append([
             InlineKeyboardButton(
-                text=f"👤 {trainee.full_name}",
-                callback_data=f"select_trainee_for_reassign:{trainee.id}"
+                text=label,
+                callback_data=f"select_trainee_for_reassign:{trainee.id}",
             )
         ])
-    
+
+    if total_pages > 1:
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"reassign_trainees_page:{page - 1}"))
+        nav.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"))
+        if page < total_pages - 1:
+            nav.append(InlineKeyboardButton(text="➡️", callback_data=f"reassign_trainees_page:{page + 1}"))
+        keyboard.append(nav)
+
     keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mentor_assignment_management")])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 

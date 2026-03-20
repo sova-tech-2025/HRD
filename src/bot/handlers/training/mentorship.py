@@ -1412,48 +1412,75 @@ async def callback_assignments_page(callback: CallbackQuery, state: FSMContext, 
         log_user_error(callback.from_user.id, "assignments_page_error", f"Invalid page data: {callback.data}")
 
 
+async def _get_trainees_with_mentors(session: AsyncSession, company_id: int) -> list:
+    """Получить список стажёров с назначенными наставниками."""
+    mentors = await get_available_mentors(session, company_id=company_id)
+    trainees_with_mentors = []
+    seen_ids = set()
+
+    for mentor in mentors:
+        trainees = await get_mentor_trainees(session, mentor.id, company_id=company_id)
+        for trainee in trainees:
+            if trainee.id not in seen_ids:
+                trainee.current_mentor = mentor
+                trainees_with_mentors.append(trainee)
+                seen_ids.add(trainee.id)
+
+    return trainees_with_mentors
+
+
+async def _show_reassign_trainees(callback: CallbackQuery, session: AsyncSession, page: int = 0):
+    """Отображение списка стажёров для переназначения наставника с пагинацией."""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user:
+        await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+        return
+
+    trainees_with_mentors = await _get_trainees_with_mentors(session, user.company_id)
+
+    if not trainees_with_mentors:
+        await callback.message.edit_text(
+            "🔄 <b>Переназначение наставника</b>\n\nВ системе нет стажеров с назначенными наставниками.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="← назад", callback_data="mentor_assignment_management")]]
+            ),
+        )
+        return
+
+    total = len(trainees_with_mentors)
+    header = f"🔄 <b>Переназначение наставника</b>\n\n📊 Всего стажёров: <b>{total}</b>\nВыбери стажера:"
+
+    await callback.message.edit_text(
+        header,
+        parse_mode="HTML",
+        reply_markup=get_trainees_with_mentors_keyboard(trainees_with_mentors, page=page),
+    )
+
+
 @router.callback_query(F.data == "reassign_mentor")
 async def callback_reassign_mentor(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Переназначение наставника - выбор стажера"""
     try:
-        user = await get_user_by_tg_id(session, callback.from_user.id)
-        if not user:
-            await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
-            return
-
-        # Получаем всех стажеров, у которых есть наставники
-        mentors = await get_available_mentors(session, company_id=user.company_id)
-        trainees_with_mentors = []
-
-        for mentor in mentors:
-            trainees = await get_mentor_trainees(session, mentor.id, company_id=user.company_id)
-            for trainee in trainees:
-                trainee.current_mentor = mentor  # Добавляем информацию о текущем наставнике
-                trainees_with_mentors.append(trainee)
-
-        if not trainees_with_mentors:
-            await callback.message.edit_text(
-                "🔄 <b>Переназначение наставника</b>\n\nВ системе нет стажеров с назначенными наставниками.",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [InlineKeyboardButton(text="← назад", callback_data="mentor_assignment_management")]
-                    ]
-                ),
-            )
-            await callback.answer()
-            return
-
-        await callback.message.edit_text(
-            "🔄 <b>Переназначение наставника</b>\n\nВыбери стажера для переназначения наставника:",
-            parse_mode="HTML",
-            reply_markup=get_trainees_with_mentors_keyboard(trainees_with_mentors),
-        )
+        await _show_reassign_trainees(callback, session, page=0)
         await callback.answer()
-
     except Exception as e:
         await callback.answer("Ошибка при получении списка стажеров")
         log_user_error(callback.from_user.id, "reassign_mentor_error", str(e))
+
+
+@router.callback_query(F.data.startswith("reassign_trainees_page:"))
+async def callback_reassign_trainees_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Пагинация списка стажёров для переназначения наставника."""
+    try:
+        page = int(callback.data.split(":")[1])
+        await _show_reassign_trainees(callback, session, page=page)
+        await callback.answer()
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка навигации")
+    except Exception as e:
+        await callback.answer("Ошибка при получении списка стажеров")
+        log_user_error(callback.from_user.id, "reassign_trainees_page_error", str(e))
 
 
 @router.callback_query(F.data.startswith("select_trainee_for_reassign:"))
