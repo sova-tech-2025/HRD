@@ -188,7 +188,7 @@ docker-compose.local.yml
 # Загруженные файлы пользователей
 uploads/
 downloads/
-media/
+/media/
 
 # Кэш aiogram
 .aiogram_cache/

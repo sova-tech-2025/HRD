@@ -7,16 +7,16 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies (layer cached separately from code)
+COPY pyproject.toml .
+RUN mkdir -p src/bot && touch src/bot/__init__.py && \
+    pip install --no-cache-dir . && \
+    rm -rf src/
 
 COPY . .
 
+ENV PYTHONPATH=/app/src
+
 RUN mkdir -p /app/logs
 
-RUN chmod +x /app
-
-EXPOSE 8000
-
-CMD ["python", "main.py"]
+CMD ["python", "-m", "bot"]

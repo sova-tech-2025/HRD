@@ -1,5 +1,72 @@
+[project]
+name = "hrd-bot"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "aiogram>=3.0.0",
+    "python-dotenv>=1.0.0",
+    "asyncpg>=0.28.0",
+    "SQLAlchemy>=2.0.0",
+    "alembic>=1.13.0",
+    "pydantic>=2.4.0",
+    "phonenumbers>=8.13.18",
+    "APScheduler>=3.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.9.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+e2e = [
+    "telethon>=1.36.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-timeout>=2.2.0",
+    "pytest-order>=1.2.0",
+    "cryptg>=0.4.0",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["src/tests/unit"]
+pythonpath = ["src"]
 markers = [
+    "e2e: end-to-end tests (require Docker + Telegram accounts)",
     "order: set test execution order (e2e tests)",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "F",     # Pyflakes — unused imports, undefined names, syntax errors
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "I",     # isort — порядок импортов
+]
+ignore = [
+    "E501",  # line too long (контролируется formatter)
+    "E711",  # comparison to None (SQLAlchemy использует == None)
+    "E712",  # comparison to True/False (SQLAlchemy фильтры)
+    "W291",  # trailing whitespace (formatter исправит)
+    "W292",  # no newline at end (formatter исправит)
+    "W293",  # whitespace before ':' (formatter исправит)
+    "F841",  # unused variable (TODO: исправить постепенно)
+    "F811",  # redefined while unused (переопределения в handlers)
+    "E402",  # module-level import not at top (conditional imports)
+    "E722",  # bare except (TODO: исправить постепенно)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # реэкспорты в __init__.py
+
+[tool.ruff.lint.isort]
+known-first-party = ["bot"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
