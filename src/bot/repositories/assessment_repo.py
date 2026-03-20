@@ -23,8 +23,9 @@ class AssessmentRepository(BaseRepository):
         passing_score: float,
         creator_id: int,
         company_id: int = None,
+        assessment_type: str = "attestation",
     ) -> Optional[Attestation]:
-        """Создание новой аттестации (с привязкой к компании)"""
+        """Создание новой аттестации/экзамена (с привязкой к компании)"""
         try:
             attestation = Attestation(
                 name=name,
@@ -32,6 +33,7 @@ class AssessmentRepository(BaseRepository):
                 max_score=0,  # Будет обновлено при добавлении вопросов
                 created_by_id=creator_id,
                 company_id=company_id,
+                assessment_type=assessment_type,
             )
 
             self.session.add(attestation)
@@ -77,8 +79,8 @@ class AssessmentRepository(BaseRepository):
             await self.session.rollback()
             return None
 
-    async def get_all(self, company_id: int = None) -> List[Attestation]:
-        """Получение всех аттестаций (с фильтрацией по компании)
+    async def get_all(self, company_id: int = None, assessment_type: str = "attestation") -> List[Attestation]:
+        """Получение всех аттестаций/экзаменов (с фильтрацией по компании и типу)
 
         КРИТИЧЕСКИ ВАЖНО: Если company_id = None, возвращается пустой список (deny-by-default)
         для предотвращения утечки данных между компаниями.
@@ -98,6 +100,7 @@ class AssessmentRepository(BaseRepository):
                     .where(
                         Attestation.is_active == True,
                         Attestation.company_id == company_id,
+                        Attestation.assessment_type == assessment_type,
                     )
                     .order_by(Attestation.created_date.desc())
                 )
