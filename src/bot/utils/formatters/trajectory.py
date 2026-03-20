@@ -10,7 +10,8 @@ async def generate_trajectory_progress_with_attestation_status(
     session, trainee_path, stages_progress, test_results=None
 ):
     """Генерация прогресса траектории с правильным статусом аттестации"""
-    from bot.database.db import get_trainee_attestation_status, get_user_by_id
+    from bot.database.db import get_user_by_id
+    from bot.repositories import AssessmentAssignmentRepository
 
     if not trainee_path:
         return "🗺️<b>Траектория:</b> не выбрано"
@@ -79,8 +80,8 @@ async def generate_trajectory_progress_with_attestation_status(
         trainee = await get_user_by_id(session, trainee_path.trainee_id)
         company_id = trainee.company_id if trainee else None
 
-        attestation_status = await get_trainee_attestation_status(
-            session, trainee_path.trainee_id, trainee_path.learning_path.attestation.id, company_id=company_id
+        attestation_status = await AssessmentAssignmentRepository(session).get_status(
+            trainee_path.trainee_id, trainee_path.learning_path.attestation.id, company_id=company_id
         )
         progress += f"🏁<b>Аттестация:</b> {trainee_path.learning_path.attestation.name} {attestation_status}\n"
     else:

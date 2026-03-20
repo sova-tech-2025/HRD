@@ -8,8 +8,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.db import check_user_permission, get_attestation_results, get_manager_trainees, get_user_by_tg_id
+from bot.database.db import check_user_permission, get_manager_trainees, get_user_by_tg_id
 from bot.keyboards.keyboards import get_main_menu_keyboard
+from bot.repositories import AssessmentResultRepository
 from bot.utils.auth.auth import check_auth
 from bot.utils.logger import log_user_action, log_user_error
 
@@ -75,7 +76,7 @@ async def cmd_my_attestations(message: Message, state: FSMContext, session: Asyn
             trainee = trainee_manager.trainee
 
             # Получаем результаты аттестаций стажера с изоляцией по компании
-            results = await get_attestation_results(session, trainee.id, company_id=company_id)
+            results = await AssessmentResultRepository(session).get_for_trainee(trainee.id, company_id=company_id)
             last_result = results[0] if results else None
 
             status_text = "Не проводилась"
@@ -125,7 +126,7 @@ async def callback_select_trainee_for_attestation(callback: CallbackQuery, sessi
         company_id = trainee.company_id
 
         # Получаем результаты аттестаций с изоляцией по компании
-        results = await get_attestation_results(session, trainee_id, company_id=company_id)
+        results = await AssessmentResultRepository(session).get_for_trainee(trainee_id, company_id=company_id)
 
         # Формируем информацию о стажере
         trainee_info = (
@@ -219,7 +220,7 @@ async def callback_back_to_my_attestations(callback: CallbackQuery, session: Asy
             trainee = trainee_manager.trainee
 
             # Получаем результаты аттестаций стажера с изоляцией по компании
-            results = await get_attestation_results(session, trainee.id, company_id=company_id)
+            results = await AssessmentResultRepository(session).get_for_trainee(trainee.id, company_id=company_id)
             last_result = results[0] if results else None
 
             status_text = "Не проводилась"
@@ -302,7 +303,7 @@ async def cmd_my_trainees(message: Message, state: FSMContext, session: AsyncSes
             trainee = trainee_manager.trainee
 
             # Получаем результаты аттестаций стажера с изоляцией по компании
-            results = await get_attestation_results(session, trainee.id, company_id=company_id)
+            results = await AssessmentResultRepository(session).get_for_trainee(trainee.id, company_id=company_id)
             last_result = results[0] if results else None
 
             status_text = "Не проводилась"

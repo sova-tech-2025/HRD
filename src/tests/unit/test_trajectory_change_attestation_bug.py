@@ -133,7 +133,7 @@ class TestTrajectoryChangeAttestationBug:
         Если у стажёра 2 активные аттестации (от старой и новой траектории),
         руководитель видит обе → дубликат в ЛК.
         """
-        from bot.database.db import get_manager_assigned_attestations
+        from bot.repositories import AssessmentAssignmentRepository
 
         session = AsyncMock()
 
@@ -157,7 +157,8 @@ class TestTrajectoryChangeAttestationBug:
         result_mock.scalars.return_value = scalars_mock
         session.execute = AsyncMock(return_value=result_mock)
 
-        attestations = await get_manager_assigned_attestations(session=session, manager_id=500, company_id=1)
+        repo = AssessmentAssignmentRepository(session)
+        attestations = await repo.get_for_manager(manager_id=500, company_id=1)
 
         # Это показывает баг: руководитель получает 2 аттестации для одного стажёра
         assert len(attestations) == 2, "Ожидается 2 записи (баг: обе аттестации активны)"
@@ -185,7 +186,7 @@ class TestAssignAttestationDeduplication:
         Это корневая причина бага: при смене траектории меняется attestation_id,
         и старая запись остаётся активной.
         """
-        from bot.database.db import assign_attestation_to_trainee
+        from bot.repositories import AssessmentAssignmentRepository
 
         session = AsyncMock()
 
@@ -199,20 +200,15 @@ class TestAssignAttestationDeduplication:
             ]
         )
 
-        new_attestation_mock = MagicMock()
-        new_attestation_mock.id = 50
         session.flush = AsyncMock()
 
-        with patch("bot.database.db.TraineeAttestation") as MockTA:
-            MockTA.return_value = new_attestation_mock
-
-            result = await assign_attestation_to_trainee(
-                session=session,
-                trainee_id=100,
-                manager_id=500,
-                attestation_id=2,  # Новая аттестация (от новой траектории)
-                assigned_by_id=300,
-            )
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.assign(
+            trainee_id=100,
+            manager_id=500,
+            attestation_id=2,  # Новая аттестация (от новой траектории)
+            assigned_by_id=300,
+        )
 
         assert result is not None
 

@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import TRAINEE_TRAJECTORY_IMAGE_FILE_ID, TRAINEE_TRAJECTORY_IMAGE_PATH
 from bot.database.db import (
     get_stage_session_progress,
-    get_trainee_attestation_status,
     get_trainee_learning_path,
     get_trainee_stage_progress,
     get_user_by_id,
@@ -21,6 +20,7 @@ from bot.database.db import (
     get_user_test_result,
 )
 from bot.keyboards.keyboards import get_mentor_contact_keyboard
+from bot.repositories import AssessmentAssignmentRepository
 from bot.utils.auth.auth import check_auth
 from bot.utils.formatters.test_progress import format_test_line_figma, get_test_status_icon
 from bot.utils.handlers.callback import ensure_callback_auth
@@ -764,8 +764,8 @@ async def format_attestation_status(session, user_id, trainee_path):
             user = await get_user_by_id(session, user_id)
             company_id = user.company_id if user else None
 
-            attestation_status = await get_trainee_attestation_status(
-                session, user_id, trainee_path.learning_path.attestation.id, company_id=company_id
+            attestation_status = await AssessmentAssignmentRepository(session).get_status(
+                user_id, trainee_path.learning_path.attestation.id, company_id=company_id
             )
             return f"🏁 <b>Аттестация:</b> {trainee_path.learning_path.attestation.name} {attestation_status}\n\n"
         else:

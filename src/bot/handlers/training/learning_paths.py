@@ -6,25 +6,17 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.db import (
-    add_attestation_question,
     add_question_to_test,
-    check_attestation_in_use,
     check_user_permission,
-    create_attestation,
     create_test,
-    delete_attestation,
     delete_learning_path,
     ensure_company_id,
     get_all_active_tests,
-    get_all_attestations,
     get_all_groups,
     get_all_learning_paths,
-    get_attestation_by_id,
     get_learning_path_by_id,
-    get_trajectories_using_attestation,
     get_trajectory_usage_info,
     get_user_by_tg_id,
-    save_trajectory_with_attestation_and_group,
 )
 from bot.keyboards.keyboards import (
     get_attestation_creation_start_keyboard,
@@ -50,6 +42,7 @@ from bot.keyboards.keyboards import (
     get_trajectory_selection_keyboard,
     is_main_menu_text,
 )
+from bot.repositories import AssessmentRepository
 from bot.states.states import AttestationStates, LearningPathStates
 from bot.utils.auth.auth import check_auth
 from bot.utils.logger import log_user_action, log_user_error
@@ -1296,7 +1289,7 @@ async def callback_confirm_trajectory_save(callback: CallbackQuery, state: FSMCo
 
         # Получаем аттестации
         company_id = await ensure_company_id(session, state, callback.from_user.id)
-        attestations = await get_all_attestations(session, company_id)
+        attestations = await AssessmentRepository(session).get_all(company_id)
 
         if not attestations:
             await callback.message.edit_text(
@@ -1343,7 +1336,7 @@ async def callback_select_attestation(callback: CallbackQuery, state: FSMContext
         company_id = data.get("company_id")
 
         # Получаем аттестацию
-        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+        attestation = await AssessmentRepository(session).get_by_id(attestation_id, company_id=company_id)
         if not attestation:
             await callback.answer("Аттестация не найдена", show_alert=True)
             return
@@ -1429,7 +1422,7 @@ async def callback_select_group_for_trajectory(callback: CallbackQuery, state: F
         selected_group = next((g for g in groups if g.id == group_id), None)
         group_name = selected_group.name if selected_group else "Неизвестная группа"
 
-        attestations = await get_all_attestations(session, company_id)
+        attestations = await AssessmentRepository(session).get_all(company_id)
         selected_attestation = next((a for a in attestations if a.id == attestation_id), None)
         attestation_name = selected_attestation.name if selected_attestation else "Неизвестная аттестация"
 
@@ -1475,8 +1468,8 @@ async def callback_final_confirm_save(callback: CallbackQuery, state: FSMContext
         company_id = data.get("company_id")
 
         # Финально сохраняем траекторию
-        success = await save_trajectory_with_attestation_and_group(
-            session, trajectory_data, attestation_id, group_id, company_id
+        success = await AssessmentRepository(session).save_with_trajectory_and_group(
+            trajectory_data, attestation_id, group_id, company_id
         )
 
         if not success:
@@ -1605,7 +1598,7 @@ async def callback_cancel_attestation_confirmation(callback: CallbackQuery, stat
 
         # Возвращаемся к выбору аттестации
         company_id = await ensure_company_id(session, state, callback.from_user.id)
-        attestations = await get_all_attestations(session, company_id)
+        attestations = await AssessmentRepository(session).get_all(company_id)
 
         # У нас теперь всегда есть mock аттестации
 
@@ -1749,7 +1742,7 @@ async def callback_manage_attestations(callback: CallbackQuery, state: FSMContex
 
         # Получаем все аттестации
         company_id = await ensure_company_id(session, state, callback.from_user.id)
-        attestations = await get_all_attestations(session, company_id)
+        attestations = await AssessmentRepository(session).get_all(company_id)
 
         text = "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\nВыбери нужную тебе аттестацию или создай новую"
 
@@ -1966,15 +1959,11 @@ async def process_attestation_passing_score(message: Message, state: FSMContext,
         user = await get_user_by_tg_id(session, message.from_user.id)
 
         # Сохраняем вопросы перед созданием аттестации
-        if not hasattr(create_attestation, "_pending_questions"):
-            create_attestation._pending_questions = {}
-        create_attestation._pending_questions["current"] = questions
-
         # Создаем аттестацию в БД
         data = await state.get_data()
         company_id = data.get("company_id")
-        attestation = await create_attestation(
-            session=session,
+        assessment_repo = AssessmentRepository(session)
+        attestation = await assessment_repo.create(
             name=attestation_name,
             passing_score=passing_score,
             creator_id=user.id,
@@ -1984,8 +1973,7 @@ async def process_attestation_passing_score(message: Message, state: FSMContext,
         # Добавляем вопросы
         if attestation:
             for question in questions:
-                await add_attestation_question(
-                    session=session,
+                await assessment_repo.add_question(
                     attestation_id=attestation.id if hasattr(attestation, "id") else 1,
                     question_text=question["text"],
                     max_points=question["max_points"],
@@ -2007,7 +1995,7 @@ async def process_attestation_passing_score(message: Message, state: FSMContext,
 
         # КРИТИЧНО: После создания показываем обновленный список аттестаций
         company_id = await ensure_company_id(session, state, message.from_user.id)
-        updated_attestations = await get_all_attestations(session, company_id)
+        updated_attestations = await AssessmentRepository(session).get_all(company_id)
 
         menu_text = (
             "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\n"
@@ -2042,7 +2030,7 @@ async def callback_view_attestation(callback: CallbackQuery, state: FSMContext, 
         company_id = data.get("company_id")
 
         # Получаем аттестацию
-        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+        attestation = await AssessmentRepository(session).get_by_id(attestation_id, company_id=company_id)
         if not attestation:
             await callback.answer("Аттестация не найдена", show_alert=True)
             return
@@ -2064,7 +2052,7 @@ async def render_attestation_page(
     session: AsyncSession, attestation_id: int, page: int, company_id: int = None
 ) -> tuple[str, InlineKeyboardMarkup]:
     """Универсальная функция рендеринга страницы аттестации"""
-    attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+    attestation = await AssessmentRepository(session).get_by_id(attestation_id, company_id=company_id)
     if not attestation:
         raise ValueError("Аттестация не найдена")
 
@@ -2089,7 +2077,9 @@ async def render_attestation_page(
             questions_text += f"📄 <i>Страница {page + 1} из {total_pages}</i>\n\n"
 
     # Информация о траекториях
-    using_trajectories = await get_trajectories_using_attestation(session, attestation_id, company_id=company_id)
+    using_trajectories = await AssessmentRepository(session).get_trajectories_using(
+        attestation_id, company_id=company_id
+    )
     if using_trajectories:
         if len(using_trajectories) == 1:
             trajectories_info = f"🗺️ <b>Используется в траектории:</b> {using_trajectories[0]}\n\n"
@@ -2168,7 +2158,7 @@ async def callback_attestation_page_next(callback: CallbackQuery, state: FSMCont
         current_page = data.get("attestation_page", 0)
         company_id = data.get("company_id")
 
-        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+        attestation = await AssessmentRepository(session).get_by_id(attestation_id, company_id=company_id)
         if not attestation:
             await callback.answer("Аттестация не найдена", show_alert=True)
             return
@@ -2193,7 +2183,7 @@ async def callback_back_to_attestations_list(callback: CallbackQuery, state: FSM
 
         # Получаем все аттестации
         company_id = await ensure_company_id(session, state, callback.from_user.id)
-        attestations = await get_all_attestations(session, company_id)
+        attestations = await AssessmentRepository(session).get_all(company_id)
 
         text = "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\nВыбери нужную тебе аттестацию или создай новую"
 
@@ -2221,17 +2211,19 @@ async def callback_delete_attestation_confirm(callback: CallbackQuery, state: FS
         company_id = data.get("company_id")
 
         # Получаем информацию об аттестации
-        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+        attestation = await AssessmentRepository(session).get_by_id(attestation_id, company_id=company_id)
         if not attestation:
             await callback.answer("Аттестация не найдена", show_alert=True)
             return
 
         # Проверяем, используется ли аттестация в траекториях
-        is_in_use = await check_attestation_in_use(session, attestation_id, company_id=company_id)
+        is_in_use = await AssessmentRepository(session).check_in_use(attestation_id, company_id=company_id)
 
         if is_in_use:
             # Получаем названия траекторий, использующих эту аттестацию
-            trajectory_names = await get_trajectories_using_attestation(session, attestation_id, company_id=company_id)
+            trajectory_names = await AssessmentRepository(session).get_trajectories_using(
+                attestation_id, company_id=company_id
+            )
 
             # Формируем список траекторий для отображения
             if len(trajectory_names) == 1:
@@ -2334,7 +2326,7 @@ async def callback_confirm_delete_attestation(callback: CallbackQuery, state: FS
         company_id = data.get("company_id") or (user.company_id if user else None)
 
         # Выполняем удаление
-        success = await delete_attestation(session, attestation_id, company_id=company_id)
+        success = await AssessmentRepository(session).delete(attestation_id, company_id=company_id)
 
         if success:
             # Удаление успешно
@@ -2350,7 +2342,7 @@ async def callback_confirm_delete_attestation(callback: CallbackQuery, state: FS
             await asyncio.sleep(2)  # Небольшая пауза для чтения сообщения
 
             company_id = await ensure_company_id(session, state, callback.from_user.id)
-            attestations = await get_all_attestations(session, company_id)
+            attestations = await AssessmentRepository(session).get_all(company_id)
 
             menu_text = (
                 "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\n"

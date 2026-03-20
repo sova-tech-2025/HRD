@@ -6,15 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.db import (
     add_user_role,
-    assign_attestation_to_trainee,
     check_user_permission,
     get_all_roles,
     get_all_trainees,
     get_all_users,
-    get_attestation_by_id,
-    get_managers_for_attestation,
     get_test_by_id,
-    get_trainee_attestation_status,
     get_trainee_learning_path,
     get_trainee_mentor,
     get_user_by_id,
@@ -29,6 +25,7 @@ from bot.keyboards.keyboards import (
     get_user_action_keyboard,
     get_user_selection_keyboard,
 )
+from bot.repositories import AssessmentAssignmentRepository, AssessmentRepository
 from bot.states.states import AdminStates, RecruiterAttestationStates
 from bot.utils.auth.auth import check_auth
 from bot.utils.logger import log_user_action, log_user_error, logger
@@ -516,8 +513,8 @@ async def show_trainee_detail(callback: CallbackQuery, session: AsyncSession, tr
         and trainee_path.learning_path.attestation is not None
     ):
         # Проверяем, не назначена ли уже аттестация
-        attestation_status = await get_trainee_attestation_status(
-            session, trainee_id, trainee_path.learning_path.attestation.id, company_id=company_id
+        attestation_status = await AssessmentAssignmentRepository(session).get_status(
+            trainee_id, trainee_path.learning_path.attestation.id, company_id=company_id
         )
         # Показываем кнопку только если аттестация НЕ назначена (статус ⛔️)
         has_attestation = attestation_status == "⛔️"
@@ -664,8 +661,8 @@ async def callback_recruiter_open_attestation(callback: CallbackQuery, state: FS
         attestation = trainee_path.learning_path.attestation
 
         # Проверяем, не назначена ли уже аттестация
-        attestation_status = await get_trainee_attestation_status(
-            session, trainee_id, attestation.id, company_id=company_id
+        attestation_status = await AssessmentAssignmentRepository(session).get_status(
+            trainee_id, attestation.id, company_id=company_id
         )
         if attestation_status in ["🟡", "✅"]:
             status_text = "уже назначена" if attestation_status == "🟡" else "уже пройдена"
@@ -674,7 +671,7 @@ async def callback_recruiter_open_attestation(callback: CallbackQuery, state: FS
 
         # Получаем список руководителей
         group_id = trainee.groups[0].id if trainee.groups else None
-        managers = await get_managers_for_attestation(session, group_id, company_id=company_id)
+        managers = await AssessmentAssignmentRepository(session).get_managers(group_id, company_id=company_id)
 
         if not managers:
             await callback.message.edit_text(
@@ -752,7 +749,7 @@ async def callback_recruiter_select_manager(callback: CallbackQuery, state: FSMC
         trainee = await get_user_by_id(session, trainee_id)
         manager = await get_user_by_id(session, manager_id)
         company_id = trainee.company_id if trainee else None
-        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+        attestation = await AssessmentRepository(session).get_by_id(attestation_id, company_id=company_id)
         trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
 
         if not trainee or not manager or not attestation:
@@ -833,7 +830,7 @@ async def callback_recruiter_confirm_attestation(callback: CallbackQuery, state:
             return
 
         company_id = trainee.company_id
-        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+        attestation = await AssessmentRepository(session).get_by_id(attestation_id, company_id=company_id)
         trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
 
         if not attestation:
@@ -842,8 +839,7 @@ async def callback_recruiter_confirm_attestation(callback: CallbackQuery, state:
             return
 
         # Назначаем аттестацию (assigned_by_id = recruiter.id)
-        result = await assign_attestation_to_trainee(
-            session=session,
+        result = await AssessmentAssignmentRepository(session).assign(
             trainee_id=trainee_id,
             manager_id=manager_id,
             attestation_id=attestation_id,

@@ -11,7 +11,6 @@ import pytest
 
 from bot.states.states import UserActivationStates
 
-
 # --- Helpers ---
 
 

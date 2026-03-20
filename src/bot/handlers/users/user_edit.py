@@ -31,17 +31,14 @@ from bot.database.db import (
 )
 from bot.keyboards.keyboards import (
     get_edit_confirmation_keyboard,
-    get_group_filter_keyboard,
     get_group_selection_keyboard,
-    get_object_filter_keyboard,
     get_object_selection_keyboard,
     get_role_selection_keyboard,
     get_user_deletion_confirmation_keyboard,
     get_user_editor_keyboard,
     get_user_groups_multiselect_keyboard,
     get_user_info_keyboard,
-    get_users_filter_keyboard,
-    get_users_list_keyboard,
+    user_edit_filters,
 )
 from bot.states.states import UserEditStates
 from bot.utils.auth.auth import check_auth
@@ -155,7 +152,7 @@ async def cmd_all_users(message: Message, session: AsyncSession, state: FSMConte
         "Выбери способ фильтрации пользователей:"
     )
 
-    keyboard = get_users_filter_keyboard(groups, objects)
+    keyboard = user_edit_filters.filter_menu(groups, objects)
 
     await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     await state.set_state(UserEditStates.waiting_for_filter_selection)
@@ -170,7 +167,7 @@ async def cmd_all_users(message: Message, session: AsyncSession, state: FSMConte
 # ===================== НОВЫЕ ОБРАБОТЧИКИ ФИЛЬТРАЦИИ =====================
 
 
-@router.callback_query(F.data == "filter_all_users", UserEditStates.waiting_for_filter_selection)
+@router.callback_query(F.data == user_edit_filters.cb_all, UserEditStates.waiting_for_filter_selection)
 async def callback_filter_all_users(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показать всех пользователей без фильтрации"""
     try:
@@ -186,7 +183,7 @@ async def callback_filter_all_users(callback: CallbackQuery, state: FSMContext, 
 
         text = f"<b>Найдено пользователей: {len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
 
-        keyboard = get_users_list_keyboard(users, 0, 5, "all")
+        keyboard = user_edit_filters.user_list(users, 0)
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         await state.set_state(UserEditStates.waiting_for_user_selection)
@@ -199,7 +196,7 @@ async def callback_filter_all_users(callback: CallbackQuery, state: FSMContext, 
         log_user_error(callback.from_user.id, "filter_all_users_error", str(e))
 
 
-@router.callback_query(F.data == "filter_by_groups", UserEditStates.waiting_for_filter_selection)
+@router.callback_query(F.data == user_edit_filters.cb_groups, UserEditStates.waiting_for_filter_selection)
 async def callback_filter_by_groups(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показать фильтр по группам"""
     try:
@@ -219,7 +216,7 @@ async def callback_filter_by_groups(callback: CallbackQuery, state: FSMContext, 
             "Выбери группу, чтобы посмотреть пользователей:"
         )
 
-        keyboard = get_group_filter_keyboard(groups, 0, 5)
+        keyboard = user_edit_filters.group_list(groups, 0)
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         await state.update_data(available_groups=groups, filter_page=0)
@@ -231,7 +228,7 @@ async def callback_filter_by_groups(callback: CallbackQuery, state: FSMContext, 
         log_user_error(callback.from_user.id, "filter_by_groups_error", str(e))
 
 
-@router.callback_query(F.data == "filter_by_objects", UserEditStates.waiting_for_filter_selection)
+@router.callback_query(F.data == user_edit_filters.cb_objects, UserEditStates.waiting_for_filter_selection)
 async def callback_filter_by_objects(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показать фильтр по объектам"""
     try:
@@ -251,7 +248,7 @@ async def callback_filter_by_objects(callback: CallbackQuery, state: FSMContext,
             "Выбери объект для просмотра связанных с ним пользователей:"
         )
 
-        keyboard = get_object_filter_keyboard(objects, 0, 5)
+        keyboard = user_edit_filters.object_list(objects, 0)
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         await state.update_data(available_objects=objects, filter_page=0)
@@ -263,7 +260,9 @@ async def callback_filter_by_objects(callback: CallbackQuery, state: FSMContext,
         log_user_error(callback.from_user.id, "filter_by_objects_error", str(e))
 
 
-@router.callback_query(F.data.startswith("filter_group:"), UserEditStates.waiting_for_filter_selection)
+@router.callback_query(
+    F.data.startswith(user_edit_filters.prefix + "_group:"), UserEditStates.waiting_for_filter_selection
+)
 async def callback_filter_group(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показать пользователей выбранной группы"""
     try:
@@ -287,13 +286,13 @@ async def callback_filter_group(callback: CallbackQuery, state: FSMContext, sess
 
         if users:
             text += "Выбери пользователя для просмотра и редактирования:"
-            keyboard = get_users_list_keyboard(users, 0, 5, f"group:{group_id}")
+            keyboard = user_edit_filters.user_list(users, 0)
             await state.set_state(UserEditStates.waiting_for_user_selection)
             await state.update_data(current_users=users, filter_type=f"group:{group_id}", current_page=0)
         else:
             text += "В данной группе пока нет пользователей."
             company_id = await ensure_company_id(session, state, callback.from_user.id)
-            keyboard = get_users_filter_keyboard(
+            keyboard = user_edit_filters.filter_menu(
                 await get_all_groups(session, company_id), await get_all_objects(session, company_id)
             )
             await state.set_state(UserEditStates.waiting_for_filter_selection)
@@ -307,7 +306,9 @@ async def callback_filter_group(callback: CallbackQuery, state: FSMContext, sess
         log_user_error(callback.from_user.id, "filter_group_error", str(e))
 
 
-@router.callback_query(F.data.startswith("filter_object:"), UserEditStates.waiting_for_filter_selection)
+@router.callback_query(
+    F.data.startswith(user_edit_filters.prefix + "_object:"), UserEditStates.waiting_for_filter_selection
+)
 async def callback_filter_object(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Показать пользователей выбранного объекта"""
     try:
@@ -331,13 +332,13 @@ async def callback_filter_object(callback: CallbackQuery, state: FSMContext, ses
 
         if users:
             text += "Выбери пользователя для просмотра и редактирования:"
-            keyboard = get_users_list_keyboard(users, 0, 5, f"object:{object_id}")
+            keyboard = user_edit_filters.user_list(users, 0)
             await state.set_state(UserEditStates.waiting_for_user_selection)
             await state.update_data(current_users=users, filter_type=f"object:{object_id}", current_page=0)
         else:
             text += "К данному объекту пока не привязаны пользователи."
             company_id = await ensure_company_id(session, state, callback.from_user.id)
-            keyboard = get_users_filter_keyboard(
+            keyboard = user_edit_filters.filter_menu(
                 await get_all_groups(session, company_id), await get_all_objects(session, company_id)
             )
             await state.set_state(UserEditStates.waiting_for_filter_selection)
@@ -354,7 +355,7 @@ async def callback_filter_object(callback: CallbackQuery, state: FSMContext, ses
 # ===================== ОБРАБОТЧИКИ ПОИСКА ПО ФИО =====================
 
 
-@router.callback_query(F.data == "search_all_users", UserEditStates.waiting_for_filter_selection)
+@router.callback_query(F.data == user_edit_filters.cb_search, UserEditStates.waiting_for_filter_selection)
 async def callback_start_search_all_users(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Начать поиск пользователей по ФИО"""
     try:
@@ -396,8 +397,12 @@ async def process_search_query_all_users(message: Message, state: FSMContext, se
             # Пользователи не найдены
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="🔄 Повторить поиск", callback_data="retry_search_all_users")],
-                    [InlineKeyboardButton(text="↩️ Назад к фильтрам", callback_data="back_to_filters")],
+                    [
+                        InlineKeyboardButton(
+                            text="🔄 Повторить поиск", callback_data=user_edit_filters.prefix + "_retry_search"
+                        )
+                    ],
+                    [InlineKeyboardButton(text="↩️ Назад к фильтрам", callback_data=user_edit_filters.cb_back)],
                 ]
             )
 
@@ -419,7 +424,7 @@ async def process_search_query_all_users(message: Message, state: FSMContext, se
             "Выбери пользователя для просмотра и редактирования:"
         )
 
-        keyboard = get_users_list_keyboard(users, 0, 5, "search")
+        keyboard = user_edit_filters.user_list(users, 0)
 
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
@@ -433,7 +438,7 @@ async def process_search_query_all_users(message: Message, state: FSMContext, se
         log_user_error(message.from_user.id, "search_query_error", str(e))
 
 
-@router.callback_query(F.data == "retry_search_all_users")
+@router.callback_query(F.data == user_edit_filters.prefix + "_retry_search")
 async def callback_retry_search_all_users(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Повторить поиск пользователей"""
     try:
@@ -451,7 +456,9 @@ async def callback_retry_search_all_users(callback: CallbackQuery, state: FSMCon
         log_user_error(callback.from_user.id, "retry_search_error", str(e))
 
 
-@router.callback_query(F.data.startswith("view_user:"), UserEditStates.waiting_for_user_selection)
+@router.callback_query(
+    F.data.startswith(user_edit_filters.prefix + "_user:"), UserEditStates.waiting_for_user_selection
+)
 async def callback_view_user(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Просмотр информации о пользователе"""
     try:
@@ -545,7 +552,7 @@ async def callback_edit_user(callback: CallbackQuery, state: FSMContext, session
         log_user_error(callback.from_user.id, "edit_user_error", str(e))
 
 
-@router.callback_query(F.data == "back_to_filters")
+@router.callback_query(F.data == user_edit_filters.cb_back)
 async def callback_back_to_filters(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Возврат к фильтрам пользователей"""
     try:
@@ -566,7 +573,7 @@ async def callback_back_to_filters(callback: CallbackQuery, state: FSMContext, s
             "Выбери способ фильтрации пользователей:"
         )
 
-        keyboard = get_users_filter_keyboard(groups, objects)
+        keyboard = user_edit_filters.filter_menu(groups, objects)
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         await state.set_state(UserEditStates.waiting_for_filter_selection)
@@ -610,7 +617,7 @@ async def callback_back_to_users(callback: CallbackQuery, state: FSMContext, ses
         else:
             text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
 
-        keyboard = get_users_list_keyboard(users, current_page, 5, filter_type)
+        keyboard = user_edit_filters.user_list(users, current_page)
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         await state.set_state(UserEditStates.waiting_for_user_selection)
@@ -625,26 +632,17 @@ async def callback_back_to_users(callback: CallbackQuery, state: FSMContext, ses
 # ===================== ОБРАБОТЧИКИ ПАГИНАЦИИ =====================
 
 
-@router.callback_query(F.data.startswith("users_page:"))
+@router.callback_query(F.data.startswith(user_edit_filters.prefix + "_upage:"))
 async def callback_users_pagination(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработка пагинации списка пользователей"""
     try:
         await callback.answer()
 
-        # Парсим данные: users_page:{filter_type}:{page}
-        # filter_type может содержать двоеточие (например, "group:1")
-        parts = callback.data.split(":")
-        if len(parts) == 3:
-            # Простой случай: users_page:all:0
-            filter_type = parts[1]
-            page = int(parts[2])
-        else:
-            # Сложный случай: users_page:group:1:0 или users_page:object:2:1
-            filter_type = ":".join(parts[1:-1])  # Все части кроме первой и последней
-            page = int(parts[-1])  # Последняя часть - номер страницы
+        page = int(callback.data.split(":")[1])
 
         data = await state.get_data()
         users = data.get("current_users", [])
+        filter_type = data.get("filter_type", "all")
 
         if filter_type == "all":
             text = f"👥 <b>ВСЕ ПОЛЬЗОВАТЕЛИ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
@@ -670,7 +668,7 @@ async def callback_users_pagination(callback: CallbackQuery, state: FSMContext, 
         else:
             text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
 
-        keyboard = get_users_list_keyboard(users, page, 5, filter_type)
+        keyboard = user_edit_filters.user_list(users, page)
 
         await callback.message.edit_reply_markup(reply_markup=keyboard)
         await state.update_data(current_page=page)
@@ -682,7 +680,7 @@ async def callback_users_pagination(callback: CallbackQuery, state: FSMContext, 
         log_user_error(callback.from_user.id, "users_pagination_error", str(e))
 
 
-@router.callback_query(F.data.startswith("group_filter_page:"))
+@router.callback_query(F.data.startswith(user_edit_filters.prefix + "_gpage:"))
 async def callback_group_filter_pagination(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработка пагинации списка групп для фильтрации"""
     try:
@@ -696,7 +694,7 @@ async def callback_group_filter_pagination(callback: CallbackQuery, state: FSMCo
             company_id = await ensure_company_id(session, state, callback.from_user.id)
             groups = await get_all_groups(session, company_id)
 
-        keyboard = get_group_filter_keyboard(groups, page, 5)
+        keyboard = user_edit_filters.group_list(groups, page)
 
         await callback.message.edit_reply_markup(reply_markup=keyboard)
         await state.update_data(filter_page=page)
@@ -708,7 +706,7 @@ async def callback_group_filter_pagination(callback: CallbackQuery, state: FSMCo
         log_user_error(callback.from_user.id, "group_filter_pagination_error", str(e))
 
 
-@router.callback_query(F.data.startswith("object_filter_page:"))
+@router.callback_query(F.data.startswith(user_edit_filters.prefix + "_opage:"))
 async def callback_object_filter_pagination(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработка пагинации списка объектов для фильтрации"""
     try:
@@ -722,7 +720,7 @@ async def callback_object_filter_pagination(callback: CallbackQuery, state: FSMC
             company_id = await ensure_company_id(session, state, callback.from_user.id)
             objects = await get_all_objects(session, company_id)
 
-        keyboard = get_object_filter_keyboard(objects, page, 5)
+        keyboard = user_edit_filters.object_list(objects, page)
 
         await callback.message.edit_reply_markup(reply_markup=keyboard)
         await state.update_data(filter_page=page)
@@ -1666,7 +1664,7 @@ async def callback_confirm_delete_user(callback: CallbackQuery, state: FSMContex
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
-                        [InlineKeyboardButton(text="⬅️ Назад к фильтрам", callback_data="back_to_filters")],
+                        [InlineKeyboardButton(text="⬅️ Назад к фильтрам", callback_data=user_edit_filters.cb_back)],
                         [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
                     ]
                 ),

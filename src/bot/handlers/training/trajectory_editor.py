@@ -18,14 +18,11 @@ from bot.database.db import (
     delete_learning_stage,
     ensure_company_id,
     get_all_active_tests,
-    get_all_attestations,
     get_all_groups,
-    get_attestation_by_id,
     get_learning_path_by_id,
     get_session_tests,
     get_user_by_tg_id,
     remove_test_from_session,
-    update_learning_path_attestation,
     update_learning_path_group,
     update_learning_session_name,
     update_learning_stage_name,
@@ -43,6 +40,7 @@ from bot.keyboards.keyboards import (
     get_trajectory_attestation_management_keyboard,
     get_trajectory_editor_main_keyboard,
 )
+from bot.repositories import AssessmentRepository
 from bot.states.states import LearningPathStates
 from bot.utils.formatters.trajectory import (
     format_session_tests_editor_view,
@@ -65,7 +63,7 @@ async def render_attestation_page_for_editor(
     session: AsyncSession, attestation_id: int, path_id: int, page: int, company_id: int
 ) -> tuple[str, InlineKeyboardMarkup]:
     """Универсальная функция рендеринга страницы аттестации для редактора траекторий"""
-    attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+    attestation = await AssessmentRepository(session).get_by_id(attestation_id, company_id=company_id)
     if not attestation:
         raise ValueError("Аттестация не найдена")
 
@@ -951,7 +949,7 @@ async def callback_select_attestation_for_trajectory(callback: CallbackQuery, st
 
         # Получаем все аттестации
         company_id = await ensure_company_id(session, state, callback.from_user.id)
-        attestations = await get_all_attestations(session, company_id)
+        attestations = await AssessmentRepository(session).get_all(company_id)
 
         if not attestations:
             await callback.message.edit_text(
@@ -997,7 +995,9 @@ async def callback_confirm_attestation_selection(callback: CallbackQuery, state:
             return
 
         # Обновляем аттестацию траектории
-        success = await update_learning_path_attestation(session, path_id, attestation_id, company_id=user.company_id)
+        success = await AssessmentRepository(session).update_learning_path_attestation(
+            path_id, attestation_id, company_id=user.company_id
+        )
 
         if not success:
             await callback.answer("Не удалось обновить аттестацию", show_alert=True)
@@ -1140,7 +1140,9 @@ async def callback_remove_trajectory_attestation(callback: CallbackQuery, state:
             return
 
         # Удаляем аттестацию (устанавливаем в None)
-        success = await update_learning_path_attestation(session, path_id, None, company_id=user.company_id)
+        success = await AssessmentRepository(session).update_learning_path_attestation(
+            path_id, None, company_id=user.company_id
+        )
 
         if not success:
             await callback.answer("Не удалось удалить аттестацию", show_alert=True)
@@ -1175,7 +1177,7 @@ async def callback_attestations_page(callback: CallbackQuery, state: FSMContext,
         page = int(parts[2])
 
         company_id = await ensure_company_id(session, state, callback.from_user.id)
-        attestations = await get_all_attestations(session, company_id)
+        attestations = await AssessmentRepository(session).get_all(company_id)
 
         text = "🔍 <b>Выбор аттестации для траектории</b>\n\nВыбери аттестацию:"
 

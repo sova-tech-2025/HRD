@@ -38,6 +38,8 @@ MAIN_MENU_TEXTS = {
     "☰ Главное меню",
     # Руководитель
     "Аттестация ✔️",
+    # Экзамены
+    "Экзамены 📝",
     # Главное меню (текст)
     "≡ Главное меню",
 }
@@ -108,6 +110,7 @@ def get_recruiter_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="Рассылка ✈️")],
             [KeyboardButton(text="Тесты 📄")],
             [KeyboardButton(text="Мои тесты 📋")],
+            [KeyboardButton(text="Экзамены 📝")],
             [KeyboardButton(text="Наставники 🦉")],
             [KeyboardButton(text="Стажеры 🐣")],
             [KeyboardButton(text="Группы 🗂️")],
@@ -141,6 +144,7 @@ def get_mentor_inline_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Мой профиль 🦸🏻‍♂️", callback_data="mentor_profile")],
         [InlineKeyboardButton(text="База знаний 📒", callback_data="mentor_knowledge_base")],
         [InlineKeyboardButton(text="Мои тесты 🗒", callback_data="mentor_my_tests")],
+        [InlineKeyboardButton(text="Экзамены 📝", callback_data="exam_menu")],
         [InlineKeyboardButton(text="Панель наставника 🎓", callback_data="mentor_panel")],
         [InlineKeyboardButton(text="Помощь ❓", callback_data="mentor_help")],
     ])
@@ -152,6 +156,7 @@ def get_employee_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="Мой профиль 🦸🏻‍♂️")],
             [KeyboardButton(text="Мои тесты 📋")],
+            [KeyboardButton(text="Экзамены 📝")],
             [KeyboardButton(text="База знаний 📁️")],
             [KeyboardButton(text="Помощь ❓")]
         ],
@@ -166,6 +171,7 @@ def get_manager_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="Мой профиль 🦸🏻‍♂️")],
             [KeyboardButton(text="Аттестация ✔️")],
+            [KeyboardButton(text="Экзамены 📝")],
             [KeyboardButton(text="Мои тесты 📋")],
             [KeyboardButton(text="База знаний 📁️")],
             [KeyboardButton(text="Помощь ❓")]
@@ -1686,126 +1692,257 @@ def get_attestation_questions_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-# ================== ФИЛЬТРАЦИЯ ПОЛЬЗОВАТЕЛЕЙ ==================
+# ================== ЭКЗАМЕНЫ ==================
 
-def get_users_filter_keyboard(groups: list, objects: list) -> InlineKeyboardMarkup:
-    """Клавиатура фильтрации пользователей по группам и объектам"""
+
+def get_exam_menu_keyboard(
+    exams: list, is_recruiter: bool = False, is_examiner: bool = False, is_mentor: bool = False,
+) -> InlineKeyboardMarkup:
+    """Главное меню РЕДАКТОРА Экзаменов (ролезависимое)"""
     keyboard = []
-    
-    # Показать всех пользователей
-    keyboard.append([InlineKeyboardButton(text="👥 Все пользователи", callback_data="filter_all_users")])
-    
-    # Фильтр по группам
-    if groups:
-        keyboard.append([InlineKeyboardButton(text="🗂️ Фильтр по группам", callback_data="filter_by_groups")])
-    
-    # Фильтр по объектам  
-    if objects:
-        keyboard.append([InlineKeyboardButton(text="📍 Фильтр по объектам", callback_data="filter_by_objects")])
-    
-    # Поиск по ФИО
-    keyboard.append([InlineKeyboardButton(text="🔍 Поиск по ФИО", callback_data="search_all_users")])
-    
-    # Кнопка главного меню
+
+    # Кнопка «Провести экзамен» — для экзаменаторов (руководитель, сотрудник, рекрутер)
+    if is_examiner:
+        keyboard.append([InlineKeyboardButton(text="Провести экзамен", callback_data="exam_conduct")])
+
+    # Кнопка «Сдать экзамен» — для всех
+    keyboard.append([InlineKeyboardButton(text="Сдать экзамен", callback_data="exam_take")])
+
+    # Кнопка «Создать экзамен» — только рекрутер
+    if is_recruiter:
+        keyboard.append([InlineKeyboardButton(text="➕ Создать экзамен", callback_data="exam_create")])
+
+    # Список существующих экзаменов — только рекрутер и наставник
+    if is_recruiter or is_mentor:
+        for exam in exams:
+            keyboard.append([InlineKeyboardButton(
+                text=f"── {exam.name}",
+                callback_data=f"exam_view:{exam.id}",
+            )])
+
     keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_group_filter_keyboard(groups: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
-    """Клавиатура выбора группы для фильтрации с пагинацией"""
+def get_exam_card_keyboard(
+    exam_id: int, is_recruiter: bool = False, can_assign: bool = False,
+) -> InlineKeyboardMarkup:
+    """Клавиатура карточки экзамена"""
     keyboard = []
-    total_groups = len(groups)
-    start_idx = page * per_page
-    end_idx = start_idx + per_page
-    
-    # Добавляем кнопки групп для текущей страницы
-    for group in groups[start_idx:end_idx]:
-        keyboard.append([InlineKeyboardButton(
-            text=f"🗂️ {group.name}",
-            callback_data=f"filter_group:{group.id}"
-        )])
-    
-    # Навигационные кнопки
-    nav_row = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton(text="⬅️", callback_data=f"group_filter_page:{page - 1}"))
-    
-    if end_idx < total_groups:
-        nav_row.append(InlineKeyboardButton(text="➡️", callback_data=f"group_filter_page:{page + 1}"))
-    
-    if nav_row:
-        keyboard.append(nav_row)
-    
-    # Кнопка назад
-    keyboard.append([InlineKeyboardButton(text="↩️ Назад к фильтрам", callback_data="back_to_filters")])
-    
+
+    if is_recruiter:
+        keyboard.append([InlineKeyboardButton(text="🗑 Удалить", callback_data=f"exam_delete:{exam_id}")])
+
+    if can_assign:
+        keyboard.append([InlineKeyboardButton(text="📌 Назначить", callback_data=f"exam_assign:{exam_id}")])
+
+    keyboard.append([InlineKeyboardButton(text="🔙 Назад к экзаменам", callback_data="exam_back_to_menu")])
+    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_object_filter_keyboard(objects: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
-    """Клавиатура выбора объекта для фильтрации с пагинацией"""
+def get_exam_questions_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для управления вопросами экзамена при создании"""
+    keyboard = [
+        [InlineKeyboardButton(text="Сохранить вопросы", callback_data="exam_save_questions")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_exam_examiner_list_keyboard(examiners: list) -> InlineKeyboardMarkup:
+    """Клавиатура выбора экзаменатора"""
     keyboard = []
-    total_objects = len(objects)
-    start_idx = page * per_page
-    end_idx = start_idx + per_page
-    
-    # Добавляем кнопки объектов для текущей страницы
-    for obj in objects[start_idx:end_idx]:
+    for user in examiners:
+        role_name = user.roles[0].name if user.roles else ""
         keyboard.append([InlineKeyboardButton(
-            text=f"📍 {obj.name}",
-            callback_data=f"filter_object:{obj.id}"
+            text=f"{user.full_name} ({role_name})",
+            callback_data=f"exam_examiner:{user.id}",
         )])
-    
-    # Навигационные кнопки
-    nav_row = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton(text="⬅️", callback_data=f"object_filter_page:{page - 1}"))
-    
-    if end_idx < total_objects:
-        nav_row.append(InlineKeyboardButton(text="➡️", callback_data=f"object_filter_page:{page + 1}"))
-    
-    if nav_row:
-        keyboard.append(nav_row)
-    
-    # Кнопка назад
-    keyboard.append([InlineKeyboardButton(text="↩️ Назад к фильтрам", callback_data="back_to_filters")])
-    
+    keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="exam_back_to_card")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_users_list_keyboard(users: list, page: int = 0, per_page: int = 5, filter_type: str = "all") -> InlineKeyboardMarkup:
-    """Клавиатура списка пользователей с пагинацией"""
-    keyboard = []
-    total_users = len(users)
-    start_idx = page * per_page
-    end_idx = start_idx + per_page
-    
-    # Добавляем кнопки пользователей для текущей страницы
-    for user in users[start_idx:end_idx]:
-        # Роль для отображения
-        role_name = user.roles[0].name if user.roles else "Без роли"
-        
+
+
+class UserFilterKeyboards:
+    """Генератор клавиатур фильтрации пользователей.
+
+    Единый класс для экзаменов и редактирования пользователей.
+    Callback_data: {prefix}_all, {prefix}_groups, {prefix}_group:{id}, и т.д.
+    """
+
+    def __init__(
+        self,
+        prefix: str,
+        emojis: dict = None,
+        per_page: int = 5,
+        show_role: bool = True,
+        back_text: str = "↩️ Назад к фильтрам",
+    ):
+        self.prefix = prefix
+        self.emojis = emojis or {"all": "👥", "groups": "🗂️", "objects": "📍", "search": "🔍"}
+        self.per_page = per_page
+        self.show_role = show_role
+        self.back_text = back_text
+
+    # --- Callback_data helpers ---
+    @property
+    def cb_all(self):
+        return f"{self.prefix}_all"
+
+    @property
+    def cb_groups(self):
+        return f"{self.prefix}_groups"
+
+    @property
+    def cb_objects(self):
+        return f"{self.prefix}_objects"
+
+    @property
+    def cb_search(self):
+        return f"{self.prefix}_search"
+
+    @property
+    def cb_back(self):
+        return f"{self.prefix}_back"
+
+    def cb_group(self, id):
+        return f"{self.prefix}_group:{id}"
+
+    def cb_object(self, id):
+        return f"{self.prefix}_object:{id}"
+
+    def cb_user(self, id):
+        return f"{self.prefix}_user:{id}"
+
+    def cb_upage(self, page):
+        return f"{self.prefix}_upage:{page}"
+
+    def cb_gpage(self, page):
+        return f"{self.prefix}_gpage:{page}"
+
+    def cb_opage(self, page):
+        return f"{self.prefix}_opage:{page}"
+
+    # --- Keyboards ---
+
+    def filter_menu(self, groups, objects) -> InlineKeyboardMarkup:
+        keyboard = [
+            [InlineKeyboardButton(text=f"{self.emojis['all']} Все пользователи", callback_data=self.cb_all)],
+        ]
+        if groups:
+            keyboard.append([InlineKeyboardButton(
+                text=f"{self.emojis['groups']} Фильтр по группам", callback_data=self.cb_groups,
+            )])
+        if objects:
+            keyboard.append([InlineKeyboardButton(
+                text=f"{self.emojis['objects']} Фильтр по объектам", callback_data=self.cb_objects,
+            )])
         keyboard.append([InlineKeyboardButton(
-            text=f"👤 {user.full_name} ({role_name})",
-            callback_data=f"view_user:{user.id}"
+            text=f"{self.emojis['search']} Поиск по ФИО", callback_data=self.cb_search,
         )])
-    
-    # Навигационные кнопки
-    nav_row = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton(text="⬅️", callback_data=f"users_page:{filter_type}:{page - 1}"))
-    
-    if end_idx < total_users:
-        nav_row.append(InlineKeyboardButton(text="➡️", callback_data=f"users_page:{filter_type}:{page + 1}"))
-    
-    if nav_row:
-        keyboard.append(nav_row)
-    
-    # Кнопка назад
-    keyboard.append([InlineKeyboardButton(text="↩️ Назад к фильтрам", callback_data="back_to_filters")])
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+        keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
+        return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+    def group_list(self, groups, page: int = 0) -> InlineKeyboardMarkup:
+        keyboard = []
+        total = len(groups)
+        start = page * self.per_page
+        end = start + self.per_page
+
+        for group in groups[start:end]:
+            keyboard.append([InlineKeyboardButton(
+                text=f"🗂️ {group.name}", callback_data=self.cb_group(group.id),
+            )])
+
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="⬅️", callback_data=self.cb_gpage(page - 1)))
+        if end < total:
+            nav.append(InlineKeyboardButton(text="➡️", callback_data=self.cb_gpage(page + 1)))
+        if nav:
+            keyboard.append(nav)
+
+        keyboard.append([InlineKeyboardButton(text=self.back_text, callback_data=self.cb_back)])
+        return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+    def object_list(self, objects, page: int = 0) -> InlineKeyboardMarkup:
+        keyboard = []
+        total = len(objects)
+        start = page * self.per_page
+        end = start + self.per_page
+
+        for obj in objects[start:end]:
+            keyboard.append([InlineKeyboardButton(
+                text=f"📍 {obj.name}", callback_data=self.cb_object(obj.id),
+            )])
+
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="⬅️", callback_data=self.cb_opage(page - 1)))
+        if end < total:
+            nav.append(InlineKeyboardButton(text="➡️", callback_data=self.cb_opage(page + 1)))
+        if nav:
+            keyboard.append(nav)
+
+        keyboard.append([InlineKeyboardButton(text=self.back_text, callback_data=self.cb_back)])
+        return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+    def user_list(self, users, page: int = 0) -> InlineKeyboardMarkup:
+        keyboard = []
+        total = len(users)
+        start = page * self.per_page
+        end = start + self.per_page
+
+        for user in users[start:end]:
+            if self.show_role:
+                role_name = user.roles[0].name if user.roles else "Без роли"
+                text = f"👤 {user.full_name} ({role_name})"
+            else:
+                text = user.full_name
+            keyboard.append([InlineKeyboardButton(
+                text=text, callback_data=self.cb_user(user.id),
+            )])
+
+        nav = []
+        if page > 0:
+            nav.append(InlineKeyboardButton(text="⬅️", callback_data=self.cb_upage(page - 1)))
+        if end < total:
+            nav.append(InlineKeyboardButton(text="➡️", callback_data=self.cb_upage(page + 1)))
+        if nav:
+            keyboard.append(nav)
+
+        keyboard.append([InlineKeyboardButton(text=self.back_text, callback_data=self.cb_back)])
+        return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+exam_filters = UserFilterKeyboards(
+    prefix="ef",
+    emojis={"all": "👥", "groups": "🟢", "objects": "🔴", "search": "🟣"},
+    per_page=8,
+    show_role=False,
+    back_text="🔙 Назад",
+)
+
+user_edit_filters = UserFilterKeyboards(
+    prefix="uf",
+    emojis={"all": "👥", "groups": "🗂️", "objects": "📍", "search": "🔍"},
+    per_page=5,
+    show_role=True,
+    back_text="↩️ Назад к фильтрам",
+)
+
+
+def get_exam_confirm_delete_keyboard(exam_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения удаления экзамена"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"exam_confirm_delete:{exam_id}"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data=f"exam_view:{exam_id}"),
+        ]
+    ])
 
 
 def get_new_users_list_keyboard(users: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:

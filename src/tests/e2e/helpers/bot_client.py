@@ -157,9 +157,7 @@ class BotClient:
                 filter_info += f" contains='{contains}'"
             if pattern:
                 filter_info += f" pattern='{pattern}'"
-            raise TimeoutError(
-                f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}"
-            )
+            raise TimeoutError(f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}")
         finally:
             self.client.remove_event_handler(on_new_message)
 
@@ -282,9 +280,7 @@ class BotClient:
                 filter_info += f" contains='{wait_contains}'"
             if wait_pattern:
                 filter_info += f" pattern='{wait_pattern}'"
-            raise TimeoutError(
-                f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}"
-            )
+            raise TimeoutError(f"[{self.name}] Bot did not respond within {timeout}s.{filter_info}")
         finally:
             self.client.remove_event_handler(on_new)
             self.client.remove_event_handler(on_edit)
