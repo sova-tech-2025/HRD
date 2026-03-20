@@ -390,36 +390,6 @@ class CompanyJoinStates(StatesGroup):
     waiting_for_role_selection = State()
 
 
-class ExamStates(StatesGroup):
-    """Состояния для работы с экзаменами"""
-
-    # Меню экзаменов
-    main_menu = State()
-
-    # Создание экзамена (рекрутер)
-    waiting_for_exam_name = State()
-    waiting_for_exam_question = State()
-    waiting_for_exam_passing_score = State()
-
-    # Карточка экзамена
-    viewing_exam = State()
-
-    # Назначение экзамена
-    selecting_examiner = State()  # Выбор экзаменатора
-    selecting_examinee_filter = State()  # Выбор способа поиска сдающего
-    searching_examinee_by_name = State()  # Поиск по ФИО
-    selecting_examinee = State()  # Выбор сдающего из списка
-    viewing_examinee_card = State()  # Карточка сдающего перед назначением
-
-    # Проведение экзамена (экзаменатор)
-    selecting_examinee_for_exam = State()  # Выбор сдающего из списка назначенных
-    viewing_exam_details = State()  # Детали перед началом
-    waiting_for_exam_score = State()  # Ввод балла за вопрос
-
-    # Сдать экзамен (сдающий — read-only)
-    viewing_my_exams = State()
-
-
 class CompanyManagementStates(StatesGroup):
     """Состояния для управления компанией (для рекрутеров)"""
 

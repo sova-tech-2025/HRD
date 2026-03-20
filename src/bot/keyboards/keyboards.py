@@ -39,8 +39,6 @@ MAIN_MENU_TEXTS = {
     "☰ Главное меню",
     # Руководитель
     "Аттестация ✔️",
-    # Экзамены
-    "Экзамены 📝",
     # Главное меню (текст)
     "≡ Главное меню",
 }
@@ -111,7 +109,6 @@ def get_recruiter_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="Рассылка ✈️")],
             [KeyboardButton(text="Тесты 📄")],
             [KeyboardButton(text="Мои тесты 📋")],
-            [KeyboardButton(text="Экзамены 📝")],
             [KeyboardButton(text="Наставники 🦉")],
             [KeyboardButton(text="Стажеры 🐣")],
             [KeyboardButton(text="Группы 🗂️")],
@@ -145,7 +142,6 @@ def get_mentor_inline_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Мой профиль 🦸🏻‍♂️", callback_data="mentor_profile")],
         [InlineKeyboardButton(text="База знаний 📒", callback_data="mentor_knowledge_base")],
         [InlineKeyboardButton(text="Мои тесты 🗒", callback_data="mentor_my_tests")],
-        [InlineKeyboardButton(text="Экзамены 📝", callback_data="exam_menu")],
         [InlineKeyboardButton(text="Панель наставника 🎓", callback_data="mentor_panel")],
         [InlineKeyboardButton(text="Помощь ❓", callback_data="mentor_help")],
     ])
@@ -157,7 +153,6 @@ def get_employee_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="Мой профиль 🦸🏻‍♂️")],
             [KeyboardButton(text="Мои тесты 📋")],
-            [KeyboardButton(text="Экзамены 📝")],
             [KeyboardButton(text="База знаний 📁️")],
             [KeyboardButton(text="Помощь ❓")]
         ],
@@ -172,7 +167,6 @@ def get_manager_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="Мой профиль 🦸🏻‍♂️")],
             [KeyboardButton(text="Аттестация ✔️")],
-            [KeyboardButton(text="Экзамены 📝")],
             [KeyboardButton(text="Мои тесты 📋")],
             [KeyboardButton(text="База знаний 📁️")],
             [KeyboardButton(text="Помощь ❓")]
@@ -1496,84 +1490,9 @@ def get_attestation_questions_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-# ================== ЭКЗАМЕНЫ ==================
-
-
-def get_exam_menu_keyboard(
-    exams: list, is_recruiter: bool = False, is_examiner: bool = False, is_mentor: bool = False,
-) -> InlineKeyboardMarkup:
-    """Главное меню РЕДАКТОРА Экзаменов (ролезависимое)"""
-    keyboard = []
-
-    # Кнопка «Провести экзамен» — для экзаменаторов (руководитель, сотрудник, рекрутер)
-    if is_examiner:
-        keyboard.append([InlineKeyboardButton(text="Провести экзамен", callback_data="exam_conduct")])
-
-    # Кнопка «Сдать экзамен» — для всех
-    keyboard.append([InlineKeyboardButton(text="Сдать экзамен", callback_data="exam_take")])
-
-    # Кнопка «Создать экзамен» — только рекрутер
-    if is_recruiter:
-        keyboard.append([InlineKeyboardButton(text="➕ Создать экзамен", callback_data="exam_create")])
-
-    # Список существующих экзаменов — только рекрутер и наставник
-    if is_recruiter or is_mentor:
-        for exam in exams:
-            keyboard.append([InlineKeyboardButton(
-                text=f"── {exam.name}",
-                callback_data=f"exam_view:{exam.id}",
-            )])
-
-    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
-def get_exam_card_keyboard(
-    exam_id: int, is_recruiter: bool = False, can_assign: bool = False,
-) -> InlineKeyboardMarkup:
-    """Клавиатура карточки экзамена"""
-    keyboard = []
-
-    if is_recruiter:
-        keyboard.append([InlineKeyboardButton(text="🗑 Удалить", callback_data=f"exam_delete:{exam_id}")])
-
-    if can_assign:
-        keyboard.append([InlineKeyboardButton(text="📌 Назначить", callback_data=f"exam_assign:{exam_id}")])
-
-    keyboard.append([InlineKeyboardButton(text="🔙 Назад к экзаменам", callback_data="exam_back_to_menu")])
-    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
-def get_exam_questions_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для управления вопросами экзамена при создании"""
-    keyboard = [
-        [InlineKeyboardButton(text="Сохранить вопросы", callback_data="exam_save_questions")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
-def get_exam_examiner_list_keyboard(examiners: list) -> InlineKeyboardMarkup:
-    """Клавиатура выбора экзаменатора"""
-    keyboard = []
-    for user in examiners:
-        role_name = user.roles[0].name if user.roles else ""
-        keyboard.append([InlineKeyboardButton(
-            text=f"{user.full_name} ({role_name})",
-            callback_data=f"exam_examiner:{user.id}",
-        )])
-    keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="exam_back_to_card")])
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
-
-
 class UserFilterKeyboards:
     """Генератор клавиатур фильтрации пользователей.
 
-    Единый класс для экзаменов и редактирования пользователей.
     Callback_data: {prefix}_all, {prefix}_groups, {prefix}_group:{id}, и т.д.
     """
 
@@ -1722,14 +1641,6 @@ class UserFilterKeyboards:
         return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-exam_filters = UserFilterKeyboards(
-    prefix="ef",
-    emojis={"all": "👥", "groups": "🟢", "objects": "🔴", "search": "🟣"},
-    per_page=8,
-    show_role=False,
-    back_text="🔙 Назад",
-)
-
 user_edit_filters = UserFilterKeyboards(
     prefix="uf",
     emojis={"all": "👥", "groups": "🗂️", "objects": "📍", "search": "🔍"},
@@ -1737,16 +1648,6 @@ user_edit_filters = UserFilterKeyboards(
     show_role=True,
     back_text="↩️ Назад к фильтрам",
 )
-
-
-def get_exam_confirm_delete_keyboard(exam_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура подтверждения удаления экзамена"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"exam_confirm_delete:{exam_id}"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data=f"exam_view:{exam_id}"),
-        ]
-    ])
 
 
 def get_new_users_list_keyboard(users: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:

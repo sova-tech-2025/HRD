@@ -1,7 +1,7 @@
 """Тесты для PaginatedKeyboard."""
 
-import pytest
 from types import SimpleNamespace
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.keyboards.pagination import PaginatedKeyboard
@@ -32,11 +32,7 @@ class TestPaginatedKeyboardBasic:
 
     def test_single_page_no_nav(self):
         items = _items(3)
-        kb = (
-            PaginatedKeyboard(items, per_page=5, page_callback="p")
-            .add_items(lambda x: (x.name, f"cb:{x.id}"))
-            .build()
-        )
+        kb = PaginatedKeyboard(items, per_page=5, page_callback="p").add_items(lambda x: (x.name, f"cb:{x.id}")).build()
         texts = _btn_texts(kb)
         assert texts == [["Item 1"], ["Item 2"], ["Item 3"]]
 
@@ -154,11 +150,7 @@ class TestPaginatedKeyboardEdgeCases:
 class TestRenderFunction:
     def test_render_tuple(self):
         items = _items(2)
-        kb = (
-            PaginatedKeyboard(items, page_callback="p")
-            .add_items(lambda x: (f"T:{x.name}", f"cb:{x.id}"))
-            .build()
-        )
+        kb = PaginatedKeyboard(items, page_callback="p").add_items(lambda x: (f"T:{x.name}", f"cb:{x.id}")).build()
         assert _btn_texts(kb) == [["T:Item 1"], ["T:Item 2"]]
         assert _btn_callbacks(kb) == [["cb:1"], ["cb:2"]]
 
@@ -175,10 +167,12 @@ class TestRenderFunction:
         items = _items(1)
         kb = (
             PaginatedKeyboard(items, page_callback="p")
-            .add_items(lambda x: [
-                InlineKeyboardButton(text=x.name, callback_data=f"a:{x.id}"),
-                InlineKeyboardButton(text="X", callback_data=f"b:{x.id}"),
-            ])
+            .add_items(
+                lambda x: [
+                    InlineKeyboardButton(text=x.name, callback_data=f"a:{x.id}"),
+                    InlineKeyboardButton(text="X", callback_data=f"b:{x.id}"),
+                ]
+            )
             .build()
         )
         assert _btn_texts(kb) == [["Item 1", "X"]]
@@ -193,10 +187,12 @@ class TestFooter:
         kb = (
             PaginatedKeyboard(items, page=0, per_page=3, page_callback="pg")
             .add_items(lambda x: (x.name, f"cb:{x.id}"))
-            .add_footer([
-                [InlineKeyboardButton(text="Back", callback_data="back")],
-                [InlineKeyboardButton(text="Menu", callback_data="menu")],
-            ])
+            .add_footer(
+                [
+                    [InlineKeyboardButton(text="Back", callback_data="back")],
+                    [InlineKeyboardButton(text="Menu", callback_data="menu")],
+                ]
+            )
             .build()
         )
         texts = _btn_texts(kb)

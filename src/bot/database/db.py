@@ -4928,16 +4928,6 @@ async def migrate_new_tables():
             except Exception as e:
                 logger.info(f"tests.material_type уже существует или ошибка: {e}")
 
-            # Миграция: добавляем поле assessment_type для аттестаций/экзаменов
-            try:
-                await conn.execute(
-                    text(
-                        "ALTER TABLE attestations ADD COLUMN IF NOT EXISTS assessment_type VARCHAR DEFAULT 'attestation' NOT NULL"
-                    )
-                )
-            except Exception as e:
-                logger.info(f"attestations.assessment_type уже существует или ошибка: {e}")
-
         # logger.info("✅ Миграция новых таблиц для траекторий ЗАВЕРШЕНА УСПЕШНО")  # Миграции выполнены
     except Exception as e:
         logger.error(f"❌ ОШИБКА МИГРАЦИИ новых таблиц: {type(e).__name__}: {e}")

@@ -478,7 +478,6 @@ class Attestation(Base):
     created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)  # Компания аттестации
-    assessment_type = Column(String, nullable=False, default="attestation")  # 'attestation' или 'exam'
 
     # Связи
     created_by = relationship("User")
@@ -494,7 +493,6 @@ class Attestation(Base):
     __table_args__ = (
         Index("idx_attestation_is_active", "is_active"),
         Index("idx_attestation_company_active", "company_id", "is_active"),
-        Index("idx_attestation_type", "assessment_type"),
     )
 
     def __repr__(self):
