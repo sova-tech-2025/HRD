@@ -17,6 +17,6 @@ COPY . .
 
 ENV PYTHONPATH=/app/src
 
-RUN mkdir -p /app/logs
+RUN mkdir -p /app/logs && chmod +x entrypoint.sh
 
-CMD ["python", "-m", "bot"]
+ENTRYPOINT ["./entrypoint.sh"]
