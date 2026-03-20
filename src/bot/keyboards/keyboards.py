@@ -1,6 +1,7 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.keyboards.pagination import PaginatedKeyboard
 from bot.utils.media.photo import get_trainee_menu_photo, get_mentor_menu_photo, get_main_menu_photo
 
 
@@ -479,74 +480,25 @@ def get_test_filter_keyboard() -> InlineKeyboardMarkup:
 
 def get_simple_test_selection_keyboard(tests: list, page: int = 0, per_page: int = 5, filter_type: str = "all") -> InlineKeyboardMarkup:
     """Создает простую инлайн-клавиатуру со списком тестов с пагинацией"""
-    keyboard = []
-    
-    # Пагинация
-    start_index = page * per_page
-    end_index = start_index + per_page
-    page_tests = tests[start_index:end_index]
-    
-    # Кнопки тестов для текущей страницы
-    for test in page_tests:
-        button = InlineKeyboardButton(
-            text=f"{test.name} (макс. {test.max_score:.1f} б.)",
-            callback_data=f"test:{test.id}"
-        )
-        keyboard.append([button])
-    
-    # Навигационные кнопки
-    total_pages = (len(tests) + per_page - 1) // per_page
-    nav_buttons = []
-    
-    if total_pages > 1:
-        if page > 0:
-            nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"tests_list_page:{filter_type}:{page-1}"))
-        
-        # Информация о странице
-        page_info = f"📄 {page+1}/{total_pages}"
-        nav_buttons.append(InlineKeyboardButton(text=page_info, callback_data="noop"))
-        
-        if page < total_pages - 1:
-            nav_buttons.append(InlineKeyboardButton(text="➡️ Вперед", callback_data=f"tests_list_page:{filter_type}:{page+1}"))
-        
-        if nav_buttons:
-            keyboard.append(nav_buttons)
-    
-    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return (
+        PaginatedKeyboard(tests, page=page, per_page=per_page, page_callback=f"tests_list_page:{filter_type}")
+        .add_items(lambda t: (f"{t.name} (макс. {t.max_score:.1f} б.)", f"test:{t.id}"))
+        .add_footer([[InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]])
+        .build()
+    )
 
 
 def get_test_results_keyboard(test_results: list, page: int = 0, per_page: int = 5, user_role: str = "пользователь", mentor_tg_id: int = None) -> InlineKeyboardMarkup:
     """Клавиатура для результатов тестов с пагинацией"""
-    keyboard = []
-    
-    # Пагинация
-    total_pages = (len(test_results) + per_page - 1) // per_page if test_results else 0
-    
-    # Навигационные кнопки (если больше одной страницы)
-    if total_pages > 1:
-        nav_buttons = []
-        if page > 0:
-            nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"test_scores_page:{page-1}"))
-        
-        # Информация о странице
-        page_info = f"📄 {page+1}/{total_pages}"
-        nav_buttons.append(InlineKeyboardButton(text=page_info, callback_data="noop"))
-        
-        if page < total_pages - 1:
-            nav_buttons.append(InlineKeyboardButton(text="➡️ Вперед", callback_data=f"test_scores_page:{page+1}"))
-        
-        if nav_buttons:
-            keyboard.append(nav_buttons)
-    
-    # Кнопка связи с наставником (только для стажеров)
+    footer = []
     if user_role == "стажер" and mentor_tg_id:
-        keyboard.append([InlineKeyboardButton(text="✍️ Написать наставнику", url=f"tg://user?id={mentor_tg_id}")])
-    
-    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+        footer.append([InlineKeyboardButton(text="✍️ Написать наставнику", url=f"tg://user?id={mentor_tg_id}")])
+    footer.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
+    return (
+        PaginatedKeyboard(test_results, page=page, per_page=per_page, page_callback="test_scores_page")
+        .add_footer(footer)
+        .build()
+    )
 
 
 def get_broadcast_test_selection_keyboard(tests: list) -> InlineKeyboardMarkup:
@@ -965,48 +917,20 @@ def get_test_start_keyboard(test_id: int, has_previous_result: bool = False, has
 
 def get_test_selection_for_taking_keyboard(tests: list, page: int = 0, per_page: int = 5, callback_prefix: str = "my_tests_page") -> InlineKeyboardMarkup:
     """Создает инлайн-клавиатуру со списком тестов для прохождения с пагинацией
-    
+
     Args:
         tests: Список тестов
         page: Номер страницы (начиная с 0)
         per_page: Количество тестов на страницу
-        callback_prefix: Префикс для callback_data кнопок пагинации (по умолчанию "my_tests_page" для "Мои тесты", 
+        callback_prefix: Префикс для callback_data кнопок пагинации (по умолчанию "my_tests_page" для "Мои тесты",
                         можно использовать "trajectory_tests_page" для "Тесты траектории")
     """
-    keyboard = []
-    
-    # Пагинация: показываем только тесты текущей страницы
-    start_index = page * per_page
-    end_index = start_index + per_page
-    page_tests = tests[start_index:end_index]
-    
-    for test in page_tests:
-        button = InlineKeyboardButton(
-            text=f"📋 {test.name}",
-            callback_data=f"test:{test.id}"
-        )
-        keyboard.append([button])
-    
-    # Навигационные кнопки
-    total_pages = (len(tests) + per_page - 1) // per_page
-    nav_buttons = []
-    
-    if total_pages > 1:
-        if page > 0:
-            nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{callback_prefix}:{page-1}"))
-        
-        page_info = f"📄 {page+1}/{total_pages}"
-        nav_buttons.append(InlineKeyboardButton(text=page_info, callback_data="noop"))
-        
-        if page < total_pages - 1:
-            nav_buttons.append(InlineKeyboardButton(text="➡️ Вперед", callback_data=f"{callback_prefix}:{page+1}"))
-        
-        if nav_buttons:
-            keyboard.append(nav_buttons)
-    
-    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return (
+        PaginatedKeyboard(tests, page=page, per_page=per_page, page_callback=callback_prefix)
+        .add_items(lambda t: (f"📋 {t.name}", f"test:{t.id}"))
+        .add_footer([[InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]])
+        .build()
+    )
 
 
 def get_question_management_keyboard(question_id: int, is_first: bool, is_last: bool) -> InlineKeyboardMarkup:
@@ -1225,45 +1149,15 @@ def get_group_management_keyboard() -> InlineKeyboardMarkup:
 
 def get_group_selection_keyboard(groups: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
     """Клавиатура для выбора группы для изменения с пагинацией"""
-    keyboard = []
-    
-    # Пагинация
-    start_index = page * per_page
-    end_index = start_index + per_page
-    page_groups = groups[start_index:end_index]
-    
-    # Кнопки групп
-    for group in page_groups:
-        button = InlineKeyboardButton(
-            text=f"🗂️ {group.name}",
-            callback_data=f"select_group:{group.id}"
-        )
-        keyboard.append([button])
-    
-    # Навигационные кнопки
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"groups_page:{page-1}"))
-    
-    total_pages = (len(groups) + per_page - 1) // per_page
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton(text="➡️ Далее", callback_data=f"groups_page:{page+1}"))
-    
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-    
-    # Информация о страницах
-    if total_pages > 1:
-        page_info = InlineKeyboardButton(
-            text=f"📄 {page + 1}/{total_pages}",
-            callback_data="page_info"
-        )
-        keyboard.append([page_info])
-    
-    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_edit")])
-    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return (
+        PaginatedKeyboard(groups, page=page, per_page=per_page, page_callback="groups_page")
+        .add_items(lambda g: (f"🗂️ {g.name}", f"select_group:{g.id}"))
+        .add_footer([
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_edit")],
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+        ])
+        .build()
+    )
 
 
 def get_group_rename_confirmation_keyboard(group_id: int) -> InlineKeyboardMarkup:
@@ -1278,47 +1172,15 @@ def get_group_rename_confirmation_keyboard(group_id: int) -> InlineKeyboardMarku
 
 def get_group_delete_selection_keyboard(groups: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
     """Клавиатура для выбора группы для удаления с пагинацией"""
-    keyboard = []
-    
-    # Пагинация
-    start_index = page * per_page
-    end_index = start_index + per_page
-    page_groups = groups[start_index:end_index]
-    
-    # Кнопки групп
-    for group in page_groups:
-        button = InlineKeyboardButton(
-            text=f"🗂️ {group.name}",
-            callback_data=f"delete_group:{group.id}"
-        )
-        keyboard.append([button])
-    
-    # Навигационные кнопки
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"delete_group_page:{page-1}"))
-    if end_index < len(groups):
-        nav_buttons.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"delete_group_page:{page+1}"))
-    
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-    
-    # Информация о страницах
-    total_pages = (len(groups) + per_page - 1) // per_page
-    if total_pages > 1:
-        page_info = InlineKeyboardButton(
-            text=f"📄 {page + 1}/{total_pages}",
-            callback_data="page_info"
-        )
-        keyboard.append([page_info])
-    
-    # Кнопки управления
-    keyboard.append([
-        InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_delete_group"),
-        InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")
-    ])
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return (
+        PaginatedKeyboard(groups, page=page, per_page=per_page, page_callback="delete_group_page")
+        .add_items(lambda g: (f"🗂️ {g.name}", f"delete_group:{g.id}"))
+        .add_footer([[
+            InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_delete_group"),
+            InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu"),
+        ]])
+        .build()
+    )
 
 
 def get_group_delete_confirmation_keyboard(group_id: int) -> InlineKeyboardMarkup:
@@ -1355,59 +1217,25 @@ def get_object_management_keyboard() -> InlineKeyboardMarkup:
 
 def get_object_selection_keyboard(objects: list, page: int = 0, per_page: int = 5, object_type: str = "") -> InlineKeyboardMarkup:
     """Клавиатура для выбора объекта для изменения с пагинацией"""
-    keyboard = []
-    
-    # Пагинация
-    start_index = page * per_page
-    end_index = start_index + per_page
-    page_objects = objects[start_index:end_index]
-    
-    # Кнопки объектов
-    for obj in page_objects:
-        # Определяем callback_data в зависимости от типа объекта
-        if object_type == "internship":
-            callback_data = f"select_internship_object:{obj.id}"
-        elif object_type == "work":
-            callback_data = f"select_work_object:{obj.id}"
-        else:
-            callback_data = f"select_object:{obj.id}"
-            
-        keyboard.append([
-            InlineKeyboardButton(
-                text=obj.name,
-                callback_data=callback_data
-            )
-        ])
-    
-    # Навигация по страницам
-    navigation_row = []
-    total_pages = (len(objects) + per_page - 1) // per_page
-    
-    # Определяем префикс для callback_data пагинации
     if object_type == "internship":
         page_callback = "internship_object_page"
+        cb_prefix = "select_internship_object"
     elif object_type == "work":
         page_callback = "work_object_page"
+        cb_prefix = "select_work_object"
     else:
         page_callback = "objects_page"
-    
-    if page > 0:
-        navigation_row.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"{page_callback}:{page-1}"))
-    
-    if total_pages > 1:
-        navigation_row.append(InlineKeyboardButton(text=f"📄 {page+1}/{total_pages}", callback_data="page_info"))
-    
-    if page < total_pages - 1:
-        navigation_row.append(InlineKeyboardButton(text="➡️ Далее", callback_data=f"{page_callback}:{page+1}"))
-    
-    if navigation_row:
-        keyboard.append(navigation_row)
-    
-    # Кнопка возврата к редактору и главное меню
-    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_edit")])
-    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+        cb_prefix = "select_object"
+
+    return (
+        PaginatedKeyboard(objects, page=page, per_page=per_page, page_callback=page_callback)
+        .add_items(lambda obj: (obj.name, f"{cb_prefix}:{obj.id}"))
+        .add_footer([
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_edit")],
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+        ])
+        .build()
+    )
 
 def get_object_rename_confirmation_keyboard(object_id: int) -> InlineKeyboardMarkup:
     """Клавиатура для подтверждения переименования объекта"""
@@ -1421,39 +1249,15 @@ def get_object_rename_confirmation_keyboard(object_id: int) -> InlineKeyboardMar
 
 def get_object_delete_selection_keyboard(objects: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
     """Клавиатура для выбора объекта для удаления с пагинацией"""
-    keyboard = []
-    
-    # Добавляем объекты для текущей страницы
-    start_idx = page * per_page
-    end_idx = start_idx + per_page
-    page_objects = objects[start_idx:end_idx]
-    
-    for obj in page_objects:
-        keyboard.append([InlineKeyboardButton(
-            text=f"🗑️ {obj.name}",
-            callback_data=f"delete_object:{obj.id}"
-        )])
-    
-    # Добавляем кнопки навигации если нужно
-    total_pages = (len(objects) + per_page - 1) // per_page
-    nav_buttons = []
-    
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"object_delete_page:{page-1}"))
-    
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton(text="Вперёд ➡️", callback_data=f"object_delete_page:{page+1}"))
-    
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-    
-    # Кнопки управления
-    keyboard.extend([
-        [InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_object_delete")],
-        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]
-    ])
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return (
+        PaginatedKeyboard(objects, page=page, per_page=per_page, page_callback="object_delete_page")
+        .add_items(lambda obj: (f"🗑️ {obj.name}", f"delete_object:{obj.id}"))
+        .add_footer([
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_object_delete")],
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+        ])
+        .build()
+    )
 
 
 def get_object_delete_confirmation_keyboard(object_id: int) -> InlineKeyboardMarkup:
@@ -1947,45 +1751,16 @@ def get_exam_confirm_delete_keyboard(exam_id: int) -> InlineKeyboardMarkup:
 
 def get_new_users_list_keyboard(users: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
     """Клавиатура списка новых (неактивированных) пользователей с пагинацией"""
-    keyboard = []
-    total_users = len(users)
-    start_idx = page * per_page
-    end_idx = start_idx + per_page
-    
-    # Добавляем кнопки пользователей для текущей страницы
-    for user in users[start_idx:end_idx]:
+    def render_user(user):
         registration_date = user.registration_date.strftime('%d.%m.%Y') if user.registration_date else "Неизвестно"
-        button_text = f"{user.full_name} ({registration_date})"
-        keyboard.append([
-            InlineKeyboardButton(
-                text=button_text,
-                callback_data=f"activate_user:{user.id}"
-            )
-        ])
-    
-    # Навигационные кнопки
-    nav_row = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton(text="⬅️", callback_data=f"new_users_page:{page - 1}"))
-    
-    if end_idx < total_users:
-        nav_row.append(InlineKeyboardButton(text="➡️", callback_data=f"new_users_page:{page + 1}"))
-    
-    if nav_row:
-        keyboard.append(nav_row)
-    
-    # Показываем номер страницы
-    if total_users > per_page:
-        total_pages = (total_users + per_page - 1) // per_page
-        keyboard.append([InlineKeyboardButton(
-            text=f"📄 Страница {page + 1}/{total_pages}",
-            callback_data="noop"
-        )])
-    
-    # Кнопка поиска
-    keyboard.append([InlineKeyboardButton(text="🔍 Поиск по ФИО", callback_data="search_new_users")])
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+        return (f"{user.full_name} ({registration_date})", f"activate_user:{user.id}")
+
+    return (
+        PaginatedKeyboard(users, page=page, per_page=per_page, page_callback="new_users_page")
+        .add_items(render_user)
+        .add_footer([[InlineKeyboardButton(text="🔍 Поиск по ФИО", callback_data="search_new_users")]])
+        .build()
+    )
 
 
 def get_user_info_keyboard(user_id: int, filter_type: str = "all") -> InlineKeyboardMarkup:
@@ -2307,45 +2082,12 @@ def get_fallback_keyboard() -> InlineKeyboardMarkup:
 
 def get_trainees_list_keyboard(trainees: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
     """Клавиатура со списком стажеров с пагинацией для рекрутера"""
-    keyboard = []
-    
-    # Пагинация
-    start_index = page * per_page
-    end_index = start_index + per_page
-    page_trainees = trainees[start_index:end_index]
-    
-    # Кнопки стажеров
-    for trainee in page_trainees:
-        button = InlineKeyboardButton(
-            text=f"{trainee.full_name}",
-            callback_data=f"view_trainee:{trainee.id}"
-        )
-        keyboard.append([button])
-    
-    # Навигационные кнопки
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"trainees_page:{page-1}"))
-    
-    total_pages = (len(trainees) + per_page - 1) // per_page
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"trainees_page:{page+1}"))
-    
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-    
-    # Информация о страницах
-    if total_pages > 1:
-        page_info = InlineKeyboardButton(
-            text=f"📄 {page + 1}/{total_pages}",
-            callback_data="page_info"
-        )
-        keyboard.append([page_info])
-    
-    # Кнопка главного меню
-    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return (
+        PaginatedKeyboard(trainees, page=page, per_page=per_page, page_callback="trainees_page")
+        .add_items(lambda t: (t.full_name, f"view_trainee:{t.id}"))
+        .add_footer([[InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")]])
+        .build()
+    )
 
 
 def get_trainee_detail_keyboard(trainee_id: int, has_attestation: bool = False) -> InlineKeyboardMarkup:
@@ -2425,75 +2167,32 @@ def get_mentor_assignment_management_keyboard() -> InlineKeyboardMarkup:
 
 def get_trainees_with_mentors_keyboard(trainees: list, page: int = 0, per_page: int = 10) -> InlineKeyboardMarkup:
     """Клавиатура для выбора стажера с наставником для переназначения (с пагинацией)"""
-    total_pages = max(1, (len(trainees) + per_page - 1) // per_page)
-    page = max(0, min(page, total_pages - 1))
-
-    start_idx = page * per_page
-    end_idx = start_idx + per_page
-    page_trainees = trainees[start_idx:end_idx]
-
-    keyboard = []
-    for trainee in page_trainees:
-        mentor_name = getattr(trainee, "current_mentor", None)
+    def render_trainee(trainee):
+        mentor = getattr(trainee, "current_mentor", None)
         label = f"👤 {trainee.full_name}"
-        if mentor_name and hasattr(mentor_name, "full_name"):
-            label += f" ({mentor_name.full_name})"
-        keyboard.append([
-            InlineKeyboardButton(
-                text=label,
-                callback_data=f"select_trainee_for_reassign:{trainee.id}",
-            )
-        ])
+        if mentor and hasattr(mentor, "full_name"):
+            label += f" ({mentor.full_name})"
+        return (label, f"select_trainee_for_reassign:{trainee.id}")
 
-    if total_pages > 1:
-        nav = []
-        if page > 0:
-            nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"reassign_trainees_page:{page - 1}"))
-        nav.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"))
-        if page < total_pages - 1:
-            nav.append(InlineKeyboardButton(text="➡️", callback_data=f"reassign_trainees_page:{page + 1}"))
-        keyboard.append(nav)
-
-    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="mentor_assignment_management")])
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return (
+        PaginatedKeyboard(trainees, page=page, per_page=per_page, page_callback="reassign_trainees_page")
+        .add_items(render_trainee)
+        .add_footer([[InlineKeyboardButton(text="⬅️ Назад", callback_data="mentor_assignment_management")]])
+        .build()
+    )
 
 
 def get_mentors_pagination_keyboard(mentors: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
     """Клавиатура для пагинации списка наставников"""
-    keyboard = []
-    
-    # Добавляем кнопки наставников для текущей страницы
-    start_idx = page * per_page
-    end_idx = start_idx + per_page
-    page_mentors = mentors[start_idx:end_idx]
-    
-    for mentor in page_mentors:
-        keyboard.append([
-            InlineKeyboardButton(
-                text=f"👤 {mentor.full_name}",
-                callback_data=f"view_mentor_detail:{mentor.id}"
-            )
+    return (
+        PaginatedKeyboard(mentors, page=page, per_page=per_page, page_callback="mentors_page")
+        .add_items(lambda m: (f"👤 {m.full_name}", f"view_mentor_detail:{m.id}"))
+        .add_footer([
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_mentors_menu")],
+            [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
         ])
-    
-    # Добавляем кнопки пагинации
-    total_pages = (len(mentors) + per_page - 1) // per_page
-    pagination_buttons = []
-    
-    if page > 0:
-        pagination_buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"mentors_page:{page-1}"))
-    
-    if page < total_pages - 1:
-        pagination_buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"mentors_page:{page+1}"))
-    
-    if pagination_buttons:
-        keyboard.append(pagination_buttons)
-    
-    # Кнопка "Назад" к подменю наставников
-    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_mentors_menu")])
-    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
-    
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+        .build()
+    )
 
 
 # ================== РЕДАКТОР ТРАЕКТОРИЙ ==================
@@ -2805,49 +2504,22 @@ def get_user_groups_multiselect_keyboard(
     Returns:
         InlineKeyboardMarkup с кнопками групп, пагинацией и управлением
     """
-    keyboard = []
     selected_group_ids = selected_group_ids or []
 
-    # Пагинация: вычисляем срез групп для текущей страницы
-    total_groups = len(groups)
-    total_pages = (total_groups + per_page - 1) // per_page if total_groups > 0 else 1
-    start_idx = page * per_page
-    end_idx = min(start_idx + per_page, total_groups)
-    page_groups = groups[start_idx:end_idx]
-
-    # Кнопки групп с отметками о выборе
-    for group in page_groups:
+    def render_group(group):
         prefix = "✅ " if group.id in selected_group_ids else ""
         group_name = group.name[:20] + "..." if len(group.name) > 20 else group.name
-        keyboard.append([InlineKeyboardButton(
-            text=f"{prefix}{group_name}",
-            callback_data=f"user_edit_toggle_group:{group.id}"
-        )])
+        return (f"{prefix}{group_name}", f"user_edit_toggle_group:{group.id}")
 
-    # Кнопки пагинации
-    pagination_row = []
-    if page > 0:
-        pagination_row.append(InlineKeyboardButton(
-            text="⬅️",
-            callback_data=f"user_edit_groups_page:{page - 1}"
-        ))
-    if page < total_pages - 1:
-        pagination_row.append(InlineKeyboardButton(
-            text="➡️",
-            callback_data=f"user_edit_groups_page:{page + 1}"
-        ))
-    if pagination_row:
-        keyboard.append(pagination_row)
-
-    # Кнопка сохранения (только если есть выбранные группы)
+    footer = []
     if selected_group_ids:
-        keyboard.append([InlineKeyboardButton(
-            text="💾 Сохранить",
-            callback_data="user_edit_save_groups"
-        )])
+        footer.append([InlineKeyboardButton(text="💾 Сохранить", callback_data="user_edit_save_groups")])
+    footer.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_edit")])
+    footer.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
 
-    # Кнопки навигации
-    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_edit")])
-    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return (
+        PaginatedKeyboard(groups, page=page, per_page=per_page, page_callback="user_edit_groups_page")
+        .add_items(render_group)
+        .add_footer(footer)
+        .build()
+    )
