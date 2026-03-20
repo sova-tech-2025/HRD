@@ -9247,3 +9247,408 @@ async def migrate_existing_users_to_default_company(session: AsyncSession) -> in
         logger.error(f"Ошибка миграции пользователей в компанию по умолчанию: {e}")
         await session.rollback()
         return 0
+
+
+# ===============================
+# Функции для Task 7: Переход от Стажера к Сотруднику
+# ===============================
+
+
+async def assign_attestation_to_trainee(
+    session: AsyncSession,
+    trainee_id: int,
+    manager_id: int,
+    attestation_id: int,
+    assigned_by_id: int,
+    company_id: int = None,
+) -> Optional[TraineeAttestation]:
+    """Назначение аттестации стажеру наставником (с изоляцией по компании)"""
+    try:
+        from bot.database.models import TraineeAttestation
+
+        # Изоляция по компании - проверяем принадлежность всех участников
+        if company_id is not None:
+            trainee = await get_user_by_id(session, trainee_id)
+            manager = await get_user_by_id(session, manager_id)
+            attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+
+            if not trainee or trainee.company_id != company_id:
+                logger.error(f"Стажер {trainee_id} не найден или не принадлежит компании {company_id}")
+                return None
+
+            if not manager or manager.company_id != company_id:
+                logger.error(f"Руководитель {manager_id} не найден или не принадлежит компании {company_id}")
+                return None
+
+            if not attestation:
+                logger.error(f"Аттестация {attestation_id} не найдена или не принадлежит компании {company_id}")
+                return None
+        # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Проверяем дубликаты по всем параметрам включая manager_id
+        existing = await session.execute(
+            select(TraineeAttestation)
+            .where(TraineeAttestation.trainee_id == trainee_id)
+            .where(TraineeAttestation.manager_id == manager_id)
+            .where(TraineeAttestation.attestation_id == attestation_id)
+            .where(TraineeAttestation.is_active == True)
+        )
+
+        existing_assignment = existing.scalar_one_or_none()
+        if existing_assignment:
+            logger.warning(
+                f"Аттестация {attestation_id} уже назначена стажеру {trainee_id} с руководителем {manager_id}"
+            )
+            return existing_assignment  # Возвращаем существующее назначение вместо None
+
+        # Дополнительная проверка: деактивируем все старые назначения этой же аттестации для этого стажера
+        await session.execute(
+            update(TraineeAttestation)
+            .where(TraineeAttestation.trainee_id == trainee_id)
+            .where(TraineeAttestation.attestation_id == attestation_id)
+            .where(TraineeAttestation.is_active == True)
+            .values(is_active=False)
+        )
+        logger.info(f"Деактивированы старые назначения аттестации {attestation_id} для стажера {trainee_id}")
+
+        # Создаем назначение аттестации
+        trainee_attestation = TraineeAttestation(
+            trainee_id=trainee_id,
+            manager_id=manager_id,
+            attestation_id=attestation_id,
+            assigned_by_id=assigned_by_id,
+            status="assigned",
+        )
+
+        session.add(trainee_attestation)
+        await session.flush()
+
+        logger.info(f"Аттестация {attestation_id} назначена стажеру {trainee_id} с руководителем {manager_id}")
+        return trainee_attestation
+
+    except Exception as e:
+        logger.error(f"Ошибка назначения аттестации: {e}")
+        return None
+
+
+async def get_manager_assigned_attestations(
+    session: AsyncSession, manager_id: int, company_id: int = None
+) -> List[TraineeAttestation]:
+    """Получение всех назначенных аттестаций для руководителя (с изоляцией по компании)"""
+    try:
+        query = (
+            select(TraineeAttestation)
+            .options(
+                selectinload(TraineeAttestation.trainee).selectinload(User.work_object),
+                selectinload(TraineeAttestation.attestation),
+                selectinload(TraineeAttestation.assigned_by),
+            )
+            .join(User, TraineeAttestation.trainee_id == User.id)
+            .where(TraineeAttestation.manager_id == manager_id)
+            .where(TraineeAttestation.is_active == True)
+        )
+
+        # КРИТИЧЕСКАЯ ИЗОЛЯЦИЯ ПО КОМПАНИИ!
+        if company_id is not None:
+            query = query.where(User.company_id == company_id)
+
+        query = query.order_by(TraineeAttestation.assigned_date.desc())
+
+        result = await session.execute(query)
+        return result.scalars().all()
+
+    except Exception as e:
+        logger.error(f"Ошибка получения назначенных аттестаций для руководителя {manager_id}: {e}")
+        return []
+
+
+async def update_attestation_schedule(
+    session: AsyncSession, attestation_id: int, scheduled_date: str, scheduled_time: str, company_id: int = None
+) -> bool:
+    """Обновление даты и времени аттестации с изоляцией по компании"""
+    try:
+        # Проверяем существование назначенной аттестации и принадлежность к компании
+        trainee_attestation = await get_trainee_attestation_by_id(session, attestation_id, company_id=company_id)
+        if not trainee_attestation:
+            logger.error(f"Назначенная аттестация {attestation_id} не найдена или не принадлежит компании {company_id}")
+            return False
+
+        result = await session.execute(
+            update(TraineeAttestation)
+            .where(TraineeAttestation.id == attestation_id)
+            .values(scheduled_date=scheduled_date, scheduled_time=scheduled_time)
+        )
+
+        await session.commit()
+
+        if result.rowcount > 0:
+            logger.info(f"Обновлены дата и время для аттестации {attestation_id}: {scheduled_date} {scheduled_time}")
+            return True
+        return False
+
+    except Exception as e:
+        logger.error(f"Ошибка обновления расписания аттестации {attestation_id}: {e}")
+        return False
+
+
+async def start_attestation_session(session: AsyncSession, attestation_id: int, company_id: int = None) -> bool:
+    """Начало сессии прохождения аттестации с изоляцией по компании"""
+    try:
+        # Проверяем существование назначенной аттестации и принадлежность к компании
+        trainee_attestation = await get_trainee_attestation_by_id(session, attestation_id, company_id=company_id)
+        if not trainee_attestation:
+            logger.error(f"Назначенная аттестация {attestation_id} не найдена или не принадлежит компании {company_id}")
+            return False
+
+        result = await session.execute(
+            update(TraineeAttestation).where(TraineeAttestation.id == attestation_id).values(status="in_progress")
+        )
+
+        await session.commit()
+
+        if result.rowcount > 0:
+            logger.info(f"Начата сессия аттестации {attestation_id}")
+            return True
+        return False
+
+    except Exception as e:
+        logger.error(f"Ошибка начала сессии аттестации {attestation_id}: {e}")
+        return False
+
+
+async def save_attestation_question_result(
+    session: AsyncSession, attestation_result_id: int, question_id: int, points_awarded: float, max_points: float
+) -> bool:
+    """Сохранение результата ответа на вопрос аттестации"""
+    try:
+        question_result = AttestationQuestionResult(
+            attestation_result_id=attestation_result_id,
+            question_id=question_id,
+            points_awarded=points_awarded,
+            max_points=max_points,
+        )
+
+        session.add(question_result)
+        await session.flush()
+
+        logger.info(f"Сохранен результат вопроса {question_id}: {points_awarded}/{max_points}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка сохранения результата вопроса: {e}")
+        return False
+
+
+async def complete_attestation_session(
+    session: AsyncSession,
+    attestation_id: int,
+    total_score: float,
+    max_score: float,
+    is_passed: bool,
+    company_id: int = None,
+) -> bool:
+    """Завершение сессии аттестации с результатами с изоляцией по компании"""
+    try:
+        # Проверяем существование назначенной аттестации и принадлежность к компании
+        trainee_attestation = await get_trainee_attestation_by_id(session, attestation_id, company_id=company_id)
+        if not trainee_attestation:
+            logger.error(f"Назначенная аттестация {attestation_id} не найдена или не принадлежит компании {company_id}")
+            return False
+
+        # Обновляем статус назначения аттестации
+        status = "completed" if is_passed else "failed"
+        result = await session.execute(
+            update(TraineeAttestation).where(TraineeAttestation.id == attestation_id).values(status=status)
+        )
+
+        if result.rowcount > 0:
+            logger.info(
+                f"Завершена аттестация {attestation_id} со статусом {status}, результат: {total_score}/{max_score}"
+            )
+            return True
+        return False
+
+    except Exception as e:
+        logger.error(f"Ошибка завершения аттестации {attestation_id}: {e}")
+        return False
+
+
+async def get_trainee_attestation_by_id(
+    session: AsyncSession, attestation_id: int, company_id: int = None
+) -> Optional[TraineeAttestation]:
+    """Получение назначенной аттестации по ID (с изоляцией по компании)"""
+    try:
+        query = (
+            select(TraineeAttestation)
+            .options(
+                selectinload(TraineeAttestation.trainee).selectinload(User.work_object),
+                selectinload(TraineeAttestation.manager),
+                selectinload(TraineeAttestation.attestation).selectinload(Attestation.questions),
+                selectinload(TraineeAttestation.assigned_by),
+            )
+            .join(User, TraineeAttestation.trainee_id == User.id)
+            .where(TraineeAttestation.id == attestation_id)
+            .where(TraineeAttestation.is_active == True)
+        )
+
+        # КРИТИЧЕСКАЯ ИЗОЛЯЦИЯ ПО КОМПАНИИ!
+        if company_id is not None:
+            query = query.where(User.company_id == company_id)
+
+        result = await session.execute(query)
+        return result.scalar_one_or_none()
+
+    except Exception as e:
+        logger.error(f"Ошибка получения аттестации {attestation_id}: {e}")
+        return None
+
+
+async def get_managers_for_attestation(session: AsyncSession, group_id: int, company_id: int = None) -> List[User]:
+    """Получение списка руководителей для назначения аттестации (по группе стажера, с изоляцией по компании)"""
+    try:
+        query = (
+            select(User)
+            .join(user_roles, User.id == user_roles.c.user_id)
+            .join(Role, user_roles.c.role_id == Role.id)
+            .where(Role.name == "Руководитель")
+            .where(User.is_active == True)
+            .where(User.is_activated == True)
+        )
+
+        # КРИТИЧЕСКАЯ ИЗОЛЯЦИЯ ПО КОМПАНИИ!
+        if company_id is not None:
+            query = query.where(User.company_id == company_id)
+
+        result = await session.execute(query)
+        return result.scalars().all()
+
+    except Exception as e:
+        logger.error(f"Ошибка получения руководителей для аттестации: {e}")
+        return []
+
+
+async def create_attestation_result(
+    session: AsyncSession,
+    trainee_id: int,
+    attestation_id: int,
+    manager_id: int,
+    total_score: float,
+    max_score: float,
+    is_passed: bool,
+    company_id: int = None,
+) -> Optional[AttestationResult]:
+    """Создание результата аттестации (с проверкой изоляции по компании)"""
+    try:
+        # Проверяем изоляцию: trainee должен быть из той же компании
+        if company_id is not None:
+            trainee = await get_user_by_id(session, trainee_id)
+            if not trainee or trainee.company_id != company_id:
+                logger.error(
+                    f"Попытка создать результат аттестации для стажера из другой компании: trainee_id={trainee_id}, company_id={company_id}"
+                )
+                return None
+
+            # Проверяем что attestation тоже из той же компании
+            attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
+            if not attestation:
+                logger.error(f"Аттестация {attestation_id} не найдена или из другой компании")
+                return None
+
+        result = AttestationResult(
+            trainee_id=trainee_id,
+            attestation_id=attestation_id,
+            manager_id=manager_id,
+            total_score=total_score,
+            max_score=max_score,
+            is_passed=is_passed,
+        )
+
+        session.add(result)
+        await session.flush()
+
+        logger.info(
+            f"Создан результат аттестации для стажера {trainee_id}: {total_score}/{max_score}, пройдена: {is_passed}"
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"Ошибка создания результата аттестации: {e}")
+        return None
+
+
+async def check_all_stages_completed(session: AsyncSession, trainee_id: int) -> bool:
+    """Проверка что стажер прошел ВСЕ этапы траектории перед аттестацией"""
+    try:
+        # Получаем траекторию стажера
+        trainee_path = await get_trainee_learning_path(session, trainee_id)
+        if not trainee_path:
+            logger.warning(f"У стажера {trainee_id} нет назначенной траектории")
+            return False
+
+        # Получаем все этапы траектории
+        stages_result = await session.execute(
+            select(LearningStage)
+            .where(LearningStage.learning_path_id == trainee_path.learning_path_id)
+            .order_by(LearningStage.order_number)
+        )
+        all_stages = stages_result.scalars().all()
+
+        if not all_stages:
+            logger.warning(f"В траектории стажера {trainee_id} нет этапов")
+            return False
+
+        # Получаем прогресс стажера по этапам
+        stages_progress = await get_trainee_stage_progress(session, trainee_path.id)
+
+        # Проверяем что ВСЕ этапы завершены
+        completed_stage_ids = [sp.stage_id for sp in stages_progress if sp.is_completed]
+        all_stage_ids = [stage.id for stage in all_stages]
+
+        uncompleted_stages = [stage_id for stage_id in all_stage_ids if stage_id not in completed_stage_ids]
+
+        if uncompleted_stages:
+            logger.info(f"Стажер {trainee_id} не завершил этапы: {uncompleted_stages}")
+            return False
+
+        logger.info(f"Стажер {trainee_id} успешно завершил ВСЕ этапы траектории")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка проверки завершения этапов для стажера {trainee_id}: {e}")
+        return False
+
+
+async def get_trainee_attestation_status(
+    session: AsyncSession, trainee_id: int, attestation_id: int, company_id: int = None
+) -> str:
+    """Получение статуса аттестации стажера: ⛔️ - не назначена, 🟡 - назначена, ✅ - пройдена (с изоляцией по компании)"""
+    try:
+        # Проверяем назначена ли аттестация
+        query = (
+            select(TraineeAttestation)
+            .join(User, TraineeAttestation.trainee_id == User.id)
+            .where(TraineeAttestation.trainee_id == trainee_id)
+            .where(TraineeAttestation.attestation_id == attestation_id)
+            .where(TraineeAttestation.is_active == True)
+        )
+
+        # КРИТИЧЕСКАЯ ИЗОЛЯЦИЯ ПО КОМПАНИИ!
+        if company_id is not None:
+            query = query.where(User.company_id == company_id)
+
+        assignment_result = await session.execute(query)
+        assignment = assignment_result.scalar_one_or_none()
+
+        if not assignment:
+            return "⛔️"  # Не назначена
+
+        if assignment.status == "completed":
+            return "✅"  # Пройдена
+        elif assignment.status in ["assigned", "in_progress"]:
+            return "🟡"  # Назначена
+        else:
+            return "⛔️"  # Провалена или отменена
+
+    except Exception as e:
+        logger.error(f"Ошибка получения статуса аттестации: {e}")
+        return "⛔️"
+
+
