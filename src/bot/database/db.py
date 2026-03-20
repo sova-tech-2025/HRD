@@ -11,6 +11,8 @@ from sqlalchemy.orm import joinedload, selectinload, sessionmaker
 from bot.config import DATABASE_URL
 from bot.database.models import (
     Attestation,
+    AttestationQuestion,
+    AttestationQuestionResult,
     AttestationResult,
     Base,
     Company,
@@ -4930,11 +4932,9 @@ async def migrate_new_tables():
 
             # Миграция: добавляем поле assessment_type для аттестаций/экзаменов
             try:
-                await conn.execute(
-                    text(
-                        "ALTER TABLE attestations ADD COLUMN IF NOT EXISTS assessment_type VARCHAR DEFAULT 'attestation' NOT NULL"
-                    )
-                )
+                await conn.execute(text(
+                    "ALTER TABLE attestations ADD COLUMN IF NOT EXISTS assessment_type VARCHAR DEFAULT 'attestation' NOT NULL"
+                ))
             except Exception as e:
                 logger.info(f"attestations.assessment_type уже существует или ошибка: {e}")
 
@@ -6862,9 +6862,8 @@ async def add_test_to_session_from_editor(
             update(TraineeStageProgress)
             .where(
                 TraineeStageProgress.id.in_(
-                    select(TraineeSessionProgress.stage_progress_id).where(
-                        TraineeSessionProgress.session_id == session_id
-                    )
+                    select(TraineeSessionProgress.stage_progress_id)
+                    .where(TraineeSessionProgress.session_id == session_id)
                 ),
                 TraineeStageProgress.is_completed == True,
             )

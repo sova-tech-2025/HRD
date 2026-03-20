@@ -12,7 +12,6 @@ from bot.database.db import init_db
 from bot.handlers import fallback
 from bot.handlers.company import company, groups, objects
 from bot.handlers.core import auth, common, registration
-from bot.handlers.exams import exam_assignment, exam_conducting, exam_menu
 from bot.handlers.knowledge import knowledge_base
 from bot.handlers.management import employee_transition, manager_attestation, manager_menu
 from bot.handlers.tests import broadcast, test_taking, tests
@@ -51,9 +50,6 @@ dp.include_router(mentorship.router)
 dp.include_router(mentor_assignment.router)  # Назначение наставников
 dp.include_router(manager_attestation.router)  # Проведение аттестаций руководителями
 dp.include_router(manager_menu.router)  # Меню руководителя
-dp.include_router(exam_menu.router)  # Экзамены: меню, создание, карточка
-dp.include_router(exam_assignment.router)  # Экзамены: назначение
-dp.include_router(exam_conducting.router)  # Экзамены: проведение, сдача
 dp.include_router(test_taking.router)  # Прохождение тестов (должен быть раньше trainee_trajectory)
 dp.include_router(trainee_trajectory.router)  # Прохождение траекторий стажерами
 dp.include_router(groups.router)

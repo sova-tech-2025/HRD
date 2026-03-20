@@ -97,12 +97,12 @@ class TestAddTestToSessionResetsCompleted:
 
         execute_results = [
             make_scalar_result(learning_session_mock),  # select LearningSession
-            make_scalar_result(stage_mock),  # select LearningStage
-            make_first_result(None),  # existing check → not found
-            make_scalar_value(1),  # max order_number
-            MagicMock(),  # insert session_tests
-            MagicMock(),  # UPDATE trainee_session_progress (фикс)
-            MagicMock(),  # UPDATE trainee_stage_progress (фикс)
+            make_scalar_result(stage_mock),             # select LearningStage
+            make_first_result(None),                    # existing check → not found
+            make_scalar_value(1),                       # max order_number
+            MagicMock(),                                # insert session_tests
+            MagicMock(),                                # UPDATE trainee_session_progress (фикс)
+            MagicMock(),                                # UPDATE trainee_stage_progress (фикс)
         ]
 
         call_count = 0
@@ -121,10 +121,9 @@ class TestAddTestToSessionResetsCompleted:
         session.commit = AsyncMock()
 
         # Патчим get_test_by_id и get_learning_path_by_id чтобы не усложнять моки
-        with (
-            patch("bot.database.db.get_test_by_id", new_callable=AsyncMock, return_value=test_mock),
-            patch("bot.database.db.get_learning_path_by_id", new_callable=AsyncMock, return_value=learning_path_mock),
-        ):
+        with patch("bot.database.db.get_test_by_id", new_callable=AsyncMock, return_value=test_mock), \
+             patch("bot.database.db.get_learning_path_by_id", new_callable=AsyncMock, return_value=learning_path_mock):
+
             result = await add_test_to_session_from_editor(
                 session=session,
                 session_id=340,
@@ -146,7 +145,10 @@ class TestAddTestToSessionResetsCompleted:
                     pass
 
         # Проверяем: должен быть UPDATE trainee_session_progress SET is_completed=false
-        session_reset_found = any("trainee_session_progress" in sql and "UPDATE" in sql for sql in executed_stmts)
+        session_reset_found = any(
+            "trainee_session_progress" in sql and "UPDATE" in sql
+            for sql in executed_stmts
+        )
 
         assert session_reset_found, (
             "БАГ: add_test_to_session_from_editor НЕ сбрасывает "
@@ -183,12 +185,12 @@ class TestAddTestToSessionResetsCompleted:
 
         execute_results = [
             make_scalar_result(learning_session_mock),  # select LearningSession
-            make_scalar_result(stage_mock),  # select LearningStage
-            make_first_result(None),  # existing check
-            make_scalar_value(1),  # max order
-            MagicMock(),  # insert
-            MagicMock(),  # UPDATE session progress
-            MagicMock(),  # UPDATE stage progress
+            make_scalar_result(stage_mock),             # select LearningStage
+            make_first_result(None),                    # existing check
+            make_scalar_value(1),                       # max order
+            MagicMock(),                                # insert
+            MagicMock(),                                # UPDATE session progress
+            MagicMock(),                                # UPDATE stage progress
         ]
 
         call_count = 0
@@ -206,10 +208,9 @@ class TestAddTestToSessionResetsCompleted:
         session.execute = AsyncMock(side_effect=mock_execute)
         session.commit = AsyncMock()
 
-        with (
-            patch("bot.database.db.get_test_by_id", new_callable=AsyncMock, return_value=test_mock),
-            patch("bot.database.db.get_learning_path_by_id", new_callable=AsyncMock, return_value=learning_path_mock),
-        ):
+        with patch("bot.database.db.get_test_by_id", new_callable=AsyncMock, return_value=test_mock), \
+             patch("bot.database.db.get_learning_path_by_id", new_callable=AsyncMock, return_value=learning_path_mock):
+
             result = await add_test_to_session_from_editor(
                 session=session,
                 session_id=340,
@@ -230,7 +231,10 @@ class TestAddTestToSessionResetsCompleted:
                     pass
 
         # Должен быть UPDATE trainee_stage_progress SET is_completed=false
-        stage_reset_found = any("trainee_stage_progress" in sql and "UPDATE" in sql for sql in executed_stmts)
+        stage_reset_found = any(
+            "trainee_stage_progress" in sql and "UPDATE" in sql
+            for sql in executed_stmts
+        )
 
         assert stage_reset_found, (
             "БАГ: add_test_to_session_from_editor НЕ сбрасывает "
@@ -258,11 +262,15 @@ class TestTraineeSeesNoOpenSessions:
         sessions_progress = [session_progress]
 
         # Фильтр из trainee_trajectory.py:385
-        available_sessions = [sp for sp in sessions_progress if sp.is_opened and not sp.is_completed]
+        available_sessions = [
+            sp for sp in sessions_progress
+            if sp.is_opened and not sp.is_completed
+        ]
 
         # Это показывает баг: сессия отфильтрована, стажёр ничего не видит
         assert len(available_sessions) == 0, (
-            "Подтверждение бага: завершённая сессия отфильтровывается, даже если в неё добавлены новые тесты"
+            "Подтверждение бага: завершённая сессия отфильтровывается, "
+            "даже если в неё добавлены новые тесты"
         )
 
     @pytest.mark.asyncio
@@ -277,8 +285,12 @@ class TestTraineeSeesNoOpenSessions:
 
         sessions_progress = [session_progress]
 
-        available_sessions = [sp for sp in sessions_progress if sp.is_opened and not sp.is_completed]
+        available_sessions = [
+            sp for sp in sessions_progress
+            if sp.is_opened and not sp.is_completed
+        ]
 
         assert len(available_sessions) == 1, (
-            "После фикса сессия с новыми непройденными тестами должна быть доступна стажёру"
+            "После фикса сессия с новыми непройденными тестами "
+            "должна быть доступна стажёру"
         )

@@ -18,6 +18,7 @@ from bot.database.db import (
     get_stage_session_progress,
     get_test_by_id,
     get_test_questions,
+    get_trainee_attestation_status,
     get_trainee_available_tests,
     get_trainee_learning_path,
     get_trainee_stage_progress,
@@ -39,7 +40,6 @@ from bot.keyboards.keyboards import (
     get_test_selection_for_taking_keyboard,
     get_test_start_keyboard,
 )
-from bot.repositories import AssessmentAssignmentRepository
 from bot.states.states import TestTakingStates
 from bot.utils.auth.auth import check_auth
 from bot.utils.handlers.callback import ensure_callback_auth
@@ -1615,8 +1615,8 @@ async def finish_test(message: Message, state: FSMContext, session: AsyncSession
             # Добавляем аттестацию с правильным статусом
             attestation = trainee_path.learning_path.attestation
             if attestation:
-                attestation_status = await AssessmentAssignmentRepository(session).get_status(
-                    user.id, attestation.id, company_id=company_id
+                attestation_status = await get_trainee_attestation_status(
+                    session, user.id, attestation.id, company_id=company_id
                 )
                 progress_info += f"🏁<b>Аттестация:</b> {attestation.name} {attestation_status}\n\n"
             else:

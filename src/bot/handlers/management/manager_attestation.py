@@ -11,10 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database.db import (
     change_trainee_to_employee,
     check_user_permission,
+    complete_attestation_session,
+    create_attestation_result,
+    get_manager_assigned_attestations,
+    get_trainee_attestation_by_id,
     get_user_by_tg_id,
+    save_attestation_question_result,
+    start_attestation_session,
+    update_attestation_schedule,
 )
 from bot.keyboards.keyboards import get_main_menu_keyboard
-from bot.repositories import AssessmentAssignmentRepository, AssessmentResultRepository
 from bot.states.states import ManagerAttestationStates
 from bot.utils.auth.auth import check_auth
 from bot.utils.logger import log_user_action, log_user_error, logger
@@ -55,9 +61,7 @@ async def cmd_manager_attestations(message: Message, state: FSMContext, session:
         # Получаем список назначенных аттестаций с изоляцией по компании
         data = await state.get_data()
         company_id = data.get("company_id")
-        assigned_attestations = await AssessmentAssignmentRepository(session).get_for_manager(
-            user.id, company_id=company_id
-        )
+        assigned_attestations = await get_manager_assigned_attestations(session, user.id, company_id=company_id)
 
         if not assigned_attestations:
             await message.answer(
@@ -122,7 +126,7 @@ async def callback_select_trainee_attestation(callback: CallbackQuery, state: FS
         # Получаем данные назначенной аттестации
         data = await state.get_data()
         company_id = data.get("company_id")
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await callback.message.edit_text("Аттестация не найдена")
             return
@@ -181,7 +185,7 @@ async def callback_change_attestation_date(callback: CallbackQuery, state: FSMCo
         # Получаем данные аттестации
         data = await state.get_data()
         company_id = data.get("company_id")
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await callback.message.edit_text("Аттестация не найдена")
             return
@@ -230,7 +234,7 @@ async def process_new_date(message: Message, state: FSMContext, session: AsyncSe
         # Получаем данные аттестации
         data = await state.get_data()
         company_id = data.get("company_id")
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await message.answer("Аттестация не найдена")
             return
@@ -273,7 +277,7 @@ async def process_new_time(message: Message, state: FSMContext, session: AsyncSe
         # Получаем данные аттестации
         data = await state.get_data()
         company_id = data.get("company_id")
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await message.answer("Аттестация не найдена")
             return
@@ -335,9 +339,7 @@ async def callback_save_new_schedule(callback: CallbackQuery, state: FSMContext,
         company_id = data.get("company_id")
 
         # Обновляем расписание аттестации
-        success = await AssessmentAssignmentRepository(session).update_schedule(
-            assignment_id, new_date, new_time, company_id=company_id
-        )
+        success = await update_attestation_schedule(session, assignment_id, new_date, new_time, company_id=company_id)
         if not success:
             await callback.message.edit_text("❌ Ошибка при сохранении расписания")
             return
@@ -345,7 +347,7 @@ async def callback_save_new_schedule(callback: CallbackQuery, state: FSMContext,
         # Получаем обновленные данные
         data = await state.get_data()
         company_id = data.get("company_id")
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         trainee = assignment.trainee
 
         # Отправляем уведомление стажеру согласно ТЗ (шаг 14) с изоляцией по компании
@@ -401,7 +403,7 @@ async def callback_start_attestation(callback: CallbackQuery, state: FSMContext,
         # Получаем данные аттестации
         data = await state.get_data()
         company_id = data.get("company_id")
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await callback.message.edit_text("Аттестация не найдена")
             return
@@ -455,7 +457,7 @@ async def callback_confirm_start_attestation(callback: CallbackQuery, state: FSM
         # Получаем данные аттестации
         data = await state.get_data()
         company_id = data.get("company_id")
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await callback.message.edit_text("Аттестация не найдена")
             return
@@ -465,7 +467,7 @@ async def callback_confirm_start_attestation(callback: CallbackQuery, state: FSM
         company_id = data.get("company_id")
 
         # Начинаем сессию аттестации
-        await AssessmentAssignmentRepository(session).start_session(assignment_id, company_id=company_id)
+        await start_attestation_session(session, assignment_id, company_id=company_id)
 
         # Инициализируем прохождение вопросов
         await state.update_data(assignment_id=assignment_id, current_question_index=0, answers=[])
@@ -488,7 +490,7 @@ async def show_attestation_question(callback: CallbackQuery, state: FSMContext, 
         # Получаем данные аттестации
         data = await state.get_data()
         company_id = data.get("company_id")
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         attestation = assignment.attestation
         questions = attestation.questions
 
@@ -541,7 +543,7 @@ async def process_question_score(message: Message, state: FSMContext, session: A
         # Получаем данные аттестации
         data = await state.get_data()
         company_id = data.get("company_id")
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         attestation = assignment.attestation
         questions = attestation.questions
 
@@ -598,7 +600,7 @@ async def show_attestation_results_message(message: Message, state: FSMContext, 
         # Получаем данные аттестации
         data = await state.get_data()
         company_id = data.get("company_id")
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         trainee = assignment.trainee
         attestation = assignment.attestation
 
@@ -610,7 +612,8 @@ async def show_attestation_results_message(message: Message, state: FSMContext, 
         # Создаем результат аттестации
         data = await state.get_data()
         company_id = data.get("company_id")
-        attestation_result = await AssessmentResultRepository(session).create(
+        attestation_result = await create_attestation_result(
+            session,
             trainee.id,
             attestation.id,
             assignment.manager_id,
@@ -622,13 +625,13 @@ async def show_attestation_results_message(message: Message, state: FSMContext, 
 
         # Сохраняем детали по вопросам
         for answer in answers:
-            await AssessmentResultRepository(session).save_question_result(
-                attestation_result.id, answer["question_id"], answer["score"], answer["max_score"]
+            await save_attestation_question_result(
+                session, attestation_result.id, answer["question_id"], answer["score"], answer["max_score"]
             )
 
         # Завершаем сессию аттестации
-        await AssessmentAssignmentRepository(session).complete_session(
-            assignment_id, total_score, max_score, is_passed, company_id=company_id
+        await complete_attestation_session(
+            session, assignment_id, total_score, max_score, is_passed, company_id=company_id
         )
 
         # Сохраняем все изменения в базу данных
@@ -737,7 +740,7 @@ async def send_schedule_change_notification_to_trainee(
     """Отправка уведомления стажеру об изменении даты/времени (ТЗ шаг 14)"""
     try:
         # Получаем assignment с изоляцией по компании
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             return
 
@@ -849,7 +852,7 @@ async def callback_make_employee_anyway(callback: CallbackQuery, state: FSMConte
         # Получаем данные аттестации
         data = await state.get_data()
         company_id = data.get("company_id")
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             await callback.message.edit_text("Аттестация не найдена")
             return
@@ -934,9 +937,7 @@ async def callback_back_to_attestations(callback: CallbackQuery, state: FSMConte
         # Получаем аттестации для руководителя с изоляцией по компании
         state_data = await state.get_data()
         company_id = state_data.get("company_id")
-        manager_attestations = await AssessmentAssignmentRepository(session).get_for_manager(
-            user.id, company_id=company_id
-        )
+        manager_attestations = await get_manager_assigned_attestations(session, user.id, company_id=company_id)
 
         if not manager_attestations:
             await callback.message.edit_text(

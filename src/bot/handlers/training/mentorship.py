@@ -7,22 +7,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import MENTOR_PANEL_IMAGE_FILE_ID, MENTOR_PANEL_IMAGE_PATH
 from bot.database.db import (
+    assign_attestation_to_trainee,
     assign_learning_path_to_trainee,
     assign_manager_to_trainee,
     assign_mentor,
+    check_all_stages_completed,
     check_user_permission,
     ensure_company_id,
     get_accessible_knowledge_folders_for_user,
     get_all_active_tests,
+    get_attestation_by_id,
     get_available_learning_paths_for_mentor,
     get_available_managers_for_trainee,
     get_available_mentors,
     get_learning_path_by_id,
     get_learning_path_stages,
+    get_managers_for_attestation,
     get_mentor_trainees,
     get_stage_session_progress,
     get_test_by_id,
     get_test_results_summary,
+    get_trainee_attestation_by_id,
+    get_trainee_attestation_status,
     get_trainee_available_tests,
     get_trainee_learning_path,
     get_trainee_manager,
@@ -54,7 +60,6 @@ from bot.keyboards.keyboards import (
     get_trainees_with_mentors_keyboard,
     get_unassigned_trainees_keyboard,
 )
-from bot.repositories import AssessmentAssignmentRepository, AssessmentRepository
 from bot.utils.formatters.test_progress import get_test_status_icon
 from bot.utils.formatters.trajectory import generate_trajectory_progress_with_attestation_status
 from bot.utils.timezone import moscow_now
@@ -2376,8 +2381,8 @@ async def generate_trajectory_progress_with_attestation_status(
         trainee = await get_user_by_id(session, trainee_path.trainee_id)
         company_id = trainee.company_id if trainee else None
 
-        attestation_status = await AssessmentAssignmentRepository(session).get_status(
-            trainee_path.trainee_id, trainee_path.learning_path.attestation.id, company_id=company_id
+        attestation_status = await get_trainee_attestation_status(
+            session, trainee_path.trainee_id, trainee_path.learning_path.attestation.id, company_id=company_id
         )
         progress += f"🏁 <b>Аттестация:</b> {trainee_path.learning_path.attestation.name} {attestation_status}\n"
 
@@ -3974,7 +3979,7 @@ async def callback_view_trainee_attestation(callback: CallbackQuery, state: FSMC
             return
 
         # КРИТИЧЕСКАЯ ПРОВЕРКА: Все этапы траектории должны быть завершены перед аттестацией
-        all_stages_completed = await AssessmentAssignmentRepository(session).check_all_stages_completed(trainee.id)
+        all_stages_completed = await check_all_stages_completed(session, trainee.id)
         if not all_stages_completed:
             await callback.message.edit_text(
                 "❌ <b>Аттестация недоступна</b>\n\n"
@@ -4003,7 +4008,7 @@ async def callback_view_trainee_attestation(callback: CallbackQuery, state: FSMC
 
         # Получаем список руководителей для аттестации
         group_id = trainee.groups[0].id if trainee.groups else None
-        managers = await AssessmentAssignmentRepository(session).get_managers(group_id, company_id=company_id)
+        managers = await get_managers_for_attestation(session, group_id, company_id=company_id)
 
         if not managers:
             await callback.message.edit_text(
@@ -4089,7 +4094,7 @@ async def callback_select_manager_for_attestation(callback: CallbackQuery, state
         trainee = await get_user_by_id(session, trainee_id)
         manager = await get_user_by_id(session, manager_id)
         company_id = trainee.company_id if trainee else None
-        attestation = await AssessmentRepository(session).get_by_id(attestation_id, company_id=company_id)
+        attestation = await get_attestation_by_id(session, attestation_id, company_id=company_id)
         trainee_path = await get_trainee_learning_path(session, trainee_id, company_id=company_id)
 
         if not trainee or not manager or not attestation:
@@ -4176,8 +4181,8 @@ async def callback_confirm_attestation_assignment(callback: CallbackQuery, state
         company_id = data.get("company_id")
 
         # Назначаем аттестацию
-        assignment = await AssessmentAssignmentRepository(session).assign(
-            trainee_id, manager_id, attestation_id, mentor.id, company_id=company_id
+        assignment = await assign_attestation_to_trainee(
+            session, trainee_id, manager_id, attestation_id, mentor.id, company_id=company_id
         )
 
         if not assignment:
@@ -4190,7 +4195,7 @@ async def callback_confirm_attestation_assignment(callback: CallbackQuery, state
         # Получаем данные для уведомлений
         trainee = await get_user_by_id(session, trainee_id)
         manager = await get_user_by_id(session, manager_id)
-        attestation = await AssessmentRepository(session).get_by_id(attestation_id, company_id=mentor.company_id)
+        attestation = await get_attestation_by_id(session, attestation_id, company_id=mentor.company_id)
 
         # Очищаем состояние
         await state.clear()
@@ -4236,7 +4241,7 @@ async def send_attestation_assignment_notification_to_trainee(
     """Отправка уведомления стажеру о назначении аттестации (ТЗ шаг 14)"""
     try:
         # Получаем данные назначения с изоляцией по компании
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             return
 
@@ -4275,7 +4280,7 @@ async def send_attestation_assignment_notification_to_manager(
     """Отправка уведомления руководителю о назначении стажера на аттестацию (ТЗ шаг 15)"""
     try:
         # Получаем данные назначения с изоляцией по компании
-        assignment = await AssessmentAssignmentRepository(session).get_by_id(assignment_id, company_id=company_id)
+        assignment = await get_trainee_attestation_by_id(session, assignment_id, company_id=company_id)
         if not assignment:
             return
 
