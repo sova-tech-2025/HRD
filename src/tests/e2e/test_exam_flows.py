@@ -223,7 +223,61 @@ class TestTraineeExamBlocked:
 
 
 # =========================================================================
-# Класс 7: Рекрутер назначает экзамен
+# Класс 7: Стажёр не попадает в список сдающих при назначении экзамена
+# =========================================================================
+
+
+class TestTraineeExcludedFromExamAssignment:
+    """По ТЗ стажёр не может быть назначен сдающим экзамена."""
+
+    async def test_step1_trainee_not_in_examinee_list(self, recruiter: BotClient, shared_state: dict):
+        """Рекрутер открывает список сдающих — стажёр отсутствует."""
+        await wait_between_actions()
+
+        # Открываем меню экзаменов
+        resp = await recruiter.send_and_wait("Экзамены 📝", pattern="РЕДАКТОР")
+
+        # Находим экзамен и открываем карточку
+        exam_btn = recruiter.find_button_data(resp, text_contains="E2E Экзамен Кофе", data_prefix="exam_view:")
+        assert exam_btn, f"Exam not found. Buttons: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=exam_btn, wait_pattern="E2E Экзамен Кофе")
+
+        # Нажимаем «Назначить»
+        assign_btn = recruiter.find_button_data(resp, data_prefix="exam_assign:")
+        assert assign_btn, f"Assign button not found. Buttons: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=assign_btn, wait_pattern="Экзаменатор|экзаменатор")
+
+        # Выбираем экзаменатора (руководителя)
+        examiner_btn = recruiter.find_button_data(resp, text_contains="Руководителев", data_prefix="exam_examiner:")
+        assert examiner_btn, f"Examiner not found. Buttons: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=examiner_btn, wait_pattern="Сдающий|способ поиска")
+
+        # Нажимаем «Все пользователи»
+        all_btn = recruiter.find_button_data(resp, data_prefix="ef_all")
+        assert all_btn, f"'All users' button not found. Buttons: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=all_btn, wait_pattern="Найдено|Выбери")
+
+        # Получаем список имён
+        button_texts = recruiter.get_button_texts(resp)
+
+        # Стажёр (trainee1 = "Стажёров Первый") НЕ должен быть в списке сдающих
+        assert not any("Стажёров Первый" in b for b in button_texts), (
+            f"Trainee 'Стажёров Первый' should NOT be in examinee list. Buttons: {button_texts}"
+        )
+
+        # Сотрудник (trainee2 = "Стажёров Второй", перешёл в роль Сотрудник) ДОЛЖЕН быть
+        assert any("Стажёров Второй" in b for b in button_texts), (
+            f"Employee 'Стажёров Второй' should be in examinee list. Buttons: {button_texts}"
+        )
+
+        # Наставник тоже ДОЛЖЕН быть
+        assert any("Наставников" in b for b in button_texts), (
+            f"Mentor 'Наставников' should be in examinee list. Buttons: {button_texts}"
+        )
+
+
+# =========================================================================
+# Класс 8: Рекрутер назначает экзамен
 # =========================================================================
 
 

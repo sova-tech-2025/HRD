@@ -130,6 +130,7 @@ class AssessmentAssignmentRepository(BaseRepository):
                 select(TraineeAttestation)
                 .options(
                     selectinload(TraineeAttestation.trainee).selectinload(User.work_object),
+                    selectinload(TraineeAttestation.trainee).selectinload(User.internship_object),
                     selectinload(TraineeAttestation.manager),
                     selectinload(TraineeAttestation.attestation).selectinload(Attestation.questions),
                     selectinload(TraineeAttestation.assigned_by),
@@ -437,6 +438,13 @@ class AssessmentAssignmentRepository(BaseRepository):
     ) -> List[User]:
         """Получение пользователей для назначения экзамена с фильтрацией"""
         try:
+            # Исключаем стажёров — по ТЗ им нельзя назначить экзамен
+            trainee_role_subquery = (
+                select(user_roles.c.user_id)
+                .join(Role, user_roles.c.role_id == Role.id)
+                .where(Role.name.in_(["Стажер", "Стажёр"]))
+            )
+
             query = (
                 select(User)
                 .options(
@@ -449,6 +457,7 @@ class AssessmentAssignmentRepository(BaseRepository):
                     User.is_active == True,
                     User.is_activated == True,
                     User.company_id == company_id,
+                    User.id.not_in(trainee_role_subquery),
                 )
             )
 
