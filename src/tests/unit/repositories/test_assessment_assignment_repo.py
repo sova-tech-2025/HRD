@@ -528,3 +528,333 @@ class TestCleanupDuplicates:
         assert middle.is_active is False
         assert oldest.is_active is False
         session.flush.assert_awaited_once()
+
+
+# ==========================================================================
+# get_users_for_exam_assignment()
+# ==========================================================================
+
+
+def make_scalars_unique_result(items: list) -> MagicMock:
+    """Создать мок результата session.execute() с scalars().unique().all()."""
+    unique_mock = MagicMock()
+    unique_mock.all.return_value = items
+    scalars_mock = MagicMock()
+    scalars_mock.unique.return_value = unique_mock
+    result = MagicMock()
+    result.scalars.return_value = scalars_mock
+    return result
+
+
+class TestGetUsersForExamAssignment:
+    """Получение пользователей для назначения экзамена (исключая стажёров)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_users(self):
+        """get_users_for_exam_assignment() возвращает список пользователей."""
+        session = AsyncMock()
+
+        user1 = MagicMock(id=1, full_name="Рекрутеров Тест")
+        user2 = MagicMock(id=2, full_name="Наставников Тест")
+
+        session.execute.return_value = make_scalars_unique_result([user1, user2])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_users_for_exam_assignment(company_id=1)
+
+        assert len(result) == 2
+        assert user1 in result
+        assert user2 in result
+        session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """get_users_for_exam_assignment() возвращает пустой список, если нет пользователей."""
+        session = AsyncMock()
+        session.execute.return_value = make_scalars_unique_result([])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_users_for_exam_assignment(company_id=1)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_filter_by_group(self):
+        """get_users_for_exam_assignment() с filter_type='group' выполняет запрос."""
+        session = AsyncMock()
+
+        user1 = MagicMock(id=1)
+        session.execute.return_value = make_scalars_unique_result([user1])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_users_for_exam_assignment(company_id=1, filter_type="group", filter_id=5)
+
+        assert len(result) == 1
+        session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_filter_by_object(self):
+        """get_users_for_exam_assignment() с filter_type='object' выполняет запрос."""
+        session = AsyncMock()
+
+        user1 = MagicMock(id=1)
+        session.execute.return_value = make_scalars_unique_result([user1])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_users_for_exam_assignment(company_id=1, filter_type="object", filter_id=3)
+
+        assert len(result) == 1
+        session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_filter_by_search(self):
+        """get_users_for_exam_assignment() с filter_type='search' выполняет запрос."""
+        session = AsyncMock()
+
+        user1 = MagicMock(id=1, full_name="Наставников Тест")
+        session.execute.return_value = make_scalars_unique_result([user1])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_users_for_exam_assignment(
+            company_id=1, filter_type="search", search_query="Наставников"
+        )
+
+        assert len(result) == 1
+        assert result[0].full_name == "Наставников Тест"
+
+    @pytest.mark.asyncio
+    async def test_error_returns_empty_list(self):
+        """get_users_for_exam_assignment() возвращает [] при ошибке."""
+        session = AsyncMock()
+        session.execute.side_effect = Exception("DB error")
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_users_for_exam_assignment(company_id=1)
+
+        assert result == []
+
+
+# ==========================================================================
+# get_by_id() — проверка загрузки internship_object
+# ==========================================================================
+
+
+class TestGetByIdInternshipObject:
+    """Проверка что get_by_id корректно возвращает объект с trainee.internship_object."""
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_returns_trainee_with_internship_object(self):
+        """get_by_id() возвращает назначение, у которого trainee имеет internship_object."""
+        session = AsyncMock()
+
+        internship_obj = MagicMock()
+        internship_obj.name = "Кафе Центр"
+
+        trainee = MagicMock()
+        trainee.full_name = "Наставников Тест"
+        trainee.work_object = MagicMock(name="Кафе Юг")
+        trainee.internship_object = internship_obj
+
+        assignment_mock = MagicMock()
+        assignment_mock.id = 42
+        assignment_mock.trainee = trainee
+
+        session.execute.return_value = make_scalar_one_or_none_result(assignment_mock)
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_by_id(assignment_id=42, company_id=1)
+
+        assert result is assignment_mock
+        assert result.trainee.internship_object.name == "Кафе Центр"
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_trainee_without_internship_object(self):
+        """get_by_id() корректно работает, когда internship_object = None."""
+        session = AsyncMock()
+
+        trainee = MagicMock()
+        trainee.full_name = "Наставников Тест"
+        trainee.work_object = MagicMock(name="Кафе Юг")
+        trainee.internship_object = None
+
+        assignment_mock = MagicMock()
+        assignment_mock.id = 42
+        assignment_mock.trainee = trainee
+
+        session.execute.return_value = make_scalar_one_or_none_result(assignment_mock)
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_by_id(assignment_id=42, company_id=1)
+
+        assert result is assignment_mock
+        assert result.trainee.internship_object is None
+
+
+# ==========================================================================
+# get_exam_assignments_for_examiner()
+# ==========================================================================
+
+
+class TestGetExamAssignmentsForExaminer:
+    """Получение назначенных экзаменов для экзаменатора."""
+
+    @pytest.mark.asyncio
+    async def test_returns_assignments(self):
+        """get_exam_assignments_for_examiner() возвращает список назначений."""
+        session = AsyncMock()
+
+        att1 = MagicMock(id=1, status="assigned")
+        att2 = MagicMock(id=2, status="in_progress")
+
+        session.execute.return_value = make_scalars_result([att1, att2])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_exam_assignments_for_examiner(examiner_id=20, company_id=1)
+
+        assert len(result) == 2
+        assert att1 in result
+        assert att2 in result
+        session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """get_exam_assignments_for_examiner() возвращает [] если нет экзаменов."""
+        session = AsyncMock()
+        session.execute.return_value = make_scalars_result([])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_exam_assignments_for_examiner(examiner_id=20, company_id=1)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_returns_trainee_with_internship_object(self):
+        """Назначение содержит trainee с загруженным internship_object."""
+        session = AsyncMock()
+
+        internship_obj = MagicMock()
+        internship_obj.name = "Кафе Центр"
+
+        work_obj = MagicMock()
+        work_obj.name = "Кафе Юг"
+
+        trainee = MagicMock()
+        trainee.full_name = "Тестовый Сдающий"
+        trainee.internship_object = internship_obj
+        trainee.work_object = work_obj
+
+        att = MagicMock(id=1, status="assigned")
+        att.trainee = trainee
+
+        session.execute.return_value = make_scalars_result([att])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_exam_assignments_for_examiner(examiner_id=20, company_id=1)
+
+        assert len(result) == 1
+        assert result[0].trainee.internship_object.name == "Кафе Центр"
+        assert result[0].trainee.work_object.name == "Кафе Юг"
+
+    @pytest.mark.asyncio
+    async def test_error_returns_empty_list(self):
+        """get_exam_assignments_for_examiner() возвращает [] при ошибке."""
+        session = AsyncMock()
+        session.execute.side_effect = Exception("DB error")
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_exam_assignments_for_examiner(examiner_id=20, company_id=1)
+
+        assert result == []
+
+
+# ==========================================================================
+# get_examiners()
+# ==========================================================================
+
+
+class TestGetExaminers:
+    """Получение списка экзаменаторов."""
+
+    @pytest.mark.asyncio
+    async def test_returns_examiners(self):
+        """get_examiners() возвращает список экзаменаторов."""
+        session = AsyncMock()
+
+        user1 = MagicMock(id=1, full_name="Руководитель Тест")
+        user2 = MagicMock(id=2, full_name="Рекрутер Тест")
+
+        session.execute.return_value = make_scalars_unique_result([user1, user2])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_examiners(company_id=1)
+
+        assert len(result) == 2
+        session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """get_examiners() возвращает [] если нет экзаменаторов."""
+        session = AsyncMock()
+        session.execute.return_value = make_scalars_unique_result([])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_examiners(company_id=1)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_error_returns_empty_list(self):
+        """get_examiners() возвращает [] при ошибке."""
+        session = AsyncMock()
+        session.execute.side_effect = Exception("DB error")
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_examiners(company_id=1)
+
+        assert result == []
+
+
+# ==========================================================================
+# get_for_examinee()
+# ==========================================================================
+
+
+class TestGetForExaminee:
+    """Получение назначенных экзаменов для сдающего."""
+
+    @pytest.mark.asyncio
+    async def test_returns_assignments(self):
+        """get_for_examinee() возвращает список назначений экзаменов."""
+        session = AsyncMock()
+
+        att1 = MagicMock(id=1, status="assigned")
+
+        session.execute.return_value = make_scalars_result([att1])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_for_examinee(examinee_id=10, company_id=1)
+
+        assert len(result) == 1
+        session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """get_for_examinee() возвращает [] если нет назначений."""
+        session = AsyncMock()
+        session.execute.return_value = make_scalars_result([])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_for_examinee(examinee_id=10, company_id=1)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_error_returns_empty_list(self):
+        """get_for_examinee() возвращает [] при ошибке."""
+        session = AsyncMock()
+        session.execute.side_effect = Exception("DB error")
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_for_examinee(examinee_id=10, company_id=1)
+
+        assert result == []
