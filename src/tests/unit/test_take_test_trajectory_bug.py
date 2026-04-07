@@ -95,8 +95,7 @@ class TestTakeTestFromTrajectoryBug:
             mock_get_test.assert_called()
             actual_test_id = mock_get_test.call_args[0][1]  # второй позиционный аргумент
             assert actual_test_id == 15, (
-                f"get_test_by_id вызван с test_id={actual_test_id} (session_id), "
-                f"а должен быть вызван с test_id=15"
+                f"get_test_by_id вызван с test_id={actual_test_id} (session_id), а должен быть вызван с test_id=15"
             )
 
     @pytest.mark.asyncio
@@ -137,5 +136,5 @@ class TestTakeTestFromTrajectoryBug:
                 args = call[0] if call[0] else ()
                 for arg in args:
                     assert "Тест не найден" not in str(arg), (
-                        f"Пользователь увидел 'Тест не найден' при существующем тесте id=15"
+                        "Пользователь увидел 'Тест не найден' при существующем тесте id=15"
                     )

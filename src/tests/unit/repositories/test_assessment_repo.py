@@ -254,24 +254,24 @@ class TestDelete:
 
     @pytest.mark.asyncio
     async def test_delete_success(self):
-        """delete() удаляет вопросы и аттестацию, вызывает commit."""
+        """delete() мягко удаляет аттестацию и вопросы, вызывает commit."""
         session = AsyncMock()
 
-        attestation_mock = MagicMock()
-        attestation_mock.id = 5
-        attestation_mock.name = "Тестовая"
-
-        # execute вызывается 4 раза:
+        # execute вызывается 3 раза:
         # 1. check_in_use: scalars().all() -> [] (не используется)
-        # 2. select Attestation: scalar_one_or_none() -> attestation_mock
-        # 3. delete AttestationQuestion
-        # 4. delete Attestation
+        # 2. _soft_delete Attestation: rowcount=1 (успешно)
+        # 3. _bulk_soft_delete AttestationQuestion: rowcount=2
+        soft_delete_result = MagicMock()
+        soft_delete_result.rowcount = 1
+
+        bulk_soft_delete_result = MagicMock()
+        bulk_soft_delete_result.rowcount = 2
+
         session.execute = AsyncMock(
             side_effect=[
                 make_scalars_result([]),  # check_in_use
-                make_scalar_one_or_none_result(attestation_mock),  # select attestation
-                MagicMock(),  # delete questions
-                MagicMock(),  # delete attestation
+                soft_delete_result,  # _soft_delete Attestation
+                bulk_soft_delete_result,  # _bulk_soft_delete AttestationQuestion
             ]
         )
 

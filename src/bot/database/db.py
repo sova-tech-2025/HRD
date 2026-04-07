@@ -11,6 +11,7 @@ from sqlalchemy.orm import joinedload, selectinload, sessionmaker
 from bot.config import DATABASE_URL
 from bot.database.models import (
     Attestation,
+    AttestationQuestion,
     AttestationResult,
     Base,
     Company,
@@ -1100,65 +1101,6 @@ async def update_group_name(session: AsyncSession, group_id: int, new_name: str,
         return False
 
 
-async def delete_group(session: AsyncSession, group_id: int, deleted_by_id: int, company_id: int = None) -> bool:
-    """Физическое удаление группы (с изоляцией по компании)"""
-    try:
-        # Проверяем существование группы с изоляцией
-        group = await get_group_by_id(session, group_id, company_id=company_id)
-        if not group:
-            logger.error(f"Группа {group_id} не найдена")
-            return False
-
-        # Проверяем, есть ли пользователи в группе
-        users_in_group = await get_group_users(session, group_id, company_id=company_id)
-        if users_in_group:
-            logger.warning(f"Нельзя удалить группу {group_id}: в ней есть пользователи ({len(users_in_group)} чел.)")
-            return False
-
-        # Проверяем, используется ли группа в траекториях
-        learning_paths = await get_learning_paths_by_group(session, group_id, company_id=company_id)
-        if learning_paths:
-            logger.warning(
-                f"Нельзя удалить группу {group_id}: она используется в траекториях ({len(learning_paths)} шт.)"
-            )
-            return False
-
-        # Проверяем, используется ли группа в базе знаний
-        folders_query = (
-            select(KnowledgeFolder)
-            .join(folder_group_access, KnowledgeFolder.id == folder_group_access.c.folder_id)
-            .where(folder_group_access.c.group_id == group_id, KnowledgeFolder.is_active == True)
-        )
-
-        # КРИТИЧЕСКАЯ ИЗОЛЯЦИЯ ПО КОМПАНИИ!
-        if company_id is not None:
-            folders_query = folders_query.where(KnowledgeFolder.company_id == company_id)
-
-        folders_result = await session.execute(folders_query)
-        folders = folders_result.scalars().all()
-        if folders:
-            logger.warning(f"Нельзя удалить группу {group_id}: она используется в базе знаний ({len(folders)} папок)")
-            return False
-
-        # Удаляем связи пользователей с группой
-        await session.execute(delete(user_groups).where(user_groups.c.group_id == group_id))
-
-        # Удаляем связи группы с папками базы знаний
-        await session.execute(delete(folder_group_access).where(folder_group_access.c.group_id == group_id))
-
-        # Физическое удаление группы
-        await session.execute(delete(Group).where(Group.id == group_id))
-        await session.commit()
-
-        logger.info(f"Группа {group_id} '{group.name}' физически удалена пользователем {deleted_by_id}")
-        return True
-
-    except Exception as e:
-        logger.error(f"Ошибка удаления группы {group_id}: {e}")
-        await session.rollback()
-        return False
-
-
 async def get_group_users(session: AsyncSession, group_id: int, company_id: int = None) -> List[User]:
     """Получение всех пользователей группы (с изоляцией по компании)"""
     try:
@@ -1673,37 +1615,6 @@ async def remove_user_from_object(session: AsyncSession, user_id: int, object_id
         return False
 
 
-async def delete_object(session: AsyncSession, object_id: int, deleted_by_id: int, company_id: int = None) -> bool:
-    """Физическое удаление объекта с изоляцией по компании"""
-    try:
-        # Проверяем существование объекта и принадлежность к компании
-        object_obj = await get_object_by_id(session, object_id, company_id=company_id)
-        if not object_obj:
-            logger.error(f"Объект {object_id} не найден или не принадлежит компании {company_id}")
-            return False
-
-        # Проверяем, есть ли пользователи в объекте (включая user_objects, internship_object_id, work_object_id)
-        users_in_object = await get_object_users(session, object_id, company_id=company_id)
-        if users_in_object:
-            logger.warning(f"Нельзя удалить объект {object_id}: в нем есть пользователи ({len(users_in_object)} чел.)")
-            return False
-
-        # Удаляем связи пользователей с объектом
-        await session.execute(delete(user_objects).where(user_objects.c.object_id == object_id))
-
-        # Физическое удаление объекта
-        await session.execute(delete(Object).where(Object.id == object_id))
-        await session.commit()
-
-        logger.info(f"Объект {object_id} '{object_obj.name}' физически удален пользователем {deleted_by_id}")
-        return True
-
-    except Exception as e:
-        logger.error(f"Ошибка удаления объекта {object_id}: {e}")
-        await session.rollback()
-        return False
-
-
 # =================================
 # ФУНКЦИИ ДЛЯ РАБОТЫ С ТЕСТАМИ
 # =================================
@@ -1764,7 +1675,13 @@ async def create_test(session: AsyncSession, test_data: dict, company_id: int = 
 async def get_test_by_id(session: AsyncSession, test_id: int, company_id: int = None) -> Optional[Test]:
     """Получение теста по ID с загрузкой связанных вопросов (с изоляцией по компании)"""
     try:
-        query = select(Test).options(selectinload(Test.questions)).where(Test.id == test_id)
+        query = (
+            select(Test)
+            .options(
+                selectinload(Test.questions.and_(TestQuestion.is_active == True))  # noqa: E712
+            )
+            .where(Test.id == test_id)
+        )
 
         # Фильтрация по company_id для изоляции компаний
         if company_id is not None:
@@ -1858,25 +1775,6 @@ async def update_test(session: AsyncSession, test_id: int, update_data: dict, co
         return False
 
 
-async def delete_test(session: AsyncSession, test_id: int, company_id: int = None) -> bool:
-    """Удаление теста (мягкое удаление) с изоляцией по компании"""
-    try:
-        # Проверяем существование и принадлежность к компании
-        test = await get_test_by_id(session, test_id, company_id=company_id)
-        if not test:
-            logger.error(f"Тест {test_id} не найден или не принадлежит компании {company_id}")
-            return False
-
-        stmt = update(Test).where(Test.id == test_id).values(is_active=False)
-        await session.execute(stmt)
-        await session.commit()
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка удаления теста {test_id}: {e}")
-        await session.rollback()
-        return False
-
-
 # =================================
 # ФУНКЦИИ ДЛЯ РАБОТЫ С ВОПРОСАМИ
 # =================================
@@ -1895,10 +1793,12 @@ async def add_question_to_test(
             logger.error(f"Тест {test_id} не найден или не принадлежит компании {company_id}")
             return None
 
-        # Проверка на уникальность текста вопроса в рамках теста
+        # Проверка на уникальность текста вопроса в рамках теста (только среди активных)
         existing_question = await session.execute(
             select(TestQuestion).where(
-                TestQuestion.test_id == test_id, TestQuestion.question_text == question_data["question_text"]
+                TestQuestion.test_id == test_id,
+                TestQuestion.question_text == question_data["question_text"],
+                TestQuestion.is_active == True,  # noqa: E712
             )
         )
         if existing_question.scalar_one_or_none():
@@ -1934,7 +1834,11 @@ async def add_question_to_test(
 async def get_test_questions(session: AsyncSession, test_id: int, company_id: int = None) -> List[TestQuestion]:
     """Получение всех вопросов теста (с изоляцией по компании через Test)"""
     try:
-        query = select(TestQuestion).join(Test, TestQuestion.test_id == Test.id).where(TestQuestion.test_id == test_id)
+        query = (
+            select(TestQuestion)
+            .join(Test, TestQuestion.test_id == Test.id)
+            .where(TestQuestion.test_id == test_id, TestQuestion.is_active == True)  # noqa: E712
+        )
 
         # Фильтрация по company_id для изоляции компаний
         if company_id is not None:
@@ -1958,7 +1862,9 @@ async def update_question(session: AsyncSession, question_id: int, update_data: 
             return False
 
         # Получаем старую информацию о вопросе для обновления максимального балла
-        old_question = await session.execute(select(TestQuestion).where(TestQuestion.id == question_id))
+        old_question = await session.execute(
+            select(TestQuestion).where(TestQuestion.id == question_id, TestQuestion.is_active == True)  # noqa: E712
+        )
         old_question = old_question.scalar_one_or_none()
 
         if not old_question:
@@ -1984,37 +1890,6 @@ async def update_question(session: AsyncSession, question_id: int, update_data: 
         return False
 
 
-async def delete_question(session: AsyncSession, question_id: int, company_id: int = None) -> bool:
-    """Удаление вопроса с изоляцией по компании"""
-    try:
-        # Получаем информацию о вопросе для обновления максимального балла
-        question = await session.execute(select(TestQuestion).where(TestQuestion.id == question_id))
-        question = question.scalar_one_or_none()
-
-        if not question:
-            return False
-
-        test_id = question.test_id
-
-        # Проверяем, что тест принадлежит указанной компании
-        test = await get_test_by_id(session, test_id, company_id=company_id)
-        if not test:
-            logger.error(f"Тест {test_id} не найден или не принадлежит компании {company_id}")
-            return False
-
-        await session.execute(delete(TestQuestion).where(TestQuestion.id == question_id))
-
-        # Обновляем максимальный балл теста
-        await update_test_max_score(session, test_id, company_id=company_id)
-
-        await session.commit()
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка удаления вопроса {question_id}: {e}")
-        await session.rollback()
-        return False
-
-
 async def update_test_max_score(session: AsyncSession, test_id: int, company_id: int = None):
     """Обновление максимального балла теста на основе вопросов с изоляцией по компании"""
     try:
@@ -2024,7 +1899,12 @@ async def update_test_max_score(session: AsyncSession, test_id: int, company_id:
             logger.error(f"Тест {test_id} не найден или не принадлежит компании {company_id}")
             return
 
-        result = await session.execute(select(func.sum(TestQuestion.points)).where(TestQuestion.test_id == test_id))
+        result = await session.execute(
+            select(func.sum(TestQuestion.points)).where(
+                TestQuestion.test_id == test_id,
+                TestQuestion.is_active == True,  # noqa: E712
+            )
+        )
         max_score = result.scalar() or 0
 
         stmt = update(Test).where(Test.id == test_id).values(max_score=max_score)
@@ -2956,7 +2836,7 @@ async def get_question_analytics(session: AsyncSession, question_id: int, compan
         select(TestResult)
         .join(Test, TestResult.test_id == Test.id)
         .join(TestQuestion, Test.id == TestQuestion.test_id)
-        .where(TestResult.answers_details.isnot(None), TestQuestion.id == question_id)
+        .where(TestResult.answers_details.isnot(None), TestQuestion.id == question_id, TestQuestion.is_active == True)  # noqa: E712, E501
     )
 
     # КРИТИЧЕСКАЯ ИЗОЛЯЦИЯ ПО КОМПАНИИ!
@@ -5081,11 +4961,13 @@ async def get_learning_path_by_id(
         query = (
             select(LearningPath)
             .options(
-                selectinload(LearningPath.stages)
-                .selectinload(LearningStage.sessions)
+                selectinload(LearningPath.stages.and_(LearningStage.is_active == True))  # noqa: E712
+                .selectinload(LearningStage.sessions.and_(LearningSession.is_active == True))  # noqa: E712
                 .selectinload(LearningSession.tests),
                 selectinload(LearningPath.group),
-                selectinload(LearningPath.attestation).selectinload(Attestation.questions),
+                selectinload(LearningPath.attestation).selectinload(
+                    Attestation.questions.and_(AttestationQuestion.is_active == True)  # noqa: E712
+                ),
             )
             .where(LearningPath.id == path_id)
         )
@@ -6720,79 +6602,6 @@ async def check_session_has_trainees(session: AsyncSession, session_id: int, com
         return True  # В случае ошибки блокируем удаление для безопасности
 
 
-async def delete_learning_stage(session: AsyncSession, stage_id: int) -> bool:
-    """Удаление этапа траектории с проверкой использования стажерами"""
-    try:
-        # Получаем этап с сессиями для каскадного удаления через ORM
-        result = await session.execute(
-            select(LearningStage).where(LearningStage.id == stage_id).options(selectinload(LearningStage.sessions))
-        )
-        stage = result.scalar_one_or_none()
-
-        if not stage:
-            logger.error(f"Этап с ID {stage_id} не найден")
-            return False
-
-        # Проверяем, есть ли стажеры с этой траекторией
-        has_trainees = await check_stage_has_trainees(session, stage_id)
-        if has_trainees:
-            logger.warning(f"Нельзя удалить этап {stage_id}: есть стажеры с назначенной траекторией")
-            return False
-
-        # Получаем все сессии этапа для удаления связей с тестами
-        # Используем подзапрос для оптимизации
-        if stage.sessions:
-            session_ids = [s.id for s in stage.sessions]
-            await session.execute(delete(session_tests).where(session_tests.c.session_id.in_(session_ids)))
-            # Явно удаляем все сессии этапа
-            await session.execute(delete(LearningSession).where(LearningSession.stage_id == stage_id))
-
-        # Удаляем этап
-        await session.execute(delete(LearningStage).where(LearningStage.id == stage_id))
-        await session.commit()
-
-        logger.info(f"Этап {stage_id} '{stage.name}' удален")
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка удаления этапа {stage_id}: {e}")
-        await session.rollback()
-        return False
-
-
-async def delete_learning_session(session: AsyncSession, session_id: int) -> bool:
-    """Удаление сессии траектории с проверкой использования стажерами"""
-    try:
-        # Проверяем существование сессии
-        result = await session.execute(select(LearningSession).where(LearningSession.id == session_id))
-        learning_session = result.scalar_one_or_none()
-        if not learning_session:
-            logger.error(f"Сессия с ID {session_id} не найдена")
-            return False
-
-        # Проверяем, есть ли стажеры с этой траекторией
-        has_trainees = await check_session_has_trainees(session, session_id)
-        if has_trainees:
-            logger.warning(f"Нельзя удалить сессию {session_id}: есть стажеры с назначенной траекторией")
-            return False
-
-        # Удаляем прогресс стажеров по сессии (если остались)
-        await session.execute(delete(TraineeSessionProgress).where(TraineeSessionProgress.session_id == session_id))
-
-        # Удаляем связи тестов с сессией
-        await session.execute(delete(session_tests).where(session_tests.c.session_id == session_id))
-
-        # Удаляем саму сессию
-        await session.execute(delete(LearningSession).where(LearningSession.id == session_id))
-        await session.commit()
-
-        logger.info(f"Сессия {session_id} '{learning_session.name}' удалена")
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка удаления сессии {session_id}: {e}")
-        await session.rollback()
-        return False
-
-
 async def add_test_to_session_from_editor(
     session: AsyncSession, session_id: int, test_id: int, company_id: int = None
 ) -> bool:
@@ -7756,34 +7565,6 @@ async def update_knowledge_folder_name(
         return False
 
 
-async def delete_knowledge_folder(
-    session: AsyncSession, folder_id: int, deleted_by_id: int, company_id: int = None
-) -> bool:
-    """Удаление папки базы знаний (soft delete) с изоляцией по компании"""
-    try:
-        folder = await get_knowledge_folder_by_id(session, folder_id, company_id=company_id)
-        if not folder:
-            logger.error(f"Папка с ID {folder_id} не найдена")
-            return False
-
-        # Помечаем папку как удаленную
-        folder.is_active = False
-
-        # Помечаем все материалы в папке как удаленные (изоляция не нужна - все материалы уже в изолированной папке)
-        await session.execute(
-            update(KnowledgeMaterial).where(KnowledgeMaterial.folder_id == folder_id).values(is_active=False)
-        )
-
-        await session.flush()
-
-        logger.info(f"Удалена папка: {folder.name} (ID: {folder_id}) со всеми материалами")
-        return True
-
-    except Exception as e:
-        logger.error(f"Ошибка удаления папки {folder_id}: {e}")
-        return False
-
-
 async def create_knowledge_material(
     session: AsyncSession,
     folder_id: int,
@@ -7852,26 +7633,6 @@ async def get_knowledge_material_by_id(session: AsyncSession, material_id: int) 
     except Exception as e:
         logger.error(f"Ошибка получения материала по ID {material_id}: {e}")
         return None
-
-
-async def delete_knowledge_material(session: AsyncSession, material_id: int, deleted_by_id: int) -> bool:
-    """Удаление материала базы знаний (soft delete)"""
-    try:
-        material = await get_knowledge_material_by_id(session, material_id)
-        if not material:
-            logger.error(f"Материал с ID {material_id} не найден")
-            return False
-
-        # Помечаем материал как удаленный
-        material.is_active = False
-        await session.flush()
-
-        logger.info(f"Удален материал: {material.name} (ID: {material_id})")
-        return True
-
-    except Exception as e:
-        logger.error(f"Ошибка удаления материала {material_id}: {e}")
-        return False
 
 
 async def set_folder_access_groups(
@@ -8170,463 +7931,6 @@ async def get_trajectory_usage_info(session: AsyncSession, trajectory_id: int, c
     except Exception as e:
         logger.error(f"Ошибка получения информации об использовании траектории {trajectory_id}: {e}")
         return {"trainees": [], "trainees_count": 0, "total_users": 0}
-
-
-async def delete_learning_path(session: AsyncSession, trajectory_id: int, company_id: int = None) -> bool:
-    """Удаление траектории обучения с изоляцией по компании"""
-    try:
-        from bot.database.models import (
-            AttestationQuestionResult,
-            AttestationResult,
-            LearningPath,
-            LearningSession,
-            LearningStage,
-            Test,
-            TestResult,
-            TraineeAttestation,
-            TraineeLearningPath,
-            TraineeSessionProgress,
-            TraineeStageProgress,
-            TraineeTestAccess,
-            session_tests,
-        )
-
-        # Получаем траекторию с проверкой принадлежности к компании
-        trajectory = await get_learning_path_by_id(session, trajectory_id, company_id=company_id)
-        if not trajectory:
-            logger.error(f"Траектория {trajectory_id} не найдена или не принадлежит компании {company_id}")
-            return False
-
-        # Удаляем все связанные данные в правильном порядке
-
-        # 1. Удаляем прогресс сессий стажеров
-        trainee_session_progress_subquery = (
-            select(TraineeStageProgress.id)
-            .select_from(TraineeStageProgress)
-            .join(TraineeLearningPath, TraineeStageProgress.trainee_path_id == TraineeLearningPath.id)
-            .join(LearningPath, TraineeLearningPath.learning_path_id == LearningPath.id)
-            .where(TraineeLearningPath.learning_path_id == trajectory_id)
-        )
-
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            trainee_session_progress_subquery = trainee_session_progress_subquery.where(
-                LearningPath.company_id == company_id
-            )
-
-        await session.execute(
-            delete(TraineeSessionProgress).where(
-                TraineeSessionProgress.stage_progress_id.in_(trainee_session_progress_subquery)
-            )
-        )
-
-        # 2. Удаляем прогресс этапов стажеров
-        await session.execute(
-            delete(TraineeStageProgress).where(
-                TraineeStageProgress.trainee_path_id.in_(
-                    select(TraineeLearningPath.id)
-                    .select_from(TraineeLearningPath)
-                    .where(TraineeLearningPath.learning_path_id == trajectory_id)
-                )
-            )
-        )
-
-        # 3. Удаляем прогресс стажеров по траектории
-        await session.execute(delete(TraineeLearningPath).where(TraineeLearningPath.learning_path_id == trajectory_id))
-
-        # 4. Удаляем только результаты тестов траектории (тесты остаются в системе)
-        # Получаем ID тестов через правильную связь через session_tests
-        test_result_subquery = (
-            select(session_tests.c.test_id)
-            .select_from(session_tests)
-            .join(LearningSession, session_tests.c.session_id == LearningSession.id)
-            .join(LearningStage, LearningSession.stage_id == LearningStage.id)
-            .join(Test, session_tests.c.test_id == Test.id)
-            .where(LearningStage.learning_path_id == trajectory_id)
-        )
-
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            test_result_subquery = test_result_subquery.where(Test.company_id == company_id)
-
-        test_result_delete_query = delete(TestResult).where(TestResult.test_id.in_(test_result_subquery))
-
-        await session.execute(test_result_delete_query)
-
-        # 5. Удаляем доступы к тестам траектории (тесты остаются в системе)
-        # Получаем ID тестов через правильную связь через session_tests
-        trainee_test_access_delete_query = delete(TraineeTestAccess).where(
-            TraineeTestAccess.test_id.in_(
-                select(session_tests.c.test_id)
-                .select_from(session_tests)
-                .join(LearningSession, session_tests.c.session_id == LearningSession.id)
-                .join(LearningStage, LearningSession.stage_id == LearningStage.id)
-                .where(LearningStage.learning_path_id == trajectory_id)
-            )
-        )
-
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            trainee_test_access_delete_query = trainee_test_access_delete_query.where(
-                TraineeTestAccess.company_id == company_id
-            )
-
-        await session.execute(trainee_test_access_delete_query)
-
-        # 6. Удаляем прогресс сессий стажеров (если остались) перед удалением сессий
-        await session.execute(
-            delete(TraineeSessionProgress).where(
-                TraineeSessionProgress.session_id.in_(
-                    select(LearningSession.id)
-                    .select_from(LearningSession)
-                    .join(LearningStage, LearningSession.stage_id == LearningStage.id)
-                    .where(LearningStage.learning_path_id == trajectory_id)
-                )
-            )
-        )
-
-        # 7. Удаляем только связи тестов с сессиями (тесты остаются в системе)
-        await session.execute(
-            delete(session_tests).where(
-                session_tests.c.session_id.in_(
-                    select(LearningSession.id)
-                    .select_from(LearningSession)
-                    .join(LearningStage, LearningSession.stage_id == LearningStage.id)
-                    .where(LearningStage.learning_path_id == trajectory_id)
-                )
-            )
-        )
-
-        # 8. Удаляем сессии этапов
-        await session.execute(
-            delete(LearningSession).where(
-                LearningSession.stage_id.in_(
-                    select(LearningStage.id)
-                    .select_from(LearningStage)
-                    .where(LearningStage.learning_path_id == trajectory_id)
-                )
-            )
-        )
-
-        # 9. Удаляем прогресс этапов стажеров (если остались) перед удалением этапов
-        await session.execute(
-            delete(TraineeStageProgress).where(
-                TraineeStageProgress.stage_id.in_(
-                    select(LearningStage.id)
-                    .select_from(LearningStage)
-                    .where(LearningStage.learning_path_id == trajectory_id)
-                )
-            )
-        )
-
-        # 10. Удаляем этапы траектории
-        await session.execute(delete(LearningStage).where(LearningStage.learning_path_id == trajectory_id))
-
-        # 11. Удаляем только связи с аттестацией (аттестация остается в системе)
-        if trajectory.attestation_id:
-            attestation_id = trajectory.attestation_id
-
-            # 11.1. Удаляем результаты ответов на вопросы аттестации
-            from bot.database.models import Attestation
-
-            attestation_result_subquery = (
-                select(AttestationResult.id)
-                .select_from(AttestationResult)
-                .join(Attestation, AttestationResult.attestation_id == Attestation.id)
-                .where(AttestationResult.attestation_id == attestation_id)
-            )
-
-            # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-            if company_id is not None:
-                attestation_result_subquery = attestation_result_subquery.where(Attestation.company_id == company_id)
-
-            attestation_question_result_delete_query = delete(AttestationQuestionResult).where(
-                AttestationQuestionResult.attestation_result_id.in_(attestation_result_subquery)
-            )
-
-            await session.execute(attestation_question_result_delete_query)
-
-            # 9.2. Удаляем результаты аттестации
-            await session.execute(delete(AttestationResult).where(AttestationResult.attestation_id == attestation_id))
-
-            # 9.3. Удаляем назначения аттестаций стажерам
-            await session.execute(delete(TraineeAttestation).where(TraineeAttestation.attestation_id == attestation_id))
-
-            # 9.4. Обнуляем ссылку на аттестацию в траектории (аттестация остается в системе)
-            await session.execute(
-                update(LearningPath).where(LearningPath.id == trajectory_id).values(attestation_id=None)
-            )
-
-        # 10. Удаляем саму траекторию
-        await session.execute(delete(LearningPath).where(LearningPath.id == trajectory_id))
-
-        # Подтверждаем транзакцию
-        await session.commit()
-
-        logger.info(f"Траектория {trajectory_id} успешно удалена")
-        return True
-
-    except Exception as e:
-        logger.error(f"Ошибка удаления траектории {trajectory_id}: {e}")
-        return False
-
-
-async def delete_user(session: AsyncSession, user_id: int, company_id: int = None) -> bool:
-    """
-    Полное удаление пользователя и ВСЕХ связанных данных с изоляцией по компании
-
-    Args:
-        session: Сессия БД
-        user_id: ID пользователя для удаления
-        company_id: ID компании для изоляции (опционально, но рекомендуется для безопасности)
-
-    Returns:
-        bool: True если успешно, False при ошибке
-    """
-    try:
-        from bot.database.models import (
-            Attestation,
-            AttestationQuestionResult,
-            AttestationResult,
-            Company,
-            Group,
-            KnowledgeFolder,
-            KnowledgeMaterial,
-            LearningPath,
-            Mentorship,
-            Object,
-            Test,
-            TestResult,
-            TraineeAttestation,
-            TraineeLearningPath,
-            TraineeManager,
-            TraineeSessionProgress,
-            TraineeStageProgress,
-            TraineeTestAccess,
-            User,
-            user_groups,
-            user_objects,
-            user_roles,
-        )
-
-        # Проверяем существование пользователя
-        user = await get_user_by_id(session, user_id)
-        if not user:
-            logger.error(f"Пользователь {user_id} не найден")
-            return False
-
-        # КРИТИЧЕСКАЯ ПРОВЕРКА ИЗОЛЯЦИИ ПО КОМПАНИИ!
-        if company_id is not None and user.company_id != company_id:
-            logger.error(
-                f"Попытка удалить пользователя {user_id} из другой компании. Пользователь принадлежит компании {user.company_id}, запрос от компании {company_id}"
-            )
-            return False
-
-        logger.info(f"Начинаем удаление пользователя {user_id}: {user.full_name} (компания: {user.company_id})")
-
-        # 1. Удаляем AttestationQuestionResult (по attestation_result_id из AttestationResult)
-        attestation_question_result_subquery = (
-            select(AttestationResult.id)
-            .select_from(AttestationResult)
-            .join(Attestation, AttestationResult.attestation_id == Attestation.id)
-            .where((AttestationResult.trainee_id == user_id) | (AttestationResult.manager_id == user_id))
-        )
-
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            attestation_question_result_subquery = attestation_question_result_subquery.where(
-                Attestation.company_id == company_id
-            )
-
-        await session.execute(
-            delete(AttestationQuestionResult).where(
-                AttestationQuestionResult.attestation_result_id.in_(attestation_question_result_subquery)
-            )
-        )
-        logger.info(f"Удалены AttestationQuestionResult для пользователя {user_id}")
-
-        # 2. Удаляем AttestationResult
-        await session.execute(
-            delete(AttestationResult).where(
-                (AttestationResult.trainee_id == user_id) | (AttestationResult.manager_id == user_id)
-            )
-        )
-        logger.info(f"Удалены AttestationResult для пользователя {user_id}")
-
-        # 3. Удаляем TraineeSessionProgress (через TraineeLearningPath)
-        trainee_session_progress_subquery = (
-            select(TraineeStageProgress.id)
-            .select_from(TraineeStageProgress)
-            .join(TraineeLearningPath, TraineeStageProgress.trainee_path_id == TraineeLearningPath.id)
-            .join(LearningPath, TraineeLearningPath.learning_path_id == LearningPath.id)
-            .where((TraineeLearningPath.trainee_id == user_id) | (TraineeLearningPath.assigned_by_id == user_id))
-        )
-
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            trainee_session_progress_subquery = trainee_session_progress_subquery.where(
-                LearningPath.company_id == company_id
-            )
-
-        await session.execute(
-            delete(TraineeSessionProgress).where(
-                TraineeSessionProgress.stage_progress_id.in_(trainee_session_progress_subquery)
-            )
-        )
-        logger.info(f"Удалены TraineeSessionProgress для пользователя {user_id}")
-
-        # 4. Удаляем TraineeStageProgress (через TraineeLearningPath)
-        await session.execute(
-            delete(TraineeStageProgress).where(
-                TraineeStageProgress.trainee_path_id.in_(
-                    select(TraineeLearningPath.id)
-                    .select_from(TraineeLearningPath)
-                    .where(
-                        (TraineeLearningPath.trainee_id == user_id) | (TraineeLearningPath.assigned_by_id == user_id)
-                    )
-                )
-            )
-        )
-        logger.info(f"Удалены TraineeStageProgress для пользователя {user_id}")
-
-        # 5. Удаляем TraineeLearningPath
-        await session.execute(
-            delete(TraineeLearningPath).where(
-                (TraineeLearningPath.trainee_id == user_id) | (TraineeLearningPath.assigned_by_id == user_id)
-            )
-        )
-        logger.info(f"Удалены TraineeLearningPath для пользователя {user_id}")
-
-        # 6. Удаляем TraineeAttestation
-        await session.execute(
-            delete(TraineeAttestation).where(
-                (TraineeAttestation.trainee_id == user_id)
-                | (TraineeAttestation.manager_id == user_id)
-                | (TraineeAttestation.assigned_by_id == user_id)
-            )
-        )
-        logger.info(f"Удалены TraineeAttestation для пользователя {user_id}")
-
-        # 7. Удаляем TraineeManager
-        await session.execute(
-            delete(TraineeManager).where(
-                (TraineeManager.trainee_id == user_id)
-                | (TraineeManager.manager_id == user_id)
-                | (TraineeManager.assigned_by_id == user_id)
-            )
-        )
-        logger.info(f"Удалены TraineeManager для пользователя {user_id}")
-
-        # 8. Удаляем TraineeTestAccess
-        # Удаляем ВСЕ записи TraineeTestAccess, где пользователь участвует (trainee/granted_by)
-        # Безопасность обеспечена проверкой принадлежности пользователя к компании на строке 9192
-        # Это также исправляет проблему с записями, где company_id IS NULL или некорректный
-        await session.execute(
-            delete(TraineeTestAccess).where(
-                (TraineeTestAccess.trainee_id == user_id) | (TraineeTestAccess.granted_by_id == user_id)
-            )
-        )
-        logger.info(f"Удалены TraineeTestAccess для пользователя {user_id}")
-
-        # 9. Удаляем TestResult
-        await session.execute(delete(TestResult).where(TestResult.user_id == user_id))
-        logger.info(f"Удалены TestResult для пользователя {user_id}")
-
-        # 10. Удаляем Mentorship
-        # Удаляем ВСЕ записи Mentorship, где пользователь участвует (mentor/trainee/assigned_by)
-        # Безопасность обеспечена проверкой принадлежности пользователя к компании на строке 9192
-        # Это также исправляет проблему с записями, где company_id IS NULL или некорректный
-        await session.execute(
-            delete(Mentorship).where(
-                (Mentorship.mentor_id == user_id)
-                | (Mentorship.trainee_id == user_id)
-                | (Mentorship.assigned_by_id == user_id)
-            )
-        )
-        logger.info(f"Удалены Mentorship для пользователя {user_id}")
-
-        # 11. Обнуляем created_by_id для Test (тесты остаются в системе)
-        await session.execute(update(Test).where(Test.creator_id == user_id).values(creator_id=None))
-        logger.info(f"Обнулен creator_id для тестов пользователя {user_id}")
-
-        # 12. Обнуляем created_by_id для Attestation (аттестации остаются в системе)
-        await session.execute(
-            update(Attestation).where(Attestation.created_by_id == user_id).values(created_by_id=None)
-        )
-        logger.info(f"Обнулен created_by_id для аттестаций пользователя {user_id}")
-
-        # 13. Обнуляем created_by_id для LearningPath (траектории остаются в системе)
-        await session.execute(
-            update(LearningPath).where(LearningPath.created_by_id == user_id).values(created_by_id=None)
-        )
-        logger.info(f"Обнулен created_by_id для траекторий пользователя {user_id}")
-
-        # 14. Обнуляем created_by_id для KnowledgeMaterial (материалы остаются в системе)
-        await session.execute(
-            update(KnowledgeMaterial).where(KnowledgeMaterial.created_by_id == user_id).values(created_by_id=None)
-        )
-        logger.info(f"Обнулен created_by_id для материалов пользователя {user_id}")
-
-        # 15. Обнуляем created_by_id для KnowledgeFolder (папки остаются в системе)
-        knowledge_folder_update_query = update(KnowledgeFolder).where(KnowledgeFolder.created_by_id == user_id)
-
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            knowledge_folder_update_query = knowledge_folder_update_query.where(
-                KnowledgeFolder.company_id == company_id
-            )
-
-        await session.execute(knowledge_folder_update_query.values(created_by_id=None))
-        logger.info(f"Обнулен created_by_id для папок знаний пользователя {user_id}")
-
-        # 16. Обнуляем created_by_id для Object (объекты остаются в системе)
-        object_update_query = update(Object).where(Object.created_by_id == user_id)
-
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            object_update_query = object_update_query.where(Object.company_id == company_id)
-
-        await session.execute(object_update_query.values(created_by_id=None))
-        logger.info(f"Обнулен created_by_id для объектов пользователя {user_id}")
-
-        # 17. Обнуляем created_by_id для Group (группы остаются в системе)
-        group_update_query = update(Group).where(Group.created_by_id == user_id)
-
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            group_update_query = group_update_query.where(Group.company_id == company_id)
-
-        await session.execute(group_update_query.values(created_by_id=None))
-        logger.info(f"Обнулен created_by_id для групп пользователя {user_id}")
-
-        # 18. Обнуляем created_by_id для компаний, которые пользователь создавал
-        await session.execute(update(Company).where(Company.created_by_id == user_id).values(created_by_id=None))
-        logger.info(f"Обнулен created_by_id для компаний пользователя {user_id}")
-
-        # 19. Удаляем many-to-many связи
-        await session.execute(delete(user_roles).where(user_roles.c.user_id == user_id))
-        logger.info(f"Удалены user_roles для пользователя {user_id}")
-
-        await session.execute(delete(user_groups).where(user_groups.c.user_id == user_id))
-        logger.info(f"Удалены user_groups для пользователя {user_id}")
-
-        await session.execute(delete(user_objects).where(user_objects.c.user_id == user_id))
-        logger.info(f"Удалены user_objects для пользователя {user_id}")
-
-        # 20. Удаляем самого пользователя
-        await session.execute(delete(User).where(User.id == user_id))
-        logger.info(f"Удален сам пользователь {user_id}")
-
-        # Подтверждаем транзакцию
-        await session.commit()
-
-        logger.info(f"Пользователь {user_id} успешно удален со всеми связанными данными")
-        return True
-
-    except Exception as e:
-        logger.error(f"Ошибка удаления пользователя {user_id}: {e}")
-        await session.rollback()
-        return False
 
 
 # =================================================================

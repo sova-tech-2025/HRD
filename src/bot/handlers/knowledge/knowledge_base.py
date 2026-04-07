@@ -23,8 +23,6 @@ from bot.database.db import (
     check_user_permission,
     create_knowledge_folder,
     create_knowledge_material,
-    delete_knowledge_folder,
-    delete_knowledge_material,
     ensure_company_id,
     get_accessible_knowledge_folders_for_user,
     get_all_groups,
@@ -1506,14 +1504,13 @@ async def callback_confirm_delete_material(callback: CallbackQuery, state: FSMCo
         content_display = material.content if material.material_type == "link" else "Файл"
         description_display = material.description if material.description else "Описание не указано"
 
-        # Удаляем материал
-        success = await delete_knowledge_material(session, material_id, user.id)
+        # Удаляем материал (hard delete)
+        from bot.repositories.knowledge_repo import KnowledgeRepository
+
+        success = await KnowledgeRepository(session).delete_material(material_id)
         if not success:
             await callback.message.edit_text("❌ Не удалось удалить материал")
             return
-
-        # Сохраняем изменения в базу данных
-        await session.commit()
 
         # ТЗ 9-2 шаг 7-4
         await callback.message.edit_text(
@@ -2082,14 +2079,13 @@ async def callback_confirm_delete_folder(callback: CallbackQuery, state: FSMCont
         # Сохраняем название для отображения
         folder_name = folder.name
 
-        # Удаляем папку с изоляцией
-        success = await delete_knowledge_folder(session, folder_id, user.id, company_id=user.company_id)
+        # Удаляем папку (hard delete)
+        from bot.repositories.knowledge_repo import KnowledgeRepository
+
+        success = await KnowledgeRepository(session).delete_folder(folder_id, company_id=user.company_id)
         if not success:
             await callback.message.edit_text("❌ Не удалось удалить папку")
             return
-
-        # Сохраняем изменения в базу данных
-        await session.commit()
 
         # ТЗ 9-5 шаг 7
         await callback.message.edit_text(

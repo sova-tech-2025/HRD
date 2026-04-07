@@ -12,8 +12,6 @@ from bot.database.db import (
     check_test_access,
     check_user_permission,
     create_test,
-    delete_question,
-    delete_test,
     ensure_company_id,
     get_all_active_tests,
     get_all_stages,
@@ -1545,7 +1543,11 @@ async def _show_question_edit_menu(
     message, state: FSMContext, session: AsyncSession, question_id: int, company_id: int
 ):
     """Внутренняя функция для отображения меню редактирования вопроса"""
-    question = await session.get(TestQuestion, question_id)
+    question = (
+        await session.execute(
+            select(TestQuestion).where(TestQuestion.id == question_id, TestQuestion.is_active == True)
+        )
+    ).scalar_one_or_none()  # noqa: E712, E501
     if not question:
         # Пытаемся отправить сообщение об ошибке
         try:
@@ -1612,7 +1614,11 @@ async def move_question(callback: CallbackQuery, state: FSMContext, session: Asy
     direction = callback.data.split(":")[0].split("_")[2]
     question_id = int(callback.data.split(":")[1])
 
-    question = await session.get(TestQuestion, question_id)
+    question = (
+        await session.execute(
+            select(TestQuestion).where(TestQuestion.id == question_id, TestQuestion.is_active == True)
+        )
+    ).scalar_one_or_none()  # noqa: E712, E501
     if not question:
         await callback.answer("❌ Вопрос не найден.", show_alert=True)
         return
@@ -1650,7 +1656,11 @@ async def question_statistics(callback: CallbackQuery, session: AsyncSession):
         return
 
     question_id = int(callback.data.split(":")[1])
-    question = await session.get(TestQuestion, question_id)
+    question = (
+        await session.execute(
+            select(TestQuestion).where(TestQuestion.id == question_id, TestQuestion.is_active == True)
+        )
+    ).scalar_one_or_none()  # noqa: E712, E501
     if not question:
         await callback.answer("❌ Вопрос не найден.", show_alert=True)
         return
@@ -1750,7 +1760,11 @@ async def process_edit_question_answer(callback: CallbackQuery, state: FSMContex
     """Запрашивает новый ответ в зависимости от типа вопроса"""
     question_id = int(callback.data.split(":")[1])
     await state.update_data(question_id_to_edit=question_id)
-    question = await session.get(TestQuestion, question_id)
+    question = (
+        await session.execute(
+            select(TestQuestion).where(TestQuestion.id == question_id, TestQuestion.is_active == True)
+        )
+    ).scalar_one_or_none()  # noqa: E712, E501
 
     if not question:
         await callback.answer("❌ Вопрос не найден.", show_alert=True)
@@ -1791,7 +1805,11 @@ async def save_new_question_answer(message: Message, state: FSMContext, session:
 
     data = await state.get_data()
     question_id = data["question_id_to_edit"]
-    question = await session.get(TestQuestion, question_id)
+    question = (
+        await session.execute(
+            select(TestQuestion).where(TestQuestion.id == question_id, TestQuestion.is_active == True)
+        )
+    ).scalar_one_or_none()  # noqa: E712, E501
     new_answer = message.text.strip()
 
     if question.question_type == "multiple_choice":
@@ -1878,7 +1896,11 @@ async def process_delete_question(callback: CallbackQuery, state: FSMContext, se
     """Удаляет вопрос"""
     question_id = int(callback.data.split(":")[1])
 
-    question = await session.get(TestQuestion, question_id)
+    question = (
+        await session.execute(
+            select(TestQuestion).where(TestQuestion.id == question_id, TestQuestion.is_active == True)
+        )
+    ).scalar_one_or_none()  # noqa: E712, E501
     if not question:
         await callback.answer("❌ Вопрос не найден.", show_alert=True)
         return
@@ -1890,7 +1912,9 @@ async def process_delete_question(callback: CallbackQuery, state: FSMContext, se
         return
 
     test_id = question.test_id
-    await delete_question(session, question_id, company_id=user.company_id)
+    from bot.repositories.test_repo import TestRepository
+
+    await TestRepository(session).delete_question(question_id, company_id=user.company_id)
 
     await callback.message.edit_text(
         f"✅ Вопрос №{question.question_number} был успешно удален.\n"
@@ -2062,7 +2086,9 @@ async def process_confirm_delete_test(callback: CallbackQuery, state: FSMContext
         await callback.answer()
         return
 
-    success = await delete_test(session, test_id, company_id=user.company_id)
+    from bot.repositories.test_repo import TestRepository
+
+    success = await TestRepository(session).delete(test_id, company_id=user.company_id)
 
     if success:
         await callback.message.edit_text(

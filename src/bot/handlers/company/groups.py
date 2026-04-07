@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database.db import (
     check_user_permission,
     create_group,
-    delete_group,
     ensure_company_id,
     get_all_groups,
     get_group_by_id,
@@ -647,8 +646,10 @@ async def callback_confirm_delete_group(callback: CallbackQuery, state: FSMConte
             await callback.answer()
             return
 
-        # Удаляем группу
-        success = await delete_group(session, group_id, user.id, company_id=user.company_id)
+        # Удаляем группу (soft delete)
+        from bot.repositories.group_repo import GroupRepository
+
+        success = await GroupRepository(session).delete(group_id, company_id=user.company_id)
 
         if success:
             await callback.message.edit_text(

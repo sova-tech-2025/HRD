@@ -14,8 +14,6 @@ from bot.database.db import (
     add_test_to_session_from_editor,
     check_session_has_trainees,
     check_stage_has_trainees,
-    delete_learning_session,
-    delete_learning_stage,
     ensure_company_id,
     get_all_active_tests,
     get_all_groups,
@@ -514,8 +512,10 @@ async def callback_confirm_delete_stage(callback: CallbackQuery, state: FSMConte
         data = await state.get_data()
         path_id = data.get("path_id")
 
-        # Удаляем этап
-        success = await delete_learning_stage(session, stage_id)
+        # Удаляем этап (soft delete)
+        from bot.repositories.learning_path_repo import LearningPathRepository
+
+        success = await LearningPathRepository(session).delete_stage(stage_id)
 
         if not success:
             await callback.message.edit_text(
@@ -706,8 +706,10 @@ async def callback_confirm_delete_session(callback: CallbackQuery, state: FSMCon
         data = await state.get_data()
         stage_id = data.get("stage_id")
 
-        # Удаляем сессию
-        success = await delete_learning_session(session, session_id)
+        # Удаляем сессию (soft delete)
+        from bot.repositories.learning_path_repo import LearningPathRepository
+
+        success = await LearningPathRepository(session).delete_session(session_id)
 
         if not success:
             await callback.message.edit_text(

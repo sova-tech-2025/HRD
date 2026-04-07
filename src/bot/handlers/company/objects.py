@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database.db import (
     check_user_permission,
     create_object,
-    delete_object,
     ensure_company_id,
     get_all_objects,
     get_object_by_id,
@@ -627,8 +626,10 @@ async def callback_confirm_delete_object(callback: CallbackQuery, state: FSMCont
             await state.clear()
             return
 
-        # Удаляем объект
-        success = await delete_object(session, object_id, callback.from_user.id, company_id=user.company_id)
+        # Удаляем объект (soft delete)
+        from bot.repositories.object_repo import ObjectRepository
+
+        success = await ObjectRepository(session).delete(object_id, company_id=user.company_id)
 
         if success:
             await callback.message.edit_text(
