@@ -2031,6 +2031,13 @@ async def process_general_cancel(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(TestTakingStates.waiting_for_test_start, F.data.startswith("take_test:"))
 async def process_back_to_test_details(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик возврата к деталям теста"""
+    parts = callback.data.split(":")
+    if len(parts) == 3:
+        # Формат take_test:{session_id}:{test_id} из траектории —
+        # очищаем остаточный FSM state и передаём в основной обработчик
+        await state.clear()
+        await process_take_test_from_notification(callback, state, session)
+        return
     await process_test_selection_for_taking(callback, state, session)
 
 
