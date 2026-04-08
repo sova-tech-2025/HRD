@@ -590,11 +590,15 @@ async def get_all_users(session: AsyncSession, company_id: int = None) -> List[U
     """Получение списка всех пользователей (с фильтрацией по компании)"""
 
     try:
-        query = select(User).options(
-            selectinload(User.roles),
-            selectinload(User.groups),
-            selectinload(User.internship_object),
-            selectinload(User.work_object),
+        query = (
+            select(User)
+            .options(
+                selectinload(User.roles),
+                selectinload(User.groups),
+                selectinload(User.internship_object),
+                selectinload(User.work_object),
+            )
+            .where(User.is_active == True)  # noqa: E712
         )
 
         if company_id is not None:
@@ -618,7 +622,8 @@ async def get_all_trainees(session: AsyncSession, company_id: int = None) -> Lis
             .join(Role, user_roles.c.role_id == Role.id)
             .where(
                 Role.name == "Стажер",
-                User.is_activated == True,  # Только активированные стажеры
+                User.is_activated == True,  # noqa: E712
+                User.is_active == True,  # noqa: E712
             )
         )
 
@@ -694,7 +699,7 @@ async def get_users_by_role(session: AsyncSession, role_name: str, company_id: i
             select(User)
             .join(user_roles, User.id == user_roles.c.user_id)
             .join(Role, user_roles.c.role_id == Role.id)
-            .where(Role.name == role_name)
+            .where(Role.name == role_name, User.is_active == True)  # noqa: E712
         )
 
         # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
@@ -719,7 +724,7 @@ async def get_unactivated_users(session: AsyncSession, company_id: int = None) -
         # так как они автоматически активируются
         query = (
             select(User)
-            .where(User.is_activated == False)
+            .where(User.is_activated == False, User.is_active == True)  # noqa: E712
             .where(~User.roles.any(Role.name.in_(["Руководитель", "Рекрутер"])))
         )
 
@@ -1105,7 +1110,9 @@ async def get_group_users(session: AsyncSession, group_id: int, company_id: int 
     """Получение всех пользователей группы (с изоляцией по компании)"""
     try:
         stmt = (
-            select(User).join(user_groups, User.id == user_groups.c.user_id).where(user_groups.c.group_id == group_id)
+            select(User)
+            .join(user_groups, User.id == user_groups.c.user_id)
+            .where(user_groups.c.group_id == group_id, User.is_active == True)  # noqa: E712
         )
 
         # КРИТИЧЕСКАЯ ИЗОЛЯЦИЯ ПО КОМПАНИИ!
@@ -2130,7 +2137,8 @@ async def get_unassigned_trainees(session: AsyncSession, company_id: int = None)
             .join(Role, user_roles.c.role_id == Role.id)
             .where(
                 Role.name == "Стажер",
-                User.is_activated == True,  # Только активированные пользователи
+                User.is_activated == True,  # noqa: E712
+                User.is_active == True,  # noqa: E712
                 ~User.id.in_(subquery),
             )
         )
@@ -2158,7 +2166,7 @@ async def get_available_mentors(session: AsyncSession, company_id: int = None) -
             )
             .join(user_roles, User.id == user_roles.c.user_id)
             .join(Role, user_roles.c.role_id == Role.id)
-            .where(Role.name.in_(["Наставник", "Руководитель"]))
+            .where(Role.name.in_(["Наставник", "Руководитель"]), User.is_active == True)  # noqa: E712
         )
 
         # Изоляция по компании
@@ -3493,7 +3501,7 @@ async def get_unactivated_users_old(session: AsyncSession, company_id: int = Non
         # так как они автоматически активируются
         query = (
             select(User)
-            .where(User.is_activated == False)
+            .where(User.is_activated == False, User.is_active == True)  # noqa: E712
             .where(~User.roles.any(Role.name.in_(["Руководитель", "Рекрутер"])))
         )
 
@@ -3853,7 +3861,11 @@ async def search_unactivated_users_by_name(session: AsyncSession, query: str, co
     try:
         search_pattern = f"%{query}%"
 
-        query_filter = select(User).where(User.is_activated == False, User.full_name.ilike(search_pattern))
+        query_filter = select(User).where(
+            User.is_activated == False,
+            User.is_active == True,
+            User.full_name.ilike(search_pattern),  # noqa: E712
+        )
 
         if company_id is not None:
             query_filter = query_filter.where(User.company_id == company_id)
@@ -5518,7 +5530,7 @@ async def _create_trainee_progress(session: AsyncSession, trainee_path_id: int, 
         # Получаем этапы траектории
         stages_result = await session.execute(
             select(LearningStage)
-            .where(LearningStage.learning_path_id == learning_path_id)
+            .where(LearningStage.learning_path_id == learning_path_id, LearningStage.is_active == True)  # noqa: E712
             .order_by(LearningStage.order_number)
         )
         stages = stages_result.scalars().all()
@@ -5537,7 +5549,7 @@ async def _create_trainee_progress(session: AsyncSession, trainee_path_id: int, 
             # Получаем сессии этапа
             sessions_result = await session.execute(
                 select(LearningSession)
-                .where(LearningSession.stage_id == stage.id)
+                .where(LearningSession.stage_id == stage.id, LearningSession.is_active == True)  # noqa: E712
                 .order_by(LearningSession.order_number)
             )
             sessions = sessions_result.scalars().all()
@@ -6140,6 +6152,7 @@ async def get_learning_path_stages(
             .join(LearningPath, LearningPath.id == LearningStage.learning_path_id)
             .where(
                 LearningStage.learning_path_id == learning_path_id,
+                LearningStage.is_active == True,  # noqa: E712
                 LearningPath.company_id == company_id,
             )
             .order_by(LearningStage.order_number)
@@ -6170,6 +6183,7 @@ async def get_session_with_tests(
             .join(LearningPath, LearningPath.id == LearningStage.learning_path_id)
             .where(
                 LearningSession.id == session_id,
+                LearningSession.is_active == True,  # noqa: E712
                 LearningPath.company_id == company_id,
             )
         )
@@ -6194,6 +6208,7 @@ async def get_stage_sessions(session: AsyncSession, stage_id: int, company_id: i
             .join(LearningPath, LearningPath.id == LearningStage.learning_path_id)
             .where(
                 LearningSession.stage_id == stage_id,
+                LearningSession.is_active == True,  # noqa: E712
                 LearningPath.company_id == company_id,
             )
             .order_by(LearningSession.order_number)
@@ -6455,7 +6470,11 @@ async def reorder_learning_stages(session: AsyncSession, path_id: int, stage_ord
         # Валидация: проверяем, что все этапы принадлежат этой траектории
         stage_ids = list(stage_orders.keys())
         existing_stages_result = await session.execute(
-            select(LearningStage.id).where(LearningStage.id.in_(stage_ids), LearningStage.learning_path_id == path_id)
+            select(LearningStage.id).where(
+                LearningStage.id.in_(stage_ids),
+                LearningStage.learning_path_id == path_id,
+                LearningStage.is_active == True,  # noqa: E712
+            )
         )
         existing_stage_ids = {row[0] for row in existing_stages_result.all()}
 
@@ -6519,7 +6538,11 @@ async def reorder_learning_sessions(
         # Валидация: проверяем, что все сессии принадлежат этому этапу
         session_ids = list(session_orders.keys())
         existing_sessions_result = await session.execute(
-            select(LearningSession.id).where(LearningSession.id.in_(session_ids), LearningSession.stage_id == stage_id)
+            select(LearningSession.id).where(
+                LearningSession.id.in_(session_ids),
+                LearningSession.stage_id == stage_id,
+                LearningSession.is_active == True,  # noqa: E712
+            )
         )
         existing_session_ids = {row[0] for row in existing_sessions_result.all()}
 
