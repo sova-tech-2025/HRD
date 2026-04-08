@@ -1490,7 +1490,15 @@ async def get_object_users(session: AsyncSession, object_id: int, company_id: in
                 company_id = obj.company_id
 
         # Получаем пользователей через таблицу user_objects
-        query1 = select(User).join(user_objects).where(user_objects.c.object_id == object_id, User.is_activated == True)
+        query1 = (
+            select(User)
+            .join(user_objects)
+            .where(
+                user_objects.c.object_id == object_id,
+                User.is_activated == True,
+                User.is_active == True,  # noqa: E712
+            )
+        )
 
         # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
         if company_id is not None:
@@ -1508,7 +1516,9 @@ async def get_object_users(session: AsyncSession, object_id: int, company_id: in
 
         # Получаем пользователей, у которых этот объект указан как объект стажировки или работы
         query2 = select(User).where(
-            or_(User.internship_object_id == object_id, User.work_object_id == object_id), User.is_activated == True
+            or_(User.internship_object_id == object_id, User.work_object_id == object_id),
+            User.is_activated == True,  # noqa: E712
+            User.is_active == True,  # noqa: E712
         )
 
         # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
@@ -3693,7 +3703,7 @@ async def get_all_activated_users(session: AsyncSession, company_id: int = None)
                 selectinload(User.internship_object),
                 selectinload(User.work_object),
             )
-            .where(User.is_activated == True)
+            .where(User.is_activated == True, User.is_active == True)  # noqa: E712
         )
 
         # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
@@ -3720,7 +3730,7 @@ async def get_users_by_group(session: AsyncSession, group_id: int, company_id: i
                 selectinload(User.internship_object),
                 selectinload(User.work_object),
             )
-            .where(user_groups.c.group_id == group_id, User.is_activated == True)
+            .where(user_groups.c.group_id == group_id, User.is_activated == True, User.is_active == True)  # noqa: E712
         )
 
         if company_id is not None:
@@ -3745,7 +3755,7 @@ async def get_users_by_object(session: AsyncSession, object_id: int, company_id:
                 selectinload(User.internship_object),
                 selectinload(User.work_object),
             )
-            .where(user_objects.c.object_id == object_id, User.is_activated == True)
+            .where(user_objects.c.object_id == object_id, User.is_activated == True, User.is_active == True)  # noqa: E712
         )
 
         if company_id is not None:
@@ -3764,7 +3774,9 @@ async def get_users_by_object(session: AsyncSession, object_id: int, company_id:
                 selectinload(User.work_object),
             )
             .where(
-                or_(User.internship_object_id == object_id, User.work_object_id == object_id), User.is_activated == True
+                or_(User.internship_object_id == object_id, User.work_object_id == object_id),
+                User.is_activated == True,  # noqa: E712
+                User.is_active == True,  # noqa: E712
             )
         )
 
@@ -3809,7 +3821,7 @@ async def search_activated_users_by_name(session: AsyncSession, query: str, comp
                 selectinload(User.internship_object),
                 selectinload(User.work_object),
             )
-            .where(User.is_activated == True, User.full_name.ilike(search_pattern))
+            .where(User.is_activated == True, User.is_active == True, User.full_name.ilike(search_pattern))  # noqa: E712
         )
 
         if company_id is not None:
