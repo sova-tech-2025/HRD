@@ -56,7 +56,10 @@ async def callback_exam_assign(callback: CallbackQuery, state: FSMContext, sessi
             "👨‍⚖️ <b>Экзаменатор:</b>\nВыбери экзаменатора из списка"
         )
 
-        await state.update_data(assign_exam_id=exam_id)
+        await state.update_data(
+            assign_exam_id=exam_id,
+            exam_examiner_ids=[u.id for u in examiners],
+        )
         await callback.message.edit_text(
             text, parse_mode="HTML", reply_markup=get_exam_examiner_list_keyboard(examiners)
         )
@@ -65,6 +68,28 @@ async def callback_exam_assign(callback: CallbackQuery, state: FSMContext, sessi
     except Exception as e:
         await callback.message.edit_text("Произошла ошибка")
         log_user_error(callback.from_user.id, "exam_assign_error", str(e))
+
+
+@router.callback_query(F.data.startswith("exam_examiner_page:"), ExamStates.selecting_examiner)
+async def callback_exam_examiner_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Пагинация списка экзаменаторов"""
+    try:
+        await callback.answer()
+        page = int(callback.data.split(":")[1])
+        data = await state.get_data()
+        examiner_ids = data.get("exam_examiner_ids", [])
+
+        examiners = []
+        for uid in examiner_ids:
+            u = await get_user_by_id(session, uid)
+            if u:
+                examiners.append(u)
+
+        await callback.message.edit_reply_markup(
+            reply_markup=get_exam_examiner_list_keyboard(examiners, page=page)
+        )
+    except Exception as e:
+        log_user_error(callback.from_user.id, "exam_examiner_page_error", str(e))
 
 
 @router.callback_query(F.data == "exam_back_to_card")
