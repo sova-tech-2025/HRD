@@ -1555,17 +1555,19 @@ def get_exam_questions_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_exam_examiner_list_keyboard(examiners: list) -> InlineKeyboardMarkup:
-    """Клавиатура выбора экзаменатора"""
-    keyboard = []
-    for user in examiners:
-        role_name = user.roles[0].name if user.roles else ""
-        keyboard.append([InlineKeyboardButton(
-            text=f"{user.full_name} ({role_name})",
-            callback_data=f"exam_examiner:{user.id}",
-        )])
-    keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="exam_back_to_card")])
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+def get_exam_examiner_list_keyboard(examiners: list, page: int = 0) -> InlineKeyboardMarkup:
+    """Клавиатура выбора экзаменатора с пагинацией"""
+    from bot.keyboards.pagination import PaginatedKeyboard
+
+    return (
+        PaginatedKeyboard(examiners, page=page, per_page=8, page_callback="exam_examiner_page")
+        .add_items(lambda u: (
+            f"{u.full_name} ({u.roles[0].name if u.roles else ''})",
+            f"exam_examiner:{u.id}",
+        ))
+        .add_footer([[InlineKeyboardButton(text="🔙 Назад", callback_data="exam_back_to_card")]])
+        .build()
+    )
 
 
 class UserFilterKeyboards:

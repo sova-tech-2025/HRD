@@ -9,7 +9,6 @@ from bot.database.db import (
     add_question_to_test,
     check_user_permission,
     create_test,
-    delete_learning_path,
     ensure_company_id,
     get_all_active_tests,
     get_all_groups,
@@ -2560,8 +2559,10 @@ async def callback_confirm_trajectory_deletion(callback: CallbackQuery, state: F
             await callback.message.edit_text("❌ <b>Ошибка</b>\n\nТраектория не найдена.", parse_mode="HTML")
             return
 
-        # Удаляем траекторию
-        success = await delete_learning_path(session, trajectory_id, company_id=company_id)
+        # Удаляем траекторию (soft delete)
+        from bot.repositories.learning_path_repo import LearningPathRepository
+
+        success = await LearningPathRepository(session).delete(trajectory_id, company_id=company_id)
 
         if success:
             await callback.message.edit_text(

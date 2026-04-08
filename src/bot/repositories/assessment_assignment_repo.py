@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from bot.database.models import (
     Attestation,
+    AttestationQuestion,
     LearningStage,
     Role,
     TraineeAttestation,
@@ -132,7 +133,9 @@ class AssessmentAssignmentRepository(BaseRepository):
                     selectinload(TraineeAttestation.trainee).selectinload(User.work_object),
                     selectinload(TraineeAttestation.trainee).selectinload(User.internship_object),
                     selectinload(TraineeAttestation.manager),
-                    selectinload(TraineeAttestation.attestation).selectinload(Attestation.questions),
+                    selectinload(TraineeAttestation.attestation).selectinload(
+                        Attestation.questions.and_(AttestationQuestion.is_active == True)  # noqa: E712
+                    ),
                     selectinload(TraineeAttestation.assigned_by),
                 )
                 .join(User, TraineeAttestation.trainee_id == User.id)

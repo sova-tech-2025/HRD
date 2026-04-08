@@ -5,7 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.db import (
     check_user_permission,
-    delete_user,
     ensure_company_id,
     get_all_activated_users,
     get_all_groups,
@@ -1652,8 +1651,10 @@ async def callback_confirm_delete_user(callback: CallbackQuery, state: FSMContex
         data = await state.get_data()
         filter_type = data.get("filter_type", "all")
 
-        # Выполняем удаление с проверкой company_id
-        success = await delete_user(session, user_id, company_id=current_user.company_id)
+        # Выполняем удаление (soft delete) с проверкой company_id
+        from bot.repositories.user_repo import UserRepository
+
+        success = await UserRepository(session).delete(user_id, company_id=current_user.company_id)
 
         if success:
             await callback.message.edit_text(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from bot.database.models import (
@@ -96,7 +96,7 @@ class AssessmentRepository(BaseRepository):
             try:
                 query = (
                     select(Attestation)
-                    .options(selectinload(Attestation.questions))
+                    .options(selectinload(Attestation.questions.and_(AttestationQuestion.is_active == True)))  # noqa: E712
                     .where(
                         Attestation.is_active == True,
                         Attestation.company_id == company_id,
@@ -120,7 +120,9 @@ class AssessmentRepository(BaseRepository):
         """Получение аттестации по ID с вопросами (с изоляцией по компании)"""
         try:
             query = (
-                select(Attestation).options(selectinload(Attestation.questions)).where(Attestation.id == attestation_id)
+                select(Attestation)
+                .options(selectinload(Attestation.questions.and_(AttestationQuestion.is_active == True)))  # noqa: E712
+                .where(Attestation.id == attestation_id)
             )
 
             # Добавляем фильтр по company_id для изоляции
@@ -155,38 +157,24 @@ class AssessmentRepository(BaseRepository):
             return True  # В случае ошибки считаем, что аттестация используется (безопасно)
 
     async def delete(self, attestation_id: int, company_id: int = None) -> bool:
-        """Удаление аттестации (с изоляцией по компании)"""
+        """Мягкое удаление аттестации + каскадный soft delete вопросов (с изоляцией по компании)"""
         try:
             # Сначала проверяем, не используется ли аттестация
             if await self.check_in_use(attestation_id, company_id=company_id):
                 logger.warning(f"Попытка удалить используемую аттестацию {attestation_id}")
                 return False
 
-            # Получаем аттестацию для логирования с изоляцией
-            query = select(Attestation).where(Attestation.id == attestation_id)
-
-            # КРИТИЧЕСКАЯ ИЗОЛЯЦИЯ ПО КОМПАНИИ!
-            if company_id is not None:
-                query = query.where(Attestation.company_id == company_id)
-
-            result = await self.session.execute(query)
-            attestation = result.scalar_one_or_none()
-
-            if not attestation:
+            # Soft delete аттестации
+            if not await self._soft_delete(Attestation, attestation_id, company_id):
                 logger.warning(f"Аттестация {attestation_id} не найдена для удаления")
                 return False
 
-            # Удаляем все вопросы аттестации
-            await self.session.execute(
-                delete(AttestationQuestion).where(AttestationQuestion.attestation_id == attestation_id)
-            )
-
-            # Удаляем саму аттестацию
-            await self.session.execute(delete(Attestation).where(Attestation.id == attestation_id))
+            # Каскадный soft delete вопросов
+            await self._bulk_soft_delete(AttestationQuestion, AttestationQuestion.attestation_id == attestation_id)
 
             await self.session.commit()
 
-            logger.info(f"Аттестация '{attestation.name}' (ID: {attestation_id}) успешно удалена")
+            logger.info(f"Аттестация (ID: {attestation_id}) мягко удалена с вопросами")
             return True
 
         except Exception as e:

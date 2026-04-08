@@ -57,6 +57,7 @@ class User(Base):
     registration_date = Column(DateTime, default=moscow_now)
     role_assigned_date = Column(DateTime, default=moscow_now)  # Дата назначения текущей роли
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Timestamp мягкого удаления
     is_activated = Column(Boolean, default=False)  # Активация рекрутером
     internship_object_id = Column(Integer, ForeignKey("objects.id"), nullable=True)  # Объект стажировки
     work_object_id = Column(Integer, ForeignKey("objects.id"), nullable=True)  # Объект работы
@@ -145,6 +146,7 @@ class Group(Base):
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Было: nullable=False
     created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Timestamp мягкого удаления
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)  # Компания группы
 
     # Связи
@@ -171,6 +173,7 @@ class Object(Base):
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Было: nullable=False
     created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Timestamp мягкого удаления
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)  # Компания объекта
 
     # Связи
@@ -233,6 +236,7 @@ class Test(Base):
     creator_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Было: nullable=False
     created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Timestamp мягкого удаления
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)  # Компания теста
 
     # Расширенные настройки
@@ -277,9 +281,13 @@ class TestQuestion(Base):
     points = Column(Float, nullable=False, default=1)
     penalty_points = Column(Float, nullable=False, default=0)  # Штраф за неправильный ответ
     created_date = Column(DateTime, default=moscow_now)
+    is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Timestamp мягкого удаления
 
     # Связи
     test = relationship("Test", back_populates="questions")
+
+    __table_args__ = (Index("idx_test_question_is_active", "is_active"),)
 
     def __repr__(self):
         return f"<TestQuestion(id={self.id}, test_id={self.test_id}, number={self.question_number})>"
@@ -390,6 +398,7 @@ class LearningPath(Base):
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Рекрутер-создатель, было: nullable=False
     created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Timestamp мягкого удаления
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)  # Компания траектории
 
     # Связи
@@ -429,6 +438,7 @@ class LearningStage(Base):
     learning_path_id = Column(Integer, ForeignKey("learning_paths.id"), nullable=False)
     order_number = Column(Integer, nullable=False)  # Порядок этапа в траектории
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Timestamp мягкого удаления
     created_date = Column(DateTime, default=moscow_now)
 
     # Связи
@@ -452,6 +462,7 @@ class LearningSession(Base):
     stage_id = Column(Integer, ForeignKey("learning_stages.id"), nullable=False)
     order_number = Column(Integer, nullable=False)  # Порядок сессии в этапе
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Timestamp мягкого удаления
     created_date = Column(DateTime, default=moscow_now)
 
     # Связи
@@ -477,6 +488,7 @@ class Attestation(Base):
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Рекрутер-создатель, было: nullable=False
     created_date = Column(DateTime, default=moscow_now)
     is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Timestamp мягкого удаления
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)  # Компания аттестации
     assessment_type = Column(String, nullable=False, default="attestation")  # 'attestation' или 'exam'
 
@@ -512,9 +524,13 @@ class AttestationQuestion(Base):
     question_text = Column(Text, nullable=False)  # Текст вопроса с критериями оценки
     max_points = Column(Float, nullable=False)  # Максимальный балл за вопрос
     created_date = Column(DateTime, default=moscow_now)
+    is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Timestamp мягкого удаления
 
     # Связи
     attestation = relationship("Attestation", back_populates="questions")
+
+    __table_args__ = (Index("idx_attestation_question_is_active", "is_active"),)
 
     def __repr__(self):
         return (
