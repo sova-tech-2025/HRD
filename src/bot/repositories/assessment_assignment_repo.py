@@ -13,6 +13,7 @@ from bot.database.models import (
     user_groups,
     user_roles,
 )
+from bot.repositories.admin_repo import admin_inclusive_role_filter  # noqa: E402
 from bot.repositories.base import BaseRepository
 from bot.utils.logger import logger
 
@@ -283,7 +284,7 @@ class AssessmentAssignmentRepository(BaseRepository):
                 select(User)
                 .join(user_roles, User.id == user_roles.c.user_id)
                 .join(Role, user_roles.c.role_id == Role.id)
-                .where(Role.name == "Руководитель")
+                .where(admin_inclusive_role_filter(["Руководитель"]))
                 .where(User.is_active == True)
                 .where(User.is_activated == True)
             )
@@ -351,7 +352,7 @@ class AssessmentAssignmentRepository(BaseRepository):
                 .join(user_roles, User.id == user_roles.c.user_id)
                 .join(Role, user_roles.c.role_id == Role.id)
                 .where(
-                    Role.name.in_(["Руководитель", "Сотрудник", "Рекрутер"]),
+                    admin_inclusive_role_filter(["Руководитель", "Сотрудник", "Рекрутер"]),
                     User.is_active == True,
                     User.is_activated == True,
                 )
@@ -442,10 +443,15 @@ class AssessmentAssignmentRepository(BaseRepository):
         """Получение пользователей для назначения экзамена с фильтрацией"""
         try:
             # Исключаем стажёров — по ТЗ им нельзя назначить экзамен
+            # Но не исключаем ADMIN, даже если у него нет других ролей
+            admin_user_ids = (
+                select(user_roles.c.user_id).join(Role, user_roles.c.role_id == Role.id).where(Role.name == "ADMIN")
+            )
             trainee_role_subquery = (
                 select(user_roles.c.user_id)
                 .join(Role, user_roles.c.role_id == Role.id)
                 .where(Role.name.in_(["Стажер", "Стажёр"]))
+                .where(user_roles.c.user_id.not_in(admin_user_ids))
             )
 
             query = (

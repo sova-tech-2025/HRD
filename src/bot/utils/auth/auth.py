@@ -3,6 +3,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.db import get_company_by_id, get_user_by_id, get_user_by_tg_id, get_user_roles
+from bot.utils.bot.roles import get_primary_role
 from bot.utils.logger import log_user_action, log_user_error
 from bot.utils.timezone import moscow_now
 
@@ -45,7 +46,7 @@ async def validate_user_access(session: AsyncSession, user) -> tuple[bool, str |
     if not roles:
         return False, "У тебя нет назначенных ролей. Обратись к рекрутеру.", None
 
-    return True, None, roles[0].name
+    return True, None, get_primary_role(roles)
 
 
 async def check_auth(message: Message, state: FSMContext, session: AsyncSession) -> bool:
@@ -142,7 +143,7 @@ async def check_auth(message: Message, state: FSMContext, session: AsyncSession)
             await message.answer("У тебя нет назначенных ролей. Обратись к рекрутеру.")
             return False
 
-        primary_role = roles[0].name
+        primary_role = get_primary_role(roles)
 
         await state.update_data(
             user_id=user.id,

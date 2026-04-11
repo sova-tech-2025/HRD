@@ -43,6 +43,7 @@ from bot.database.models import (
     user_objects,
     user_roles,
 )
+from bot.repositories.admin_repo import admin_inclusive_role_filter
 from bot.utils.formatters.trajectory import generate_trajectory_progress_with_attestation_status
 from bot.utils.logger import logger
 from bot.utils.timezone import moscow_now
@@ -512,6 +513,11 @@ async def create_user_without_role(session: AsyncSession, user_data: dict, bot=N
 
 
 async def check_user_permission(session: AsyncSession, user_id: int, permission_name: str) -> bool:
+    from bot.repositories.admin_repo import is_admin_user
+
+    if await is_admin_user(session, user_id):
+        return True
+
     stmt = (
         select(func.count())
         .select_from(User)
@@ -621,7 +627,7 @@ async def get_all_trainees(session: AsyncSession, company_id: int = None) -> Lis
             .join(user_roles, User.id == user_roles.c.user_id)
             .join(Role, user_roles.c.role_id == Role.id)
             .where(
-                Role.name == "Стажер",
+                admin_inclusive_role_filter(["Стажер"]),
                 User.is_activated == True,  # noqa: E712
                 User.is_active == True,  # noqa: E712
             )
@@ -725,7 +731,7 @@ async def get_unactivated_users(session: AsyncSession, company_id: int = None) -
         query = (
             select(User)
             .where(User.is_activated == False, User.is_active == True)  # noqa: E712
-            .where(~User.roles.any(Role.name.in_(["Руководитель", "Рекрутер"])))
+            .where(~User.roles.any(Role.name.in_(["Руководитель", "Рекрутер", "ADMIN"])))
         )
 
         if company_id is not None:
@@ -2082,7 +2088,7 @@ async def get_mentor_trainees(session: AsyncSession, mentor_id: int, company_id:
                 Mentorship.mentor_id == mentor_id,
                 Mentorship.is_active == True,
                 User.is_active == True,
-                Role.name == "Стажер",
+                admin_inclusive_role_filter(["Стажер"]),
             )
         )
 
@@ -2136,7 +2142,7 @@ async def get_unassigned_trainees(session: AsyncSession, company_id: int = None)
             .join(user_roles, User.id == user_roles.c.user_id)
             .join(Role, user_roles.c.role_id == Role.id)
             .where(
-                Role.name == "Стажер",
+                admin_inclusive_role_filter(["Стажер"]),
                 User.is_activated == True,  # noqa: E712
                 User.is_active == True,  # noqa: E712
                 ~User.id.in_(subquery),
@@ -2166,7 +2172,7 @@ async def get_available_mentors(session: AsyncSession, company_id: int = None) -
             )
             .join(user_roles, User.id == user_roles.c.user_id)
             .join(Role, user_roles.c.role_id == Role.id)
-            .where(Role.name.in_(["Наставник", "Руководитель"]), User.is_active == True)  # noqa: E712
+            .where(admin_inclusive_role_filter(["Наставник", "Руководитель"]), User.is_active == True)  # noqa: E712
         )
 
         # Изоляция по компании
@@ -3502,7 +3508,7 @@ async def get_unactivated_users_old(session: AsyncSession, company_id: int = Non
         query = (
             select(User)
             .where(User.is_activated == False, User.is_active == True)  # noqa: E712
-            .where(~User.roles.any(Role.name.in_(["Руководитель", "Рекрутер"])))
+            .where(~User.roles.any(Role.name.in_(["Руководитель", "Рекрутер", "ADMIN"])))
         )
 
         if company_id is not None:
@@ -5111,19 +5117,21 @@ async def get_trainees_without_mentor(session: AsyncSession, company_id: int = N
     try:
         from bot.database.models import Mentorship, Role, User
 
-        # Получаем роль стажера
-        trainee_role_result = await session.execute(select(Role).where(Role.name == "Стажер"))
-        trainee_role = trainee_role_result.scalar_one_or_none()
+        # Получаем роли стажера и ADMIN
+        trainee_roles_result = await session.execute(select(Role).where(Role.name.in_(["Стажер", "ADMIN"])))
+        trainee_roles = trainee_roles_result.scalars().all()
 
-        if not trainee_role:
+        if not trainee_roles:
             return []
+
+        trainee_role_ids = [r.id for r in trainee_roles]
 
         # Получаем стажеров без активного наставника
         query = (
             select(User)
             .where(User.is_active == True, User.is_activated == True)
             .join(user_roles)
-            .where(user_roles.c.role_id == trainee_role.id)
+            .where(user_roles.c.role_id.in_(trainee_role_ids))
             .outerjoin(Mentorship, (Mentorship.trainee_id == User.id) & (Mentorship.is_active == True))
             .where(Mentorship.id.is_(None))  # Нет активного наставника
         )
@@ -5165,8 +5173,10 @@ async def get_available_mentors_for_trainee(
         if not trainee or not trainee.work_object:
             return []
 
-        # Получаем роли наставника и руководителя
-        mentor_roles_result = await session.execute(select(Role).where(Role.name.in_(["Наставник", "Руководитель"])))
+        # Получаем роли наставника, руководителя и ADMIN
+        mentor_roles_result = await session.execute(
+            select(Role).where(Role.name.in_(["Наставник", "Руководитель", "ADMIN"]))
+        )
         mentor_roles = mentor_roles_result.scalars().all()
         mentor_role_ids = [role.id for role in mentor_roles]
 

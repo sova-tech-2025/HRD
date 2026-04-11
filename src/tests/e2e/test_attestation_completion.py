@@ -51,9 +51,9 @@ class TestScenario7A_ManagerSchedulesDateTime:
 
     async def test_step0_setup_attestation_for_scheduling(self, e2e_db: asyncpg.Connection, shared_state: dict):
         """SQL: назначаем аттестацию стажёру 1 (без даты/времени)."""
-        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Первый")
-        manager_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Руководителев Тест")
-        mentor_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Наставников Тест")
+        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Тест")
+        manager_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Рекрутеров Тест")
+        mentor_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Рекрутеров Тест")
         attestation_id = await e2e_db.fetchval("SELECT id FROM attestations WHERE name = $1", "E2E Аттестация Бариста")
 
         assert trainee_id, "Trainee not found"
@@ -101,6 +101,10 @@ class TestScenario7A_ManagerSchedulesDateTime:
         shared_state["sched_assignment_id"] = assignment_id
         shared_state["sched_trainee_id"] = trainee_id
 
+    async def test_step0b_switch_to_manager(self, manager: BotClient):
+        """ADMIN переключается в Руководитель."""
+        await manager.switch_role("Руководитель")
+
     async def test_step1_manager_sets_date_and_time(self, manager: BotClient, shared_state: dict):
         """
         Руководитель назначает дату и время:
@@ -114,13 +118,13 @@ class TestScenario7A_ManagerSchedulesDateTime:
         # 2. Выбираем стажёра
         trainee_btn = manager.find_button_data(
             resp,
-            text_contains="Первый",
+            text_contains="Стажёров",
             data_prefix="select_trainee_attestation:",
         )
         if not trainee_btn:
             trainee_btn = manager.find_button_data(
                 resp,
-                text_contains="Стажёров",
+                text_contains="Тест",
                 data_prefix="select_trainee_attestation:",
             )
         assert trainee_btn, f"Trainee button not found. Buttons: {manager.get_button_texts(resp)}"
@@ -196,13 +200,13 @@ class TestScenario7A_ManagerSchedulesDateTime:
 
         trainee_btn = manager.find_button_data(
             resp,
-            text_contains="Первый",
+            text_contains="Стажёров",
             data_prefix="select_trainee_attestation:",
         )
         if not trainee_btn:
             trainee_btn = manager.find_button_data(
                 resp,
-                text_contains="Стажёров",
+                text_contains="Тест",
                 data_prefix="select_trainee_attestation:",
             )
         assert trainee_btn, f"Trainee button not found. Buttons: {manager.get_button_texts(resp)}"

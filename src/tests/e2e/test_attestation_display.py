@@ -64,23 +64,21 @@ def extract_attestation_icon(text: str) -> str:
 
 
 async def _select_trainee_in_mentor_list(mentor: BotClient) -> "Message":
-    """Выбрать Стажёра 1 в списке наставника."""
+    """Выбрать trainee в списке наставника."""
     resp = await mentor.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
 
     trainee_btn = mentor.find_button_data(
         resp,
-        text_contains="Первый",
+        text_contains="Стажёров",
         data_prefix="select_trainee_for_trajectory:",
     )
     if not trainee_btn:
         trainee_btn = mentor.find_button_data(
             resp,
-            text_contains="Стажёров",
+            text_contains="Тест",
             data_prefix="select_trainee_for_trajectory:",
         )
-    assert trainee_btn, (
-        f"Trainee 'Стажёров Первый' not found in mentor's list. Buttons: {mentor.get_button_texts(resp)}"
-    )
+    assert trainee_btn, f"Trainee not found in mentor's list. Buttons: {mentor.get_button_texts(resp)}"
 
     resp = await mentor.click_and_wait(resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка")
     return resp
@@ -116,14 +114,14 @@ class TestScenario6_AttestationDisplay:
         - Async-функция (фикс): запрашивает БД → 🟡
         """
         # Получаем ID сущностей (параметризованные запросы)
-        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Первый")
-        manager_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Руководителев Тест")
-        mentor_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Наставников Тест")
+        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Тест")
+        manager_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Рекрутеров Тест")
+        mentor_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Рекрутеров Тест")
         attestation_id = await e2e_db.fetchval("SELECT id FROM attestations WHERE name = $1", "E2E Аттестация Бариста")
 
-        assert trainee_id, "Trainee 'Стажёров Первый' not found in DB"
-        assert manager_id, "Manager 'Руководителев Тест' not found in DB"
-        assert mentor_id, "Mentor 'Наставников Тест' not found in DB"
+        assert trainee_id, "Trainee 'Стажёров Тест' not found in DB"
+        assert manager_id, "Manager 'Рекрутеров Тест' not found in DB"
+        assert mentor_id, "Mentor 'Рекрутеров Тест' not found in DB"
         assert attestation_id, "Attestation 'E2E Аттестация Бариста' not found in DB"
 
         # Удаляем старые записи (если есть от предыдущих прогонов)
@@ -155,6 +153,10 @@ class TestScenario6_AttestationDisplay:
 
         shared_state["attestation_sql_inserted"] = True
         shared_state["expected_attestation_icon"] = "🟡"
+
+    async def test_step0b_switch_to_mentor(self, mentor: BotClient):
+        """ADMIN переключается в Наставник."""
+        await mentor.switch_role("Наставник")
 
     async def test_step1_quick_view_shows_assigned_status(self, mentor: BotClient, shared_state: dict):
         """
@@ -345,7 +347,7 @@ class TestScenario6_AttestationDisplay:
 
     async def test_step6_cleanup_attestation(self, e2e_db: asyncpg.Connection):
         """Очистка: удаляем тестовую TraineeAttestation."""
-        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = 'Стажёров Первый'")
+        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = 'Стажёров Тест'")
         if trainee_id:
             await e2e_db.execute(
                 "DELETE FROM trainee_attestations WHERE trainee_id = $1",

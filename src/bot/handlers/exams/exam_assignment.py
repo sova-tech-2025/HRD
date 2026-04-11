@@ -85,9 +85,7 @@ async def callback_exam_examiner_page(callback: CallbackQuery, state: FSMContext
             if u:
                 examiners.append(u)
 
-        await callback.message.edit_reply_markup(
-            reply_markup=get_exam_examiner_list_keyboard(examiners, page=page)
-        )
+        await callback.message.edit_reply_markup(reply_markup=get_exam_examiner_list_keyboard(examiners, page=page))
     except Exception as e:
         log_user_error(callback.from_user.id, "exam_examiner_page_error", str(e))
 

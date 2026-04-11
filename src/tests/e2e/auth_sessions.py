@@ -25,11 +25,8 @@ SESSIONS_DIR = Path(__file__).parent / "sessions"
 
 # Аккаунты для авторизации
 ACCOUNTS = [
-    ("recruiter", os.getenv("E2E_PHONE_RECRUITER")),
-    ("mentor", os.getenv("E2E_PHONE_MENTOR")),
-    ("manager", os.getenv("E2E_PHONE_MANAGER")),
-    ("trainee1", os.getenv("E2E_PHONE_TRAINEE_1")),
-    ("trainee2", os.getenv("E2E_PHONE_TRAINEE_2")),
+    ("admin", os.getenv("E2E_PHONE_ADMIN")),
+    ("trainee", os.getenv("E2E_PHONE_TRAINEE")),
 ]
 
 

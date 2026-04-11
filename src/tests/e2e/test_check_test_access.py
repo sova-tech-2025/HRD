@@ -1,10 +1,11 @@
 """
-E2E Сценарии 1-2: Проверка check_test_access.
+E2E Сценарий 1: Проверка check_test_access.
 
-Сценарий 1: Стажёр без TraineeTestAccess получает доступ через fallback
-            (структура траектории с открытым этапом).
-Сценарий 2: Сотрудник (бывший стажёр) сохраняет доступ к тестам
-            с creator_id = NULL (legacy-данные из продакшна).
+Стажёр без TraineeTestAccess получает доступ через fallback
+(структура траектории с открытым этапом).
+
+Сценарий 2 (Employee access) вынесен в test_employee_access.py (order=8),
+т.к. требует перехода trainee в Сотрудника (после attestation_flows).
 
 Зависит от test_setup.py (order=1).
 """
@@ -26,7 +27,7 @@ pytestmark = [
 
 
 # =========================================================================
-# Вспомогательные функции
+# Вспомогательные функции (используются другими тестами через import)
 # =========================================================================
 
 
@@ -189,7 +190,7 @@ async def close_mentor_stage(
 
 
 # =========================================================================
-# Сценарий 1: Стажёр с закрытым этапом
+# Сценарий 1: Стажёр с закрытым этапом (fallback access)
 # =========================================================================
 
 
@@ -199,58 +200,56 @@ class TestScenario1_TraineeFallbackAccess:
     отсутствует (например, после переназначения траектории).
 
     Реальный путь бага на продакшне:
-    1. Траектория переназначается → TraineeTestAccess не пересоздаётся
+    1. Траектория переназначается -> TraineeTestAccess не пересоздаётся
     2. Старый код: if not access: return False (сразу отказ)
-    3. Новый код: fallback → проверка структуры траектории → тест в открытом этапе → True
+    3. Новый код: fallback -> проверка структуры траектории -> тест в открытом этапе -> True
 
     Для воспроизведения: удаляем TraineeTestAccess через прямой SQL,
     ЗАТЕМ стажёр проходит тест (а не наоборот — иначе этап станет completed
     и кнопки навигации пропадут).
     """
 
-    async def test_step1_mentor_opens_stage1(self, mentor: BotClient, shared_state: dict):
-        """Наставник открывает этап 1 для Стажёра 1."""
-        await open_mentor_stage(mentor, "Стажёров Первый", stage_number=1)
+    async def test_step1_switch_to_mentor(self, admin: BotClient):
+        """ADMIN переключается в Наставник."""
+        await admin.switch_role("Наставник")
 
-    async def test_step2_delete_trainee_test_access(self, e2e_db: asyncpg.Connection, shared_state: dict):
+    async def test_step2_mentor_opens_stage1(self, admin: BotClient, shared_state: dict):
+        """Наставник открывает этап 1 для trainee."""
+        await open_mentor_stage(admin, "Стажёров Тест", stage_number=1)
+
+    async def test_step3_delete_trainee_test_access(self, e2e_db: asyncpg.Connection, shared_state: dict):
         """
-        SQL: Удаляем ВСЕ записи TraineeTestAccess для Стажёра 1.
+        SQL: Удаляем ВСЕ записи TraineeTestAccess для trainee.
 
         Симулирует состояние после переназначения траектории,
         когда записи TraineeTestAccess не были пересозданы.
-        На продакшне это затронуло 45 стажёров.
-
-        ВАЖНО: делаем ДО прохождения теста, иначе этап станет is_completed=True
-        и кнопки select_stage: пропадут из UI (available_stages фильтрует их).
         """
         result = await e2e_db.execute("""
             DELETE FROM trainee_test_access
             WHERE trainee_id = (
-                SELECT id FROM users WHERE full_name = 'Стажёров Первый'
+                SELECT id FROM users WHERE full_name = 'Стажёров Тест'
             )
         """)
         deleted_count = int(result.split()[-1])
         assert deleted_count > 0, (
-            "No TraineeTestAccess records found for trainee1. Stage opening may not have created them."
+            "No TraineeTestAccess records found for trainee. Stage opening may not have created them."
         )
-        shared_state["trainee1_deleted_access_count"] = deleted_count
+        shared_state["trainee_deleted_access_count"] = deleted_count
 
-    async def test_step3_trainee1_takes_test_via_fallback(self, trainee1: BotClient, shared_state: dict):
+    async def test_step4_trainee_takes_test_via_fallback(self, trainee: BotClient, shared_state: dict):
         """
-        КРИТИЧЕСКАЯ ПРОВЕРКА: Стажёр 1 проходит тест БЕЗ TraineeTestAccess,
+        КРИТИЧЕСКАЯ ПРОВЕРКА: Стажёр проходит тест БЕЗ TraineeTestAccess,
         используя fallback на структуру траектории (тест в открытом этапе).
 
-        БЕЗ ФИКСА: check_test_access → нет TraineeTestAccess → return False →
+        БЕЗ ФИКСА: check_test_access -> нет TraineeTestAccess -> return False ->
                    "Доступ запрещён" при попытке открыть тест
-        С ФИКСОМ:  check_test_access → нет TraineeTestAccess → fallback →
-                   тест в открытом этапе → return True → тест доступен
-
-        Одновременно создаёт TestResult (нужен для последующих E2E сценариев).
+        С ФИКСОМ:  check_test_access -> нет TraineeTestAccess -> fallback ->
+                   тест в открытом этапе -> return True -> тест доступен
         """
         await wait_between_actions()
 
         result_text = await take_test_via_trajectory(
-            trainee1,
+            trainee,
             stage_name="Базовые",
             test_name="E2E Тест Кофе",
             correct_answer_index=1,
@@ -261,243 +260,5 @@ class TestScenario1_TraineeFallbackAccess:
             f"BUG REPRODUCED: check_test_access has no trajectory fallback!\n"
             f"TraineeTestAccess was deleted (simulating post-reassignment state), "
             f"but test is in OPEN stage and should be accessible via fallback.\n"
-            f"Old code: no TraineeTestAccess → immediate return False\n"
-            f"Expected: fallback to trajectory structure → test in open stage → True\n"
             f"Response: {result_text[:500]}"
         )
-
-
-# =========================================================================
-# Сценарий 2: Сотрудник (бывший стажёр) сохраняет доступ к тестам
-# =========================================================================
-
-
-class TestScenario2_EmployeeAccess:
-    """
-    Баг check_test_access: сотрудник теряет доступ к тестам с creator_id = NULL.
-
-    Реальный путь бага на продакшне:
-    1. 49 из 89 тестов имеют creator_id = NULL (legacy-данные октября 2025)
-    2. Старый код: get_user_by_id(NULL) → None → crash → return False
-    3. Новый код: проверяет TraineeTestAccess → exists → return True
-
-    Для воспроизведения: устанавливаем creator_id = NULL через SQL.
-    """
-
-    async def test_step1_mentor_opens_all_stages_for_trainee2(self, mentor: BotClient, shared_state: dict):
-        """Наставник открывает все этапы для Стажёра 2."""
-        await open_mentor_stage(mentor, "Стажёров Второй", stage_number=1)
-        await wait_between_actions()
-        await open_mentor_stage(mentor, "Стажёров Второй", stage_number=2)
-
-    async def test_step2_trainee2_passes_all_tests(self, trainee2: BotClient, shared_state: dict):
-        """Стажёр 2 проходит все тесты во всех этапах."""
-        await wait_between_actions()
-
-        # Тест 1: E2E Тест Кофе (этап 1)
-        result = await take_test_via_trajectory(
-            trainee2,
-            stage_name="Базовые",
-            test_name="E2E Тест Кофе",
-            correct_answer_index=1,
-        )
-        assert not contains_access_denied(result)
-
-        await wait_between_actions(3.0)
-
-        # Тест 2: E2E Тест Сервис (этап 2, тест 1 в сессии)
-        result = await take_test_via_trajectory(
-            trainee2,
-            stage_name="Продвинутые",
-            test_name="E2E Тест Сервис",
-            correct_answer_index=1,
-            test_index=0,
-        )
-        assert not contains_access_denied(result)
-
-        await wait_between_actions(3.0)
-
-        # Тест 3: E2E Тест Гигиена (этап 2, тест 2 в сессии)
-        result = await take_test_via_trajectory(
-            trainee2,
-            stage_name="Продвинутые",
-            test_name="E2E Тест Гигиена",
-            correct_answer_index=1,
-            test_index=1,
-        )
-        assert not contains_access_denied(result)
-
-    async def test_step3_mentor_assigns_attestation(self, mentor: BotClient, shared_state: dict):
-        """Наставник назначает аттестацию для Стажёра 2."""
-        await wait_between_actions()
-
-        resp = await mentor.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
-
-        # Выбираем стажёра 2
-        trainee_btn = mentor.find_button_data(
-            resp, text_contains="Стажёров Второй", data_prefix="select_trainee_for_trajectory:"
-        )
-        if not trainee_btn:
-            trainee_btn = mentor.find_button_data(
-                resp, text_contains="Второй", data_prefix="select_trainee_for_trajectory:"
-            )
-        assert trainee_btn, "Trainee 2 not found"
-
-        resp = await mentor.click_and_wait(
-            resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка|Аттестация"
-        )
-
-        # Нажимаем "Назначить аттестацию"
-        att_btn = mentor.find_button_data(resp, data_prefix="view_trainee_attestation:")
-        assert att_btn, f"Attestation button not found. Buttons: {mentor.get_button_texts(resp)}"
-
-        resp = await mentor.click_and_wait(
-            resp, data=att_btn, wait_pattern="руководител|[Рр]уководител|[Вв]ыбери|менеджер|назначить"
-        )
-
-        # Выбираем руководителя
-        manager_btn = mentor.find_button_data(resp, data_prefix="select_manager_for_attestation:")
-        assert manager_btn, "Manager button not found for attestation"
-
-        resp = await mentor.click_and_wait(resp, data=manager_btn, wait_pattern="Подтвердить|подтверд|назначить")
-
-        # Подтверждаем назначение
-        resp = await mentor.click_and_wait(
-            resp, data=b"confirm_attestation_assignment", wait_pattern="назначена|успешно|аттестация"
-        )
-
-    async def test_step4_manager_conducts_attestation(self, manager: BotClient, shared_state: dict):
-        """Руководитель проводит аттестацию: отвечает на все вопросы максимальным баллом."""
-        await wait_between_actions()
-
-        # Открываем меню аттестаций
-        resp = await manager.send_and_wait("Аттестация ✔️", pattern="[Аа]ттестац|стажер")
-
-        # Выбираем стажёра для аттестации
-        att_btn = manager.find_button_data(
-            resp, text_contains="Второй", data_prefix="select_trainee_attestation:"
-        ) or manager.find_button_data(resp, text_contains="Второй", data_prefix="manage_attestation:")
-        if not att_btn:
-            # Берём первую аттестацию
-            att_btn = manager.find_button_data(
-                resp, data_prefix="select_trainee_attestation:"
-            ) or manager.find_button_data(resp, data_prefix="manage_attestation:")
-        assert att_btn, "Attestation assignment not found"
-
-        resp = await manager.click_and_wait(resp, data=att_btn, wait_pattern="[Нн]ачать|аттестац")
-
-        # Начинаем аттестацию
-        start_btn = manager.find_button_data(resp, data_prefix="start_attestation:")
-        assert start_btn, "Start attestation button not found"
-
-        resp = await manager.click_and_wait(resp, data=start_btn, wait_pattern="[Дд]а|[Пп]одтверд|[Нн]ачать")
-
-        # Подтверждаем начало
-        resp = await manager.click_and_wait(
-            resp, data=b"confirm_start_attestation", wait_pattern="вопрос|Вопрос|балл|оцен"
-        )
-
-        # Отвечаем на все вопросы максимальным баллом
-        # Аттестация использует текстовый ввод баллов
-        max_attempts = 10
-        for i in range(max_attempts):
-            text = resp.text or ""
-            # Проверяем, не закончились ли вопросы
-            if "пройдена" in text.lower() or "результат" in text.lower() or "завершена" in text.lower():
-                break
-
-            # Вводим максимальный балл (10)
-            resp = await manager.send_and_wait(
-                "10",
-                pattern="вопрос|Вопрос|балл|пройдена|результат|завершена|Набрано",
-                timeout=10.0,
-            )
-
-        # Проверяем успешность аттестации
-        final_text = resp.text or ""
-        assert "пройдена" in final_text.lower() or "✅" in final_text, (
-            f"Attestation not marked as passed: {final_text[:300]}"
-        )
-
-    async def test_step5_trainee2_becomes_employee(self, trainee2: BotClient, shared_state: dict):
-        """Стажёр 2 нажимает 'Стать сотрудником'."""
-        await wait_between_actions(3.0)
-
-        # Ищем уведомление с кнопкой "Стать сотрудником"
-        messages = await trainee2.get_messages(limit=10)
-        become_btn = None
-        target_msg = None
-
-        for msg in messages:
-            if msg.out:
-                continue
-            btn = trainee2.find_button_data(msg, data_prefix="become_employee")
-            if btn:
-                become_btn = btn
-                target_msg = msg
-                break
-
-        if target_msg and become_btn:
-            resp = await trainee2.click_and_wait(
-                target_msg, data=become_btn, wait_pattern="сотрудник|Сотрудник|Поздравля|обновить"
-            )
-        else:
-            # Может уже быть сотрудником или уведомление было раньше
-            # Пробуем /start чтобы обновить меню
-            resp = await trainee2.send_and_wait("/start", pattern="меню|[Мм]ой профиль|Сотрудник")
-
-    async def test_step6_set_null_creator_id(self, e2e_db: asyncpg.Connection, shared_state: dict):
-        """
-        SQL: Устанавливаем creator_id = NULL для теста "E2E Тест Кофе".
-
-        Симулирует legacy-данные из продакшна:
-        49 из 89 тестов (все из октября 2025) имеют creator_id = NULL.
-        На продакшне test_id: 12, 16, 19, 50 — все без создателя.
-        """
-        result = await e2e_db.execute("""
-            UPDATE tests SET creator_id = NULL
-            WHERE name = 'E2E Тест Кофе'
-        """)
-        assert "UPDATE 1" in result, f"Failed to nullify creator_id on 'E2E Тест Кофе': {result}"
-
-    async def test_step7_employee_can_access_test_with_null_creator(self, trainee2: BotClient, shared_state: dict):
-        """
-        КРИТИЧЕСКАЯ ПРОВЕРКА: Сотрудник может открыть тест с creator_id = NULL
-        через "Мои тесты 📋".
-
-        БЕЗ ФИКСА: get_user_by_id(NULL) → None → None.id → AttributeError →
-                    except → return False → "Доступ запрещен"
-        С ФИКСОМ:  проверка TraineeTestAccess → запись существует → return True
-        """
-        await wait_between_actions()
-
-        resp = await trainee2.send_and_wait("Мои тесты 📋", pattern="тест|Тест|Нет тестов|пусто")
-
-        text = resp.text or ""
-
-        # Проверяем, что есть тесты и нет отказа в доступе
-        assert not contains_access_denied(text), (
-            f"BUG REPRODUCED: Employee lost access to tests! Response: {text[:500]}"
-        )
-
-        # Пробуем открыть конкретный тест с creator_id = NULL
-        test_btn = trainee2.find_button_data(resp, text_contains="Кофе", data_prefix="test:")
-        if not test_btn:
-            # Попробуем другие варианты кнопок
-            test_btn = trainee2.find_button_data(resp, text_contains="Кофе", data_prefix="take_test:")
-
-        if test_btn:
-            resp = await trainee2.click_and_wait(
-                resp,
-                data=test_btn,
-                wait_pattern="тест|результат|балл|Кофе|доступ|пройден",
-                timeout=10.0,
-            )
-
-            text = resp.text or ""
-            assert not contains_access_denied(text), (
-                f"BUG REPRODUCED: Employee denied access to test with creator_id=NULL!\n"
-                f"Old code: get_user_by_id(NULL) → None → crash → return False\n"
-                f"Expected: check TraineeTestAccess → exists → return True\n"
-                f"Response: {text[:500]}"
-            )

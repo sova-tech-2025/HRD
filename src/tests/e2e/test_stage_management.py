@@ -2,12 +2,12 @@
 E2E Сценарий 4: Закрытие этапа — согласованность UI и access.
 
 Проверяет, что:
-- Открытие этапа → стажёр видит ⏳
-- Прохождение теста → стажёр видит ✅
-- Закрытие этапа → стажёр видит ❌, но данные не потеряны
+- Открытие этапа -> стажёр видит ⏳
+- Прохождение теста -> стажёр видит ✅
+- Закрытие этапа -> стажёр видит ❌, но данные не потеряны
 - Наставник видит тест как пройденный даже в закрытом этапе
 
-Зависит от предыдущих тестов (Стажёр 1: этап 1 закрыт, тест 1 пройден).
+Зависит от предыдущих тестов (trainee: этап 1 закрыт, тест 1 пройден).
 """
 
 import pytest
@@ -32,62 +32,62 @@ class TestScenario4_StageOpenCloseConsistency:
     Проверяем, что данные о прохождении сохраняются при закрытии/открытии.
     """
 
-    async def test_step1_reopen_stage1(self, mentor: BotClient, shared_state: dict):
-        """Наставник повторно открывает этап 1 для проверки."""
-        await open_mentor_stage(mentor, "Стажёров Первый", stage_number=1)
+    async def test_step1_switch_to_mentor(self, admin: BotClient):
+        """ADMIN переключается в Наставник."""
+        await admin.switch_role("Наставник")
 
-    async def test_step2_trainee_sees_open_stage(self, trainee1: BotClient, shared_state: dict):
-        """Стажёр 1 видит этап 1 как открытый (⏳ или ✅)."""
+    async def test_step2_reopen_stage1(self, admin: BotClient, shared_state: dict):
+        """Наставник повторно открывает этап 1 для проверки."""
+        await open_mentor_stage(admin, "Стажёров Тест", stage_number=1)
+
+    async def test_step3_trainee_sees_open_stage(self, trainee: BotClient, shared_state: dict):
+        """Trainee видит этап 1 как открытый (⏳ или ✅)."""
         await wait_between_actions()
 
-        resp = await trainee1.send_and_wait("Траектория обучения 📖", pattern="[Тт]раектори|этап")
+        resp = await trainee.send_and_wait("Траектория обучения 📖", pattern="[Тт]раектори|этап")
 
         text = resp.text or ""
 
         # Этап 1 должен быть открыт (⏳) или пройден (✅), но НЕ закрыт (❌)
-        # Тест 1 уже пройден, поэтому может быть ✅
         has_open_or_passed = "⏳" in text or "✅" in text
         assert has_open_or_passed, f"Stage 1 should be open (⏳) or passed (✅) after reopening. Got: {text[:500]}"
 
         shared_state["stage1_open_text"] = text
 
-    async def test_step3_close_stage1_again(self, mentor: BotClient, shared_state: dict):
+    async def test_step4_close_stage1_again(self, admin: BotClient, shared_state: dict):
         """Наставник снова закрывает этап 1."""
-        await close_mentor_stage(mentor, "Стажёров Первый", stage_number=1)
+        await close_mentor_stage(admin, "Стажёров Тест", stage_number=1)
 
-    async def test_step4_trainee_sees_closed_stage(self, trainee1: BotClient, shared_state: dict):
-        """Стажёр 1 видит этап 1 как закрытый (❌)."""
+    async def test_step5_trainee_sees_closed_stage(self, trainee: BotClient, shared_state: dict):
+        """Trainee видит этап 1 как закрытый (❌)."""
         await wait_between_actions()
 
-        resp = await trainee1.send_and_wait("Траектория обучения 📖", pattern="[Тт]раектори|этап")
+        resp = await trainee.send_and_wait("Траектория обучения 📖", pattern="[Тт]раектори|этап")
 
         text = resp.text or ""
 
         # Этап 1 должен быть ❌ (закрыт) в UI стажёра — это by design
         assert "❌" in text, f"Stage 1 should show ❌ after closing. Got: {text[:500]}"
 
-    async def test_step5_mentor_progress_shows_closed_stage(self, mentor: BotClient, shared_state: dict):
+    async def test_step6_mentor_progress_shows_closed_stage(self, admin: BotClient, shared_state: dict):
         """
         Наставник видит закрытый этап 1 как ❌ (by design: закрытые этапы
         показывают ❌ для всех тестов, независимо от прохождения).
         """
         await wait_between_actions()
 
-        resp = await mentor.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
+        resp = await admin.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
 
-        # Выбираем стажёра 1
-        trainee_btn = mentor.find_button_data(
-            resp, text_contains="Первый", data_prefix="select_trainee_for_trajectory:"
+        trainee_btn = admin.find_button_data(
+            resp, text_contains="Стажёров", data_prefix="select_trainee_for_trajectory:"
         )
         if not trainee_btn:
-            trainee_btn = mentor.find_button_data(
-                resp, text_contains="Стажёров", data_prefix="select_trainee_for_trajectory:"
+            trainee_btn = admin.find_button_data(
+                resp, text_contains="Тест", data_prefix="select_trainee_for_trajectory:"
             )
-        assert trainee_btn, "Trainee 1 not found"
+        assert trainee_btn, "Trainee not found"
 
-        resp = await mentor.click_and_wait(
-            resp, data=trainee_btn, wait_pattern="[Тт]раектори|прогресс|[Ээ]тап|карточка"
-        )
+        resp = await admin.click_and_wait(resp, data=trainee_btn, wait_pattern="[Тт]раектори|прогресс|[Ээ]тап|карточка")
 
         text = resp.text or ""
 
@@ -95,29 +95,29 @@ class TestScenario4_StageOpenCloseConsistency:
         # возвращает ❌ для всех тестов в закрытом этапе)
         assert "❌" in text, f"Closed stage should show ❌ icons. Got: {text[:500]}"
 
-    async def test_step6_mentor_stage_management_shows_correct_toggle(self, mentor: BotClient, shared_state: dict):
+    async def test_step7_mentor_stage_management_shows_correct_toggle(self, admin: BotClient, shared_state: dict):
         """Управление этапами показывает корректную кнопку для закрытого этапа."""
         await wait_between_actions()
 
-        resp = await mentor.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
+        resp = await admin.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
 
-        trainee_btn = mentor.find_button_data(
-            resp, text_contains="Первый", data_prefix="select_trainee_for_trajectory:"
+        trainee_btn = admin.find_button_data(
+            resp, text_contains="Стажёров", data_prefix="select_trainee_for_trajectory:"
         )
         if not trainee_btn:
-            trainee_btn = mentor.find_button_data(
-                resp, text_contains="Стажёров", data_prefix="select_trainee_for_trajectory:"
+            trainee_btn = admin.find_button_data(
+                resp, text_contains="Тест", data_prefix="select_trainee_for_trajectory:"
             )
-        assert trainee_btn, "Trainee 1 not found"
+        assert trainee_btn, "Trainee not found"
 
-        resp = await mentor.click_and_wait(resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка")
+        resp = await admin.click_and_wait(resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка")
 
         # Управление этапами
-        stages_btn = mentor.find_button_data(resp, data_prefix="manage_stages:")
+        stages_btn = admin.find_button_data(resp, data_prefix="manage_stages:")
         if stages_btn:
-            resp = await mentor.click_and_wait(resp, data=stages_btn, wait_pattern="[Ээ]тап|[Оо]ткрыть|[Зз]акрыть")
+            resp = await admin.click_and_wait(resp, data=stages_btn, wait_pattern="[Ээ]тап|[Оо]ткрыть|[Зз]акрыть")
 
-        buttons = mentor.get_button_texts(resp)
+        buttons = admin.get_button_texts(resp)
 
         # Этап 1 может быть закрыт (кнопка "Открыть") или завершён (✅)
         has_open_or_completed = any(
