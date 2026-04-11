@@ -32,6 +32,12 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - DEFAULT_ROLE=${DEFAULT_ROLE:-Стажер}
       - MANAGER_IDS=${MANAGER_IDS:-}
+      - PROXY_ENABLED=${PROXY_ENABLED:-false}
+      - PROXY_TYPE=${PROXY_TYPE:-socks5}
+      - PROXY_HOST=${PROXY_HOST:-}
+      - PROXY_PORT=${PROXY_PORT:-}
+      - PROXY_LOGIN=${PROXY_LOGIN:-}
+      - PROXY_PASSWORD=${PROXY_PASSWORD:-}
     volumes:
       - ./logs:/app/logs
     networks:

@@ -4,10 +4,19 @@ import sys
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from bot.config import BOT_TOKEN
+from bot.config import (
+    BOT_TOKEN,
+    PROXY_ENABLED,
+    PROXY_HOST,
+    PROXY_LOGIN,
+    PROXY_PASSWORD,
+    PROXY_PORT,
+    PROXY_TYPE,
+)
 from bot.database.db import init_db
 from bot.handlers import fallback
 from bot.handlers.company import company, groups, objects
@@ -34,7 +43,18 @@ root_handler = logging.StreamHandler(sys.stdout)
 root_handler.setFormatter(log_format)
 root_logger.addHandler(root_handler)
 
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+# Настройка прокси для Telegram API
+session = None
+if PROXY_ENABLED and PROXY_HOST and PROXY_PORT:
+    protocol = "https" if PROXY_TYPE == "https" else "socks5"
+    if PROXY_LOGIN and PROXY_PASSWORD:
+        proxy_url = f"{protocol}://{PROXY_LOGIN}:{PROXY_PASSWORD}@{PROXY_HOST}:{PROXY_PORT}"
+    else:
+        proxy_url = f"{protocol}://{PROXY_HOST}:{PROXY_PORT}"
+    session = AiohttpSession(proxy=proxy_url)
+    logger.info(f"Прокси включён: {protocol}://{PROXY_HOST}:{PROXY_PORT}")
+
+bot = Bot(token=BOT_TOKEN, session=session, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
