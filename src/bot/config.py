@@ -35,6 +35,17 @@ MANAGER_IDS = [int(id.strip()) for id in MANAGER_IDS_STR.split(",") if id.strip(
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
+# =================================================================
+# ПРОКСИ ДЛЯ TELEGRAM API
+# =================================================================
+
+PROXY_ENABLED = os.getenv("PROXY_ENABLED", "false").lower() in ("true", "1", "yes")
+PROXY_TYPE = os.getenv("PROXY_TYPE", "socks5").lower()  # socks5 или https
+PROXY_HOST = os.getenv("PROXY_HOST", "")
+PROXY_PORT = os.getenv("PROXY_PORT", "")
+PROXY_LOGIN = os.getenv("PROXY_LOGIN", "")
+PROXY_PASSWORD = os.getenv("PROXY_PASSWORD", "")
+
 # Роль по умолчанию для новых пользователей
 DEFAULT_ROLE = os.getenv("DEFAULT_ROLE", "Стажер")
 
