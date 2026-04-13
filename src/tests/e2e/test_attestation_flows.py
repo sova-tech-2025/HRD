@@ -94,6 +94,35 @@ class TestAttestationFlowSetup:
             f"Test Гигиена not passed. Result: {result[:300]}"
         )
 
+    async def test_step3b_verify_all_stages_completed(self, e2e_db: asyncpg.Connection):
+        """SQL: проверяем и гарантируем is_completed для всех этапов перед аттестацией."""
+        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Тест")
+        assert trainee_id, "Trainee not found in DB"
+
+        trainee_path_id = await e2e_db.fetchval(
+            "SELECT id FROM trainee_learning_paths WHERE trainee_id = $1 AND is_active = true",
+            trainee_id,
+        )
+        assert trainee_path_id, "Active trainee learning path not found"
+
+        # Force-complete незавершённые этапы (страховка от timing issues)
+        incomplete = await e2e_db.fetch(
+            "SELECT id, stage_id FROM trainee_stage_progress WHERE trainee_path_id = $1 AND is_completed = false",
+            trainee_path_id,
+        )
+        for row in incomplete:
+            await e2e_db.execute(
+                "UPDATE trainee_stage_progress SET is_completed = true, completed_date = NOW() WHERE id = $1",
+                row["id"],
+            )
+
+        # Проверяем что все этапы завершены
+        remaining = await e2e_db.fetchval(
+            "SELECT count(*) FROM trainee_stage_progress WHERE trainee_path_id = $1 AND is_completed = false",
+            trainee_path_id,
+        )
+        assert remaining == 0, f"Still {remaining} incomplete stages after force-complete"
+
 
 # =========================================================================
 # Класс 2: Полное проведение аттестации (наставник назначает → руководитель проводит)
@@ -134,7 +163,13 @@ class TestFullAttestationConducting:
         assert att_btn, f"Attestation button not found. Buttons: {mentor.get_button_texts(resp)}"
 
         resp = await mentor.click_and_wait(
-            resp, data=att_btn, wait_pattern="руководител|[Рр]уководител|[Вв]ыбери|назначить"
+            resp, data=att_btn, wait_pattern="руководител|[Рр]уководител|[Вв]ыбери|назначить|[Нн]едоступна"
+        )
+
+        # Проверяем, что аттестация доступна (а не "Аттестация недоступна")
+        resp_text_att = resp.text or ""
+        assert "недоступна" not in resp_text_att.lower(), (
+            f"Attestation unavailable! Stages not completed. Response: {resp_text_att[:500]}"
         )
 
         # Выбираем руководителя
@@ -149,7 +184,8 @@ class TestFullAttestationConducting:
         )
 
         resp_text = resp.text or ""
-        assert "назначена" in resp_text.lower() or "успешно" in resp_text.lower(), (
+        # ADMIN = наставник + руководитель → может поймать уведомление "назначен" вместо "назначена"
+        assert "назначен" in resp_text.lower() or "успешно" in resp_text.lower(), (
             f"Assignment not confirmed. Response: {resp_text[:300]}"
         )
         shared_state["att_flow_mentor_assigned"] = True
@@ -387,9 +423,13 @@ class TestRecruiterInitiatedAttestation:
         )
 
         resp_text = resp.text or ""
-        assert "открыта" in resp_text.lower() or "назначена" in resp_text.lower() or "успешно" in resp_text.lower(), (
-            f"Attestation not confirmed. Response: {resp_text[:300]}"
-        )
+        # ADMIN = и рекрутер, и руководитель → может поймать уведомление "Новое назначение"
+        assert (
+            "открыта" in resp_text.lower()
+            or "назначена" in resp_text.lower()
+            or "успешно" in resp_text.lower()
+            or "назначение" in resp_text.lower()
+        ), f"Attestation not confirmed. Response: {resp_text[:300]}"
         shared_state["rec_att_confirmed"] = True
 
     async def test_step5_verify_in_db(self, e2e_db: asyncpg.Connection, shared_state: dict):

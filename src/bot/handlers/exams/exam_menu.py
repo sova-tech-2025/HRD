@@ -28,12 +28,21 @@ def _user_has_role(user, role_name: str) -> bool:
     return any(r.name == role_name for r in user.roles)
 
 
-async def _get_user_exam_roles(user) -> dict:
-    """Определяет ролевые флаги пользователя для экзаменов"""
-    is_recruiter = _user_has_role(user, "Рекрутер")
-    is_mentor = _user_has_role(user, "Наставник")
-    is_manager = _user_has_role(user, "Руководитель")
-    is_employee = _user_has_role(user, "Сотрудник")
+async def _get_user_exam_roles(user, active_role: str = None) -> dict:
+    """Определяет ролевые флаги пользователя для экзаменов.
+
+    Если active_role задан (ADMIN в определённом ЛК), используем только эту роль.
+    """
+    if active_role:
+        is_recruiter = active_role == "Рекрутер"
+        is_mentor = active_role == "Наставник"
+        is_manager = active_role == "Руководитель"
+        is_employee = active_role == "Сотрудник"
+    else:
+        is_recruiter = _user_has_role(user, "Рекрутер")
+        is_mentor = _user_has_role(user, "Наставник")
+        is_manager = _user_has_role(user, "Руководитель")
+        is_employee = _user_has_role(user, "Сотрудник")
     # Экзаменатор: руководитель, сотрудник или рекрутер
     is_examiner = is_manager or is_employee or is_recruiter
     return {
@@ -57,8 +66,9 @@ async def show_exam_menu(message_or_callback, state: FSMContext, session: AsyncS
         if not user:
             return
 
-        roles = await _get_user_exam_roles(user)
         data = await state.get_data()
+        active_role = data.get("role") if data.get("is_admin") else None
+        roles = await _get_user_exam_roles(user, active_role=active_role)
         company_id = data.get("company_id")
 
         exams = await AssessmentRepository(session).get_all(company_id, assessment_type="exam")
@@ -94,8 +104,14 @@ async def cmd_exams(message: Message, state: FSMContext, session: AsyncSession):
             await message.answer("Ты не зарегистрирован в системе.")
             return
 
-        # Стажёрам экзамены недоступны
-        if _user_has_role(user, "Стажер") or _user_has_role(user, "Стажёр"):
+        # Стажёрам экзамены недоступны (ADMIN: проверяем FSM-роль)
+        data = await state.get_data()
+        active_role = data.get("role") if data.get("is_admin") else None
+        if active_role:
+            if active_role in ("Стажер", "Стажёр"):
+                await message.answer("❌ Экзамены не доступны для стажёров.")
+                return
+        elif _user_has_role(user, "Стажер") or _user_has_role(user, "Стажёр"):
             await message.answer("❌ Экзамены не доступны для стажёров.")
             return
 
@@ -357,7 +373,8 @@ async def callback_exam_view(callback: CallbackQuery, state: FSMContext, session
             return
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
-        roles = await _get_user_exam_roles(user)
+        active_role = data.get("role") if data.get("is_admin") else None
+        roles = await _get_user_exam_roles(user, active_role=active_role)
 
         # Формируем текст карточки
         questions_text = ""

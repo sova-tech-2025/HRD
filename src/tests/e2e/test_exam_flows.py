@@ -15,6 +15,7 @@ E2E Сценарий 9: Полные flow экзаменов по ролям.
 Зависит от test_attestation_flows.py (order=8).
 """
 
+import asyncpg  # noqa: F401
 import pytest
 
 from tests.e2e.helpers.bot_client import BotClient
@@ -25,6 +26,51 @@ pytestmark = [
     pytest.mark.timeout(600),
     pytest.mark.asyncio(loop_scope="session"),
 ]
+
+
+# =========================================================================
+# Класс 0: Подготовка — промоушн trainee в Сотрудник
+# =========================================================================
+
+
+class TestExamSetup:
+    """Переводим trainee из Стажер в Сотрудник перед экзаменными тестами."""
+
+    async def test_promote_trainee_to_employee(self, e2e_db: asyncpg.Connection, shared_state: dict):
+        """SQL: добавляем роль Сотрудник, удаляем Стажер, деактивируем траекторию."""
+        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Тест")
+        assert trainee_id, "Trainee 'Стажёров Тест' not found in DB"
+
+        # Добавляем роль Сотрудник
+        employee_role_id = await e2e_db.fetchval("SELECT id FROM roles WHERE name = 'Сотрудник'")
+        assert employee_role_id, "Role 'Сотрудник' not found"
+
+        exists = await e2e_db.fetchval(
+            "SELECT 1 FROM user_roles WHERE user_id = $1 AND role_id = $2",
+            trainee_id,
+            employee_role_id,
+        )
+        if not exists:
+            await e2e_db.execute(
+                "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)",
+                trainee_id,
+                employee_role_id,
+            )
+
+        # Удаляем роль Стажер/Стажёр
+        await e2e_db.execute(
+            "DELETE FROM user_roles WHERE user_id = $1 AND role_id IN "
+            "(SELECT id FROM roles WHERE name IN ('Стажер', 'Стажёр'))",
+            trainee_id,
+        )
+
+        # Деактивируем траекторию (сотрудники не имеют активных траекторий)
+        await e2e_db.execute(
+            "UPDATE trainee_learning_paths SET is_active = false WHERE trainee_id = $1",
+            trainee_id,
+        )
+
+        shared_state["trainee_promoted"] = True
 
 
 # =========================================================================

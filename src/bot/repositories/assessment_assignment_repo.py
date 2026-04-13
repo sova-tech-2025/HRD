@@ -311,10 +311,13 @@ class AssessmentAssignmentRepository(BaseRepository):
                 logger.warning(f"У стажера {trainee_id} нет назначенной траектории")
                 return False
 
-            # Получаем все этапы траектории
+            # Получаем все активные этапы траектории (прогресс создаётся только для is_active=True)
             stages_result = await self.session.execute(
                 select(LearningStage)
-                .where(LearningStage.learning_path_id == trainee_path.learning_path_id)
+                .where(
+                    LearningStage.learning_path_id == trainee_path.learning_path_id,
+                    LearningStage.is_active == True,  # noqa: E712
+                )
                 .order_by(LearningStage.order_number)
             )
             all_stages = stages_result.scalars().all()
