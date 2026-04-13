@@ -117,6 +117,7 @@ async def init_db():
             logger.error(f"Ошибка при создании компании по умолчанию или миграции пользователей: {e}")
             await session.rollback()
 
+    await ensure_admin_role()
     await update_role_permissions_for_existing_db()
     await migrate_new_tables()
     await update_existing_users_role_date()
@@ -135,6 +136,7 @@ async def create_initial_data():
                 Role(name="Стажер", description="Новый сотрудник на испытательном сроке"),
                 Role(name="Сотрудник", description="Постоянный работник компании после прохождения аттестации"),
                 Role(name="Руководитель", description="Руководитель для проведения аттестаций стажеров"),
+                Role(name="ADMIN", description="Мульти-роль для тестирования (назначается через БД)"),
             ]
             session.add_all(roles)
 
@@ -367,6 +369,22 @@ async def update_existing_users_role_date():
                 logger.info(f"Обновлена дата назначения роли для {updated_count} пользователей")
         except Exception as e:
             logger.error(f"Ошибка обновления даты назначения роли: {e}")
+            await session.rollback()
+
+
+async def ensure_admin_role():
+    """Создание роли ADMIN если её нет (для существующих БД)."""
+    async with async_session() as session:
+        try:
+            result = await session.execute(select(Role).where(Role.name == "ADMIN"))
+            if result.scalar_one_or_none() is None:
+                session.add(Role(name="ADMIN", description="Мульти-роль для тестирования (назначается через БД)"))
+                await session.commit()
+                logger.info("Роль ADMIN создана")
+            else:
+                logger.info("Роль ADMIN уже существует")
+        except Exception as e:
+            logger.error(f"Ошибка создания роли ADMIN: {e}")
             await session.rollback()
 
 
