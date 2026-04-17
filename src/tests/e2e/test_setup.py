@@ -242,16 +242,6 @@ class TestAdminRoleSetup:
             if not exists:
                 await e2e_db.execute("INSERT INTO user_groups (user_id, group_id) VALUES ($1, $2)", user_id, group_id)
 
-        obj_id = await e2e_db.fetchval(
-            "SELECT id FROM objects WHERE company_id = (SELECT company_id FROM users WHERE id = $1) LIMIT 1", user_id
-        )
-        if obj_id:
-            exists = await e2e_db.fetchval(
-                "SELECT 1 FROM user_objects WHERE user_id = $1 AND object_id = $2", user_id, obj_id
-            )
-            if not exists:
-                await e2e_db.execute("INSERT INTO user_objects (user_id, object_id) VALUES ($1, $2)", user_id, obj_id)
-
         shared_state["admin_user_id"] = user_id
         shared_state["admin_tg_id"] = me.id
 

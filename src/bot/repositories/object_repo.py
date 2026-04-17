@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, or_, select
 
-from bot.database.models import Object, User, user_objects
+from bot.database.models import Object, User
 from bot.repositories.base import BaseRepository
 from bot.utils.logger import logger
 
@@ -13,8 +13,8 @@ class ObjectRepository(BaseRepository):
     async def delete(self, object_id: int, company_id: int) -> bool:
         """Мягкое удаление объекта с проверкой зависимостей.
 
-        Проверяет: нет активных пользователей привязанных к объекту.
-        При удалении: soft delete объекта + hard delete M2M ассоциаций.
+        Проверяет: нет активных пользователей привязанных к объекту
+        (через internship_object_id / work_object_id).
         """
         try:
             # Проверяем существование объекта
@@ -30,13 +30,12 @@ class ObjectRepository(BaseRepository):
                 logger.error(f"Объект {object_id} не найден")
                 return False
 
-            # Проверяем: нет активных пользователей
+            # Проверяем: нет активных пользователей привязанных к объекту
             users_count = await self.session.execute(
                 select(func.count())
                 .select_from(User)
-                .join(user_objects, User.id == user_objects.c.user_id)
                 .where(
-                    user_objects.c.object_id == object_id,
+                    or_(User.internship_object_id == object_id, User.work_object_id == object_id),
                     User.is_active == True,  # noqa: E712
                     User.company_id == company_id,
                 )
@@ -48,9 +47,6 @@ class ObjectRepository(BaseRepository):
             # Soft delete объекта
             if not await self._soft_delete(Object, object_id, company_id):
                 return False
-
-            # Hard delete M2M ассоциаций
-            await self.session.execute(delete(user_objects).where(user_objects.c.object_id == object_id))
 
             await self.session.commit()
             logger.info(f"Объект {object_id} '{obj.name}' мягко удален")

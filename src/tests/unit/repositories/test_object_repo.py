@@ -50,17 +50,15 @@ class TestDelete:
         obj_mock.id = 1
         obj_mock.name = "Кафе на Арбате"
 
-        # execute вызывается 4 раза:
+        # execute вызывается 3 раза:
         # 1. SELECT Object -> scalar_one_or_none (found)
         # 2. SELECT count() users -> scalar() = 0
         # 3. _soft_delete(Object) -> rowcount=1
-        # 4. DELETE user_objects
         session.execute = AsyncMock(
             side_effect=[
                 make_scalar_one_or_none_result(obj_mock),  # object found
                 make_count_result(0),  # users count
                 make_update_result(1),  # _soft_delete
-                MagicMock(),  # DELETE user_objects
             ]
         )
 

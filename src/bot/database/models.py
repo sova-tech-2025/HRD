@@ -35,14 +35,6 @@ user_groups = Table(
     Column("group_id", Integer, ForeignKey("groups.id"), primary_key=True),
 )
 
-# Ассоциативная таблица для связи many-to-many между пользователями и объектами
-user_objects = Table(
-    "user_objects",
-    Base.metadata,
-    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
-    Column("object_id", Integer, ForeignKey("objects.id"), primary_key=True),
-)
-
 
 class User(Base):
     """Модель пользователя"""
@@ -65,7 +57,6 @@ class User(Base):
 
     roles = relationship("Role", secondary=user_roles, back_populates="users")
     groups = relationship("Group", secondary=user_groups, back_populates="users")
-    objects = relationship("Object", secondary=user_objects, back_populates="users")
     company = relationship("Company", foreign_keys=[company_id], back_populates="users")
 
     # Связи для объектов стажировки и работы
@@ -177,7 +168,6 @@ class Object(Base):
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)  # Компания объекта
 
     # Связи
-    users = relationship("User", secondary=user_objects, back_populates="objects")
     created_by = relationship("User", foreign_keys=[created_by_id])
     company = relationship("Company")
 
