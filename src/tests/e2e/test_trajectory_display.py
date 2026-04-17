@@ -5,7 +5,7 @@ E2E Сценарий 3: Переназначение траектории — п
 SessionProgress и TestAccess удаляются и создаются заново.
 Стажёр должен увидеть все тесты как непройденные после переназначения.
 
-Зависит от test_setup.py и test_check_test_access.py (Стажёр 1 уже прошёл тест 1).
+Зависит от test_setup.py и test_check_test_access.py (trainee уже прошёл тест 1).
 """
 
 import pytest
@@ -30,69 +30,71 @@ class TestScenario3_TrajectoryReassignment:
     Ожидание: после переназначения ✅ исчезают, все тесты становятся непройденными.
     """
 
-    async def test_step1_verify_trainee1_sees_passed_test(self, trainee1: BotClient, shared_state: dict):
-        """Стажёр 1 видит пройденный тест как ✅ в траектории (до переназначения)."""
+    async def test_step1_verify_trainee_sees_passed_test(self, trainee: BotClient, shared_state: dict):
+        """Trainee видит пройденный тест как ✅ в траектории (до переназначения)."""
         await wait_between_actions()
 
-        resp = await trainee1.send_and_wait("Траектория обучения 📖", pattern="[Тт]раектори|этап")
+        resp = await trainee.send_and_wait("Траектория обучения 📖", pattern="[Тт]раектори|этап")
 
         text = resp.text or ""
 
         # Проверяем наличие статуса ✅ (тест 1 был пройден в сценарии 1)
         has_passed = "✅" in text
         # Допустимо, что ✅ может быть на уровне этапа или теста
-        assert has_passed or "Кофе" in text, f"Trainee1's trajectory should show passed test. Got: {text[:500]}"
+        assert has_passed or "Кофе" in text, f"Trainee's trajectory should show passed test. Got: {text[:500]}"
 
-        shared_state["trainee1_trajectory_before"] = text
+        shared_state["trainee_trajectory_before"] = text
 
-    async def test_step2_reassign_same_trajectory(self, mentor: BotClient, shared_state: dict):
+    async def test_step2_switch_to_mentor(self, admin: BotClient):
+        """ADMIN переключается в Наставник для переназначения."""
+        await admin.switch_role("Наставник")
+
+    async def test_step3_reassign_same_trajectory(self, admin: BotClient, shared_state: dict):
         """
-        Наставник переназначает ту же траекторию Стажёру 1.
+        Наставник переназначает ту же траекторию trainee.
 
         Теперь это полное пересоздание — все результаты и прогресс обнуляются.
         """
         await wait_between_actions()
 
-        resp = await mentor.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
+        resp = await admin.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
 
-        # Выбираем стажёра 1
-        trainee_btn = mentor.find_button_data(
-            resp, text_contains="Первый", data_prefix="select_trainee_for_trajectory:"
+        trainee_btn = admin.find_button_data(
+            resp, text_contains="Стажёров", data_prefix="select_trainee_for_trajectory:"
         )
         if not trainee_btn:
-            trainee_btn = mentor.find_button_data(
-                resp, text_contains="Стажёров", data_prefix="select_trainee_for_trajectory:"
+            trainee_btn = admin.find_button_data(
+                resp, text_contains="Тест", data_prefix="select_trainee_for_trajectory:"
             )
-        assert trainee_btn, "Trainee 1 not found in mentor's list"
+        assert trainee_btn, "Trainee not found in mentor's list"
 
-        resp = await mentor.click_and_wait(resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка")
+        resp = await admin.click_and_wait(resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка")
 
         # Нажимаем "Поменять траекторию" (change_trajectory:)
-        change_btn = mentor.find_button_data(resp, data_prefix="change_trajectory:")
+        change_btn = admin.find_button_data(resp, data_prefix="change_trajectory:")
         if not change_btn:
-            # Fallback: стажёр без траектории — кнопки assign_trajectory: напрямую
-            change_btn = mentor.find_button_data(resp, text_contains="E2E Траектория", data_prefix="assign_trajectory:")
+            change_btn = admin.find_button_data(resp, text_contains="E2E Траектория", data_prefix="assign_trajectory:")
 
         if not change_btn:
             pytest.skip("Trajectory change button not found — UI may differ")
 
-        resp = await mentor.click_and_wait(
+        resp = await admin.click_and_wait(
             resp, data=change_btn, wait_pattern="[Уу]верен|[Зз]амен|[Тт]раектори|назначена"
         )
 
         # Подтверждаем замену (confirm_change_trajectory:)
-        confirm_btn = mentor.find_button_data(resp, data_prefix="confirm_change_trajectory:")
+        confirm_btn = admin.find_button_data(resp, data_prefix="confirm_change_trajectory:")
         if confirm_btn:
-            resp = await mentor.click_and_wait(resp, data=confirm_btn, wait_pattern="[Тт]раектори|[Вв]ыбери")
+            resp = await admin.click_and_wait(resp, data=confirm_btn, wait_pattern="[Тт]раектори|[Вв]ыбери")
 
         # Выбираем ту же траекторию (assign_trajectory:)
-        same_traj_btn = mentor.find_button_data(resp, text_contains="E2E Траектория", data_prefix="assign_trajectory:")
+        same_traj_btn = admin.find_button_data(resp, text_contains="E2E Траектория", data_prefix="assign_trajectory:")
         if same_traj_btn:
-            resp = await mentor.click_and_wait(
+            resp = await admin.click_and_wait(
                 resp, data=same_traj_btn, wait_pattern="назначена|Какой этап|открыть стажеру"
             )
 
-    async def test_step3_trainee1_sees_reset_progress(self, trainee1: BotClient, shared_state: dict):
+    async def test_step4_trainee_sees_reset_progress(self, trainee: BotClient, shared_state: dict):
         """
         КРИТИЧЕСКАЯ ПРОВЕРКА: После переназначения все тесты сброшены.
 
@@ -100,35 +102,31 @@ class TestScenario3_TrajectoryReassignment:
         """
         await wait_between_actions()
 
-        resp = await trainee1.send_and_wait("Траектория обучения 📖", pattern="[Тт]раектори|этап")
+        resp = await trainee.send_and_wait("Траектория обучения 📖", pattern="[Тт]раектори|этап")
 
         text = resp.text or ""
 
         # После полного сброса не должно быть ✅ (все тесты не пройдены)
         assert "✅" not in text, f"After reassignment, all progress should be reset (no ✅). Got: {text[:500]}"
 
-    async def test_step4_mentor_sees_reset_status(self, mentor: BotClient, shared_state: dict):
+    async def test_step5_mentor_sees_reset_status(self, admin: BotClient, shared_state: dict):
         """Наставник видит сброшенный прогресс стажёра (нет ✅)."""
         await wait_between_actions()
 
-        resp = await mentor.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
+        resp = await admin.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
 
-        # Выбираем стажёра 1
-        trainee_btn = mentor.find_button_data(
-            resp, text_contains="Первый", data_prefix="select_trainee_for_trajectory:"
+        trainee_btn = admin.find_button_data(
+            resp, text_contains="Стажёров", data_prefix="select_trainee_for_trajectory:"
         )
         if not trainee_btn:
-            trainee_btn = mentor.find_button_data(
-                resp, text_contains="Стажёров", data_prefix="select_trainee_for_trajectory:"
+            trainee_btn = admin.find_button_data(
+                resp, text_contains="Тест", data_prefix="select_trainee_for_trajectory:"
             )
-        assert trainee_btn, "Trainee 1 not found"
+        assert trainee_btn, "Trainee not found"
 
-        resp = await mentor.click_and_wait(
-            resp, data=trainee_btn, wait_pattern="[Тт]раектори|прогресс|[Ээ]тап|карточка"
-        )
+        resp = await admin.click_and_wait(resp, data=trainee_btn, wait_pattern="[Тт]раектори|прогресс|[Ээ]тап|карточка")
 
         text = resp.text or ""
 
         # Наставник тоже должен видеть сброшенный прогресс
-        # Все этапы закрыты (❌) или пустые (нет ✅)
         assert "✅" not in text, f"Mentor's view should show reset progress (no ✅). Got: {text[:500]}"

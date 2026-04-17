@@ -50,11 +50,8 @@ def e2e_config() -> dict:
         "api_hash": os.environ["E2E_API_HASH"],
         "bot_token": os.environ["E2E_BOT_TOKEN"],
         "bot_username": os.environ["E2E_BOT_USERNAME"],
-        "phone_recruiter": os.environ["E2E_PHONE_RECRUITER"],
-        "phone_mentor": os.environ["E2E_PHONE_MENTOR"],
-        "phone_manager": os.environ["E2E_PHONE_MANAGER"],
-        "phone_trainee1": os.environ["E2E_PHONE_TRAINEE_1"],
-        "phone_trainee2": os.environ["E2E_PHONE_TRAINEE_2"],
+        "phone_admin": os.environ["E2E_PHONE_ADMIN"],
+        "phone_trainee": os.environ["E2E_PHONE_TRAINEE"],
         "db_host": os.getenv("E2E_POSTGRES_HOST", "localhost"),
         "db_port": int(os.getenv("E2E_POSTGRES_PORT", "5433")),
         "db_name": os.getenv("E2E_POSTGRES_DB", "hrd_e2e_test"),
@@ -104,36 +101,15 @@ async def _create_client(api_id: int, api_hash: str, session_name: str) -> Teleg
 
 
 @pytest_asyncio.fixture(scope="session")
-async def recruiter_client(e2e_config) -> TelegramClient:
-    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "recruiter")
+async def admin_client(e2e_config) -> TelegramClient:
+    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "admin")
     yield client
     await client.disconnect()
 
 
 @pytest_asyncio.fixture(scope="session")
-async def mentor_client(e2e_config) -> TelegramClient:
-    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "mentor")
-    yield client
-    await client.disconnect()
-
-
-@pytest_asyncio.fixture(scope="session")
-async def manager_client(e2e_config) -> TelegramClient:
-    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "manager")
-    yield client
-    await client.disconnect()
-
-
-@pytest_asyncio.fixture(scope="session")
-async def trainee1_client(e2e_config) -> TelegramClient:
-    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "trainee1")
-    yield client
-    await client.disconnect()
-
-
-@pytest_asyncio.fixture(scope="session")
-async def trainee2_client(e2e_config) -> TelegramClient:
-    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "trainee2")
+async def trainee_client(e2e_config) -> TelegramClient:
+    client = await _create_client(e2e_config["api_id"], e2e_config["api_hash"], "trainee")
     yield client
     await client.disconnect()
 
@@ -157,33 +133,45 @@ async def _resolve_bot(client: TelegramClient, config: dict):
 
 
 @pytest_asyncio.fixture(scope="session")
-async def recruiter(recruiter_client, e2e_config) -> BotClient:
-    entity = await _resolve_bot(recruiter_client, e2e_config)
-    return BotClient(recruiter_client, entity, name="recruiter")
+async def admin(admin_client, e2e_config) -> BotClient:
+    entity = await _resolve_bot(admin_client, e2e_config)
+    return BotClient(admin_client, entity, name="admin")
 
 
 @pytest_asyncio.fixture(scope="session")
-async def mentor(mentor_client, e2e_config) -> BotClient:
-    entity = await _resolve_bot(mentor_client, e2e_config)
-    return BotClient(mentor_client, entity, name="mentor")
+async def trainee(trainee_client, e2e_config) -> BotClient:
+    entity = await _resolve_bot(trainee_client, e2e_config)
+    return BotClient(trainee_client, entity, name="trainee")
 
 
-@pytest_asyncio.fixture(scope="session")
-async def manager(manager_client, e2e_config) -> BotClient:
-    entity = await _resolve_bot(manager_client, e2e_config)
-    return BotClient(manager_client, entity, name="manager")
+# --------------------------------------------------------------------------
+# Алиасы для обратной совместимости (постепенная миграция тестов)
+# --------------------------------------------------------------------------
 
 
-@pytest_asyncio.fixture(scope="session")
-async def trainee1(trainee1_client, e2e_config) -> BotClient:
-    entity = await _resolve_bot(trainee1_client, e2e_config)
-    return BotClient(trainee1_client, entity, name="trainee1")
+@pytest.fixture(scope="session")
+def recruiter(admin):
+    return admin
 
 
-@pytest_asyncio.fixture(scope="session")
-async def trainee2(trainee2_client, e2e_config) -> BotClient:
-    entity = await _resolve_bot(trainee2_client, e2e_config)
-    return BotClient(trainee2_client, entity, name="trainee2")
+@pytest.fixture(scope="session")
+def mentor(admin):
+    return admin
+
+
+@pytest.fixture(scope="session")
+def manager(admin):
+    return admin
+
+
+@pytest.fixture(scope="session")
+def trainee1(trainee):
+    return trainee
+
+
+@pytest.fixture(scope="session")
+def trainee2(trainee):
+    return trainee
 
 
 # --------------------------------------------------------------------------

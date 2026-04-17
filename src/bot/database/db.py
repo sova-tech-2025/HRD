@@ -40,9 +40,9 @@ from bot.database.models import (
     role_permissions,
     session_tests,
     user_groups,
-    user_objects,
     user_roles,
 )
+from bot.repositories.admin_repo import admin_inclusive_role_filter
 from bot.utils.formatters.trajectory import generate_trajectory_progress_with_attestation_status
 from bot.utils.logger import logger
 from bot.utils.timezone import moscow_now
@@ -116,6 +116,7 @@ async def init_db():
             logger.error(f"Ошибка при создании компании по умолчанию или миграции пользователей: {e}")
             await session.rollback()
 
+    await ensure_admin_role()
     await update_role_permissions_for_existing_db()
     await migrate_new_tables()
     await update_existing_users_role_date()
@@ -134,6 +135,7 @@ async def create_initial_data():
                 Role(name="Стажер", description="Новый сотрудник на испытательном сроке"),
                 Role(name="Сотрудник", description="Постоянный работник компании после прохождения аттестации"),
                 Role(name="Руководитель", description="Руководитель для проведения аттестаций стажеров"),
+                Role(name="ADMIN", description="Мульти-роль для тестирования (назначается через БД)"),
             ]
             session.add_all(roles)
 
@@ -369,6 +371,22 @@ async def update_existing_users_role_date():
             await session.rollback()
 
 
+async def ensure_admin_role():
+    """Создание роли ADMIN если её нет (для существующих БД)."""
+    async with async_session() as session:
+        try:
+            result = await session.execute(select(Role).where(Role.name == "ADMIN"))
+            if result.scalar_one_or_none() is None:
+                session.add(Role(name="ADMIN", description="Мульти-роль для тестирования (назначается через БД)"))
+                await session.commit()
+                logger.info("Роль ADMIN создана")
+            else:
+                logger.info("Роль ADMIN уже существует")
+        except Exception as e:
+            logger.error(f"Ошибка создания роли ADMIN: {e}")
+            await session.rollback()
+
+
 async def update_role_permissions_for_existing_db():
     """Обновление прав ролей для существующих баз данных"""
     async with async_session() as session:
@@ -512,6 +530,11 @@ async def create_user_without_role(session: AsyncSession, user_data: dict, bot=N
 
 
 async def check_user_permission(session: AsyncSession, user_id: int, permission_name: str) -> bool:
+    from bot.repositories.admin_repo import is_admin_user
+
+    if await is_admin_user(session, user_id):
+        return True
+
     stmt = (
         select(func.count())
         .select_from(User)
@@ -621,7 +644,7 @@ async def get_all_trainees(session: AsyncSession, company_id: int = None) -> Lis
             .join(user_roles, User.id == user_roles.c.user_id)
             .join(Role, user_roles.c.role_id == Role.id)
             .where(
-                Role.name == "Стажер",
+                admin_inclusive_role_filter(["Стажер"]),
                 User.is_activated == True,  # noqa: E712
                 User.is_active == True,  # noqa: E712
             )
@@ -725,7 +748,7 @@ async def get_unactivated_users(session: AsyncSession, company_id: int = None) -
         query = (
             select(User)
             .where(User.is_activated == False, User.is_active == True)  # noqa: E712
-            .where(~User.roles.any(Role.name.in_(["Руководитель", "Рекрутер"])))
+            .where(~User.roles.any(Role.name.in_(["Руководитель", "Рекрутер", "ADMIN"])))
         )
 
         if company_id is not None:
@@ -1488,41 +1511,14 @@ async def update_object_name(session: AsyncSession, object_id: int, new_name: st
 
 
 async def get_object_users(session: AsyncSession, object_id: int, company_id: int = None) -> List[User]:
-    """Получение всех пользователей объекта (включая объект стажировки и работы) (с изоляцией по компании)"""
+    """Получение всех пользователей объекта (по internship_object_id / work_object_id) (с изоляцией по компании)"""
     try:
-        # Получаем объект для проверки company_id
         if company_id is None:
             obj = await get_object_by_id(session, object_id)
             if obj:
                 company_id = obj.company_id
 
-        # Получаем пользователей через таблицу user_objects
-        query1 = (
-            select(User)
-            .join(user_objects)
-            .where(
-                user_objects.c.object_id == object_id,
-                User.is_activated == True,
-                User.is_active == True,  # noqa: E712
-            )
-        )
-
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            query1 = query1.where(User.company_id == company_id)
-
-        result1 = await session.execute(
-            query1.options(
-                selectinload(User.roles),
-                selectinload(User.groups),
-                selectinload(User.internship_object),
-                selectinload(User.work_object),
-            ).order_by(User.full_name)
-        )
-        users_by_objects = result1.scalars().all()
-
-        # Получаем пользователей, у которых этот объект указан как объект стажировки или работы
-        query2 = select(User).where(
+        query = select(User).where(
             or_(User.internship_object_id == object_id, User.work_object_id == object_id),
             User.is_activated == True,  # noqa: E712
             User.is_active == True,  # noqa: E712
@@ -1530,106 +1526,24 @@ async def get_object_users(session: AsyncSession, object_id: int, company_id: in
 
         # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
         if company_id is not None:
-            query2 = query2.where(User.company_id == company_id)
+            query = query.where(User.company_id == company_id)
 
-        result2 = await session.execute(
-            query2.options(
+        result = await session.execute(
+            query.options(
                 selectinload(User.roles),
                 selectinload(User.groups),
                 selectinload(User.internship_object),
                 selectinload(User.work_object),
             ).order_by(User.full_name)
         )
-        users_by_direct = result2.scalars().all()
+        users = result.scalars().all()
 
-        # Объединяем и убираем дубликаты
-        all_users = {}
-        for user in users_by_objects + users_by_direct:
-            all_users[user.id] = user
-
-        # Сортируем по ФИО
-        sorted_users = sorted(all_users.values(), key=lambda u: u.full_name)
-
-        logger.info(f"Получено {len(sorted_users)} пользователей для объекта {object_id}")
-        return sorted_users
+        logger.info(f"Получено {len(users)} пользователей для объекта {object_id}")
+        return list(users)
 
     except Exception as e:
         logger.error(f"Ошибка получения пользователей объекта {object_id}: {e}")
         return []
-
-
-async def add_user_to_object(session: AsyncSession, user_id: int, object_id: int, company_id: int = None) -> bool:
-    """Добавление пользователя в объект с изоляцией по компании"""
-    try:
-        # Проверяем, что пользователь принадлежит указанной компании
-        user = await get_user_by_id(session, user_id)
-        if not user:
-            logger.error(f"Пользователь {user_id} не найден")
-            return False
-
-        if company_id is not None and user.company_id != company_id:
-            logger.error(
-                f"Попытка добавить пользователя {user_id} из компании {user.company_id} в объект компании {company_id}"
-            )
-            return False
-
-        # Проверяем, что объект принадлежит той же компании
-        object_obj = await get_object_by_id(session, object_id, company_id=user.company_id)
-        if not object_obj:
-            logger.error(f"Объект {object_id} не найден или не принадлежит компании {user.company_id}")
-            return False
-
-        # Проверяем, не состоит ли уже пользователь в этом объекте
-        result = await session.execute(
-            select(user_objects).where(user_objects.c.user_id == user_id, user_objects.c.object_id == object_id)
-        )
-        if result.scalar_one_or_none():
-            logger.info(f"Пользователь {user_id} уже состоит в объекте {object_id}")
-            return True
-
-        stmt = insert(user_objects).values(user_id=user_id, object_id=object_id)
-        await session.execute(stmt)
-        await session.commit()
-
-        logger.info(f"Пользователь {user_id} добавлен в объект {object_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка добавления пользователя {user_id} в объект {object_id}: {e}")
-        await session.rollback()
-        return False
-
-
-async def remove_user_from_object(session: AsyncSession, user_id: int, object_id: int, company_id: int = None) -> bool:
-    """Удаление пользователя из объекта с изоляцией по компании"""
-    try:
-        # Проверяем, что пользователь принадлежит указанной компании
-        user = await get_user_by_id(session, user_id)
-        if not user:
-            logger.error(f"Пользователь {user_id} не найден")
-            return False
-
-        if company_id is not None and user.company_id != company_id:
-            logger.error(
-                f"Попытка удалить пользователя {user_id} из компании {user.company_id} из объекта компании {company_id}"
-            )
-            return False
-
-        # Проверяем, что объект принадлежит той же компании
-        object_obj = await get_object_by_id(session, object_id, company_id=user.company_id)
-        if not object_obj:
-            logger.error(f"Объект {object_id} не найден или не принадлежит компании {user.company_id}")
-            return False
-
-        stmt = delete(user_objects).where(user_objects.c.user_id == user_id, user_objects.c.object_id == object_id)
-        await session.execute(stmt)
-        await session.commit()
-
-        logger.info(f"Пользователь {user_id} удален из объекта {object_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Ошибка удаления пользователя {user_id} из объекта {object_id}: {e}")
-        await session.rollback()
-        return False
 
 
 # =================================
@@ -2082,7 +1996,7 @@ async def get_mentor_trainees(session: AsyncSession, mentor_id: int, company_id:
                 Mentorship.mentor_id == mentor_id,
                 Mentorship.is_active == True,
                 User.is_active == True,
-                Role.name == "Стажер",
+                admin_inclusive_role_filter(["Стажер"]),
             )
         )
 
@@ -2136,7 +2050,7 @@ async def get_unassigned_trainees(session: AsyncSession, company_id: int = None)
             .join(user_roles, User.id == user_roles.c.user_id)
             .join(Role, user_roles.c.role_id == Role.id)
             .where(
-                Role.name == "Стажер",
+                admin_inclusive_role_filter(["Стажер"]),
                 User.is_activated == True,  # noqa: E712
                 User.is_active == True,  # noqa: E712
                 ~User.id.in_(subquery),
@@ -2166,7 +2080,7 @@ async def get_available_mentors(session: AsyncSession, company_id: int = None) -
             )
             .join(user_roles, User.id == user_roles.c.user_id)
             .join(Role, user_roles.c.role_id == Role.id)
-            .where(Role.name.in_(["Наставник", "Руководитель"]), User.is_active == True)  # noqa: E712
+            .where(admin_inclusive_role_filter(["Наставник", "Руководитель"]), User.is_active == True)  # noqa: E712
         )
 
         # Изоляция по компании
@@ -3502,7 +3416,7 @@ async def get_unactivated_users_old(session: AsyncSession, company_id: int = Non
         query = (
             select(User)
             .where(User.is_activated == False, User.is_active == True)  # noqa: E712
-            .where(~User.roles.any(Role.name.in_(["Руководитель", "Рекрутер"])))
+            .where(~User.roles.any(Role.name.in_(["Руководитель", "Рекрутер", "ADMIN"])))
         )
 
         if company_id is not None:
@@ -3754,26 +3668,7 @@ async def get_users_by_group(session: AsyncSession, group_id: int, company_id: i
 async def get_users_by_object(session: AsyncSession, object_id: int, company_id: int = None) -> List[User]:
     """Получение пользователей по объекту (стажировки или работы) с их полной информацией (с изоляцией компании)"""
     try:
-        query_filter1 = (
-            select(User)
-            .join(user_objects, User.id == user_objects.c.user_id)
-            .options(
-                selectinload(User.roles),
-                selectinload(User.groups),
-                selectinload(User.internship_object),
-                selectinload(User.work_object),
-            )
-            .where(user_objects.c.object_id == object_id, User.is_activated == True, User.is_active == True)  # noqa: E712
-        )
-
-        if company_id is not None:
-            query_filter1 = query_filter1.where(User.company_id == company_id)
-
-        result = await session.execute(query_filter1.order_by(User.full_name))
-        users_by_objects = result.scalars().all()
-
-        # Также ищем пользователей, где этот объект назначен как internship_object или work_object
-        query_filter2 = (
+        query = (
             select(User)
             .options(
                 selectinload(User.roles),
@@ -3789,17 +3684,10 @@ async def get_users_by_object(session: AsyncSession, object_id: int, company_id:
         )
 
         if company_id is not None:
-            query_filter2 = query_filter2.where(User.company_id == company_id)
+            query = query.where(User.company_id == company_id)
 
-        result2 = await session.execute(query_filter2.order_by(User.full_name))
-        users_by_direct = result2.scalars().all()
-
-        # Объединяем и убираем дубликаты
-        all_users = {}
-        for user in users_by_objects + users_by_direct:
-            all_users[user.id] = user
-
-        return list(all_users.values())
+        result = await session.execute(query.order_by(User.full_name))
+        return list(result.scalars().all())
 
     except Exception as e:
         logger.error(f"Ошибка получения пользователей по объекту {object_id}: {e}")
@@ -5081,27 +4969,6 @@ async def get_attestation_by_id(
     return await repo.get_by_id(attestation_id, company_id)
 
 
-async def get_user_objects(session: AsyncSession, user_id: int, company_id: int = None) -> List[Object]:
-    """Получение всех объектов пользователя (с изоляцией по компании)"""
-    try:
-        # Получаем company_id пользователя для изоляции
-        if company_id is None:
-            user = await get_user_by_id(session, user_id)
-            if user:
-                company_id = user.company_id
-
-        query = select(Object).join(user_objects).where(user_objects.c.user_id == user_id, Object.is_active == True)
-
-        # Изоляция по компании - КРИТИЧЕСКИ ВАЖНО!
-        if company_id is not None:
-            query = query.where(Object.company_id == company_id)
-
-        result = await session.execute(query.order_by(Object.name))
-        return result.scalars().all()
-    except Exception as e:
-        logger.error(f"Ошибка получения объектов пользователя {user_id}: {e}")
-        return []
-
 
 # ===== ФУНКЦИИ ДЛЯ ПРОХОЖДЕНИЯ ТРАЕКТОРИЙ СТАЖЕРАМИ =====
 
@@ -5111,19 +4978,21 @@ async def get_trainees_without_mentor(session: AsyncSession, company_id: int = N
     try:
         from bot.database.models import Mentorship, Role, User
 
-        # Получаем роль стажера
-        trainee_role_result = await session.execute(select(Role).where(Role.name == "Стажер"))
-        trainee_role = trainee_role_result.scalar_one_or_none()
+        # Получаем роли стажера и ADMIN
+        trainee_roles_result = await session.execute(select(Role).where(Role.name.in_(["Стажер", "ADMIN"])))
+        trainee_roles = trainee_roles_result.scalars().all()
 
-        if not trainee_role:
+        if not trainee_roles:
             return []
+
+        trainee_role_ids = [r.id for r in trainee_roles]
 
         # Получаем стажеров без активного наставника
         query = (
             select(User)
             .where(User.is_active == True, User.is_activated == True)
             .join(user_roles)
-            .where(user_roles.c.role_id == trainee_role.id)
+            .where(user_roles.c.role_id.in_(trainee_role_ids))
             .outerjoin(Mentorship, (Mentorship.trainee_id == User.id) & (Mentorship.is_active == True))
             .where(Mentorship.id.is_(None))  # Нет активного наставника
         )
@@ -5165,8 +5034,10 @@ async def get_available_mentors_for_trainee(
         if not trainee or not trainee.work_object:
             return []
 
-        # Получаем роли наставника и руководителя
-        mentor_roles_result = await session.execute(select(Role).where(Role.name.in_(["Наставник", "Руководитель"])))
+        # Получаем роли наставника, руководителя и ADMIN
+        mentor_roles_result = await session.execute(
+            select(Role).where(Role.name.in_(["Наставник", "Руководитель", "ADMIN"]))
+        )
         mentor_roles = mentor_roles_result.scalars().all()
         mentor_role_ids = [role.id for role in mentor_roles]
 

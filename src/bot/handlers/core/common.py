@@ -125,6 +125,13 @@ async def process_main_menu(callback: CallbackQuery, state: FSMContext, session:
         roles = await get_user_roles(session, user.id)
         primary_role = get_primary_role(roles)
 
+        # ADMIN: использовать активную роль из FSM, а не из БД
+        if primary_role == "ADMIN":
+            data = await state.get_data()
+            active_role = data.get("role")
+            if active_role:
+                primary_role = active_role
+
         is_inline = primary_role in ("Наставник", "Стажер")
         main_menu_text = get_main_menu_text(is_inline=is_inline)
         keyboard, photo_source = get_menu_by_role(primary_role)
@@ -170,6 +177,13 @@ async def process_reload_menu(callback: CallbackQuery, state: FSMContext, sessio
 
         roles = await get_user_roles(session, user.id)
         primary_role = get_primary_role(roles)
+
+        # ADMIN: использовать активную роль из FSM, а не из БД
+        if primary_role == "ADMIN":
+            data = await state.get_data()
+            active_role = data.get("role")
+            if active_role:
+                primary_role = active_role
 
         is_inline = primary_role in ("Наставник", "Стажер")
         keyboard, _ = get_menu_by_role(primary_role)

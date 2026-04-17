@@ -38,13 +38,13 @@ class TestDelete:
     async def test_delete_success(self):
         """delete() удаляет пользователя из правильной компании → True.
 
-        Порядок execute вызовов (18 шт):
+        Порядок execute вызовов (17 шт):
         1. SELECT User → scalar_one_or_none
         2. _soft_delete User → rowcount=1
-        3-5. DELETE user_roles, user_groups, user_objects
-        6-10. UPDATE Mentorship, TraineeTestAccess, TraineeLearningPath,
+        3-4. DELETE user_roles, user_groups
+        5-9. UPDATE Mentorship, TraineeTestAccess, TraineeLearningPath,
               TraineeAttestation, TraineeManager
-        11-18. UPDATE nullify creator_id: Test, Attestation, LearningPath,
+        10-17. UPDATE nullify creator_id: Test, Attestation, LearningPath,
                KnowledgeMaterial, KnowledgeFolder, Object, Group, Company
         """
         session = AsyncMock()
@@ -55,13 +55,13 @@ class TestDelete:
         user_mock.company_id = 10
 
         # Первые 2 вызова нуждаются в специфичных return values,
-        # остальные 16 — просто MagicMock (UPDATE/DELETE без чтения результата)
+        # остальные 15 — просто MagicMock (UPDATE/DELETE без чтения результата)
         side_effects = [
             make_scalar_one_or_none_result(user_mock),  # 1. SELECT User
             make_update_result(1),  # 2. _soft_delete
         ]
-        # 3-18: DELETE M2M (3) + UPDATE deactivate (5) + UPDATE nullify (8)
-        side_effects.extend([MagicMock() for _ in range(16)])
+        # 3-17: DELETE M2M (2) + UPDATE deactivate (5) + UPDATE nullify (8)
+        side_effects.extend([MagicMock() for _ in range(15)])
 
         session.execute = AsyncMock(side_effect=side_effects)
 
@@ -71,7 +71,7 @@ class TestDelete:
         assert result is True
         session.commit.assert_awaited_once()
         session.rollback.assert_not_awaited()
-        assert session.execute.await_count == 18
+        assert session.execute.await_count == 17
 
     @pytest.mark.asyncio
     async def test_delete_not_found(self):

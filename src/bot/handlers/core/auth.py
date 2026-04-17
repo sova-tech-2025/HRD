@@ -12,10 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database.db import get_user_by_tg_id
 from bot.handlers.company.company import callback_back_to_company_join_welcome
 from bot.keyboards.keyboards import get_company_selection_keyboard
+from bot.repositories.admin_repo import exit_admin_role
 from bot.states.states import RegistrationStates
 from bot.utils.auth.auth import validate_user_access
 from bot.utils.bot.commands import set_bot_commands
-from bot.utils.handlers.menu import send_role_welcome
+from bot.utils.handlers.menu import send_admin_menu, send_role_welcome
 from bot.utils.logger import log_user_action, log_user_error
 
 router = Router()
@@ -46,6 +47,19 @@ async def cmd_login(message: Message, state: FSMContext, session: AsyncSession, 
         if not is_valid:
             await message.answer(error_msg)
             log_user_error(actor.id, actor.username, "login failed - access denied")
+            return
+
+        if primary_role == "ADMIN":
+            await send_admin_menu(message, user)
+            await state.update_data(
+                user_id=user.id,
+                role=None,
+                is_admin=True,
+                is_authenticated=True,
+                auth_time=message.date.timestamp(),
+                company_id=user.company_id,
+            )
+            log_user_action(actor.id, actor.username, "admin login", {"user_id": user.id})
             return
 
         await send_role_welcome(message, user, primary_role)
@@ -127,6 +141,19 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession, 
             "started bot - already registered",
         )
 
+        if primary_role == "ADMIN":
+            await send_admin_menu(message, user)
+            await state.update_data(
+                user_id=user.id,
+                role=None,
+                is_admin=True,
+                is_authenticated=True,
+                auth_time=message.date.timestamp(),
+                company_id=user.company_id,
+            )
+            log_user_action(message.from_user.id, message.from_user.username, "admin start", {"user_id": user.id})
+            return
+
         await send_role_welcome(message, user, primary_role)
         await set_bot_commands(bot, primary_role)
 
@@ -194,3 +221,27 @@ async def callback_back_to_welcome(callback: CallbackQuery, state: FSMContext):
     )
     log_user_action(callback.from_user.id, callback.from_user.username, "returned to welcome screen")
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_role:"))
+async def admin_select_role(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot):
+    """ADMIN выбрал ЛК — сохраняем в FSM, показываем меню роли"""
+    chosen_role = callback.data.split(":")[1]
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+
+    await state.update_data(role=chosen_role, is_admin=True)
+    await send_role_welcome(callback.message, user, chosen_role)
+    await set_bot_commands(bot, chosen_role)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_exit")
+async def admin_exit_role(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot):
+    """Выход из ADMIN — необратимо, становится Рекрутером"""
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    await exit_admin_role(session, user.id)
+
+    await state.clear()
+    await send_role_welcome(callback.message, user, "Рекрутер")
+    await set_bot_commands(bot, "Рекрутер")
+    await callback.answer("Вы вышли из роли ADMIN. Теперь вы Рекрутер.")

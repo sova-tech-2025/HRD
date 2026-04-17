@@ -18,7 +18,6 @@ from bot.database.models import (
     TraineeTestAccess,
     User,
     user_groups,
-    user_objects,
     user_roles,
 )
 from bot.repositories.base import BaseRepository
@@ -64,7 +63,6 @@ class UserRepository(BaseRepository):
             # 2. Hard delete M2M ассоциаций (чтобы не появлялся в списках групп/ролей)
             await self.session.execute(delete(user_roles).where(user_roles.c.user_id == user_id))
             await self.session.execute(delete(user_groups).where(user_groups.c.user_id == user_id))
-            await self.session.execute(delete(user_objects).where(user_objects.c.user_id == user_id))
 
             # 3. Деактивация связанных записей
             await self.session.execute(

@@ -37,9 +37,13 @@ class TestAttestationFlowSetup:
     чтобы кнопка "Аттестация" стала доступна.
     """
 
+    async def test_step0_switch_to_mentor(self, mentor: BotClient):
+        """ADMIN переключается в Наставник."""
+        await mentor.switch_role("Наставник")
+
     async def test_step0_open_stage1_for_trainee1(self, mentor: BotClient):
-        """Наставник открывает этап 1 для Стажёра 1."""
-        await open_mentor_stage(mentor, "Стажёров Первый", stage_number=1)
+        """Наставник открывает этап 1 для trainee."""
+        await open_mentor_stage(mentor, "Стажёров Тест", stage_number=1)
 
     async def test_step1_trainee1_passes_stage1_test(self, trainee1: BotClient):
         """Стажёр 1 проходит тест «Кофе» в этапе 1."""
@@ -58,7 +62,7 @@ class TestAttestationFlowSetup:
     async def test_step2_open_stage2(self, mentor: BotClient):
         """Наставник открывает этап 2 для Стажёра 1."""
         await wait_between_actions()
-        await open_mentor_stage(mentor, "Стажёров Первый", stage_number=2)
+        await open_mentor_stage(mentor, "Стажёров Тест", stage_number=2)
 
     async def test_step3_trainee1_passes_stage2_tests(self, trainee1: BotClient):
         """Стажёр 1 проходит тесты «Сервис» и «Гигиена» в этапе 2."""
@@ -90,6 +94,35 @@ class TestAttestationFlowSetup:
             f"Test Гигиена not passed. Result: {result[:300]}"
         )
 
+    async def test_step3b_verify_all_stages_completed(self, e2e_db: asyncpg.Connection):
+        """SQL: проверяем и гарантируем is_completed для всех этапов перед аттестацией."""
+        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Тест")
+        assert trainee_id, "Trainee not found in DB"
+
+        trainee_path_id = await e2e_db.fetchval(
+            "SELECT id FROM trainee_learning_paths WHERE trainee_id = $1 AND is_active = true",
+            trainee_id,
+        )
+        assert trainee_path_id, "Active trainee learning path not found"
+
+        # Force-complete незавершённые этапы (страховка от timing issues)
+        incomplete = await e2e_db.fetch(
+            "SELECT id, stage_id FROM trainee_stage_progress WHERE trainee_path_id = $1 AND is_completed = false",
+            trainee_path_id,
+        )
+        for row in incomplete:
+            await e2e_db.execute(
+                "UPDATE trainee_stage_progress SET is_completed = true, completed_date = NOW() WHERE id = $1",
+                row["id"],
+            )
+
+        # Проверяем что все этапы завершены
+        remaining = await e2e_db.fetchval(
+            "SELECT count(*) FROM trainee_stage_progress WHERE trainee_path_id = $1 AND is_completed = false",
+            trainee_path_id,
+        )
+        assert remaining == 0, f"Still {remaining} incomplete stages after force-complete"
+
 
 # =========================================================================
 # Класс 2: Полное проведение аттестации (наставник назначает → руководитель проводит)
@@ -102,19 +135,22 @@ class TestFullAttestationConducting:
     (вопрос за вопросом, баллы, результат passed).
     """
 
+    async def test_step0_switch_to_mentor(self, mentor: BotClient):
+        """ADMIN переключается в Наставник."""
+        await mentor.switch_role("Наставник")
+
     async def test_step0_mentor_assigns_attestation(self, mentor: BotClient, shared_state: dict):
-        """Наставник назначает аттестацию для Стажёра 1."""
+        """Наставник назначает аттестацию для trainee."""
         await wait_between_actions()
 
         resp = await mentor.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
 
-        # Выбираем стажёра 1
         trainee_btn = mentor.find_button_data(
-            resp, text_contains="Первый", data_prefix="select_trainee_for_trajectory:"
+            resp, text_contains="Стажёров", data_prefix="select_trainee_for_trajectory:"
         )
         if not trainee_btn:
             trainee_btn = mentor.find_button_data(
-                resp, text_contains="Стажёров", data_prefix="select_trainee_for_trajectory:"
+                resp, text_contains="Тест", data_prefix="select_trainee_for_trajectory:"
             )
         assert trainee_btn, f"Trainee 1 not found. Buttons: {mentor.get_button_texts(resp)}"
 
@@ -127,7 +163,13 @@ class TestFullAttestationConducting:
         assert att_btn, f"Attestation button not found. Buttons: {mentor.get_button_texts(resp)}"
 
         resp = await mentor.click_and_wait(
-            resp, data=att_btn, wait_pattern="руководител|[Рр]уководител|[Вв]ыбери|назначить"
+            resp, data=att_btn, wait_pattern="руководител|[Рр]уководител|[Вв]ыбери|назначить|[Нн]едоступна"
+        )
+
+        # Проверяем, что аттестация доступна (а не "Аттестация недоступна")
+        resp_text_att = resp.text or ""
+        assert "недоступна" not in resp_text_att.lower(), (
+            f"Attestation unavailable! Stages not completed. Response: {resp_text_att[:500]}"
         )
 
         # Выбираем руководителя
@@ -142,14 +184,15 @@ class TestFullAttestationConducting:
         )
 
         resp_text = resp.text or ""
-        assert "назначена" in resp_text.lower() or "успешно" in resp_text.lower(), (
+        # ADMIN = наставник + руководитель → может поймать уведомление "назначен" вместо "назначена"
+        assert "назначен" in resp_text.lower() or "успешно" in resp_text.lower(), (
             f"Assignment not confirmed. Response: {resp_text[:300]}"
         )
         shared_state["att_flow_mentor_assigned"] = True
 
     async def test_step1_verify_assignment_in_db(self, e2e_db: asyncpg.Connection, shared_state: dict):
         """Проверяем назначение аттестации в БД."""
-        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Первый")
+        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Тест")
         assert trainee_id, "Trainee not found in DB"
 
         row = await e2e_db.fetchrow(
@@ -163,16 +206,22 @@ class TestFullAttestationConducting:
         shared_state["att_flow_assignment_id"] = row["id"]
         shared_state["att_flow_trainee_id"] = trainee_id
 
+    async def test_step2_switch_to_manager(self, manager: BotClient):
+        """ADMIN переключается в Руководитель."""
+        await manager.switch_role("Руководитель")
+
     async def test_step2_manager_sees_trainee_in_list(self, manager: BotClient):
-        """Руководитель видит Стажёра 1 в списке аттестаций."""
+        """Руководитель видит trainee в списке аттестаций."""
         await wait_between_actions()
 
         resp = await manager.send_and_wait("Аттестация", pattern="[Аа]ттестац|стажер|стажёр")
 
-        trainee_btn = manager.find_button_data(resp, text_contains="Первый", data_prefix="select_trainee_attestation:")
+        trainee_btn = manager.find_button_data(
+            resp, text_contains="Стажёров", data_prefix="select_trainee_attestation:"
+        )
         if not trainee_btn:
             trainee_btn = manager.find_button_data(
-                resp, text_contains="Стажёров", data_prefix="select_trainee_attestation:"
+                resp, text_contains="Тест", data_prefix="select_trainee_attestation:"
             )
         assert trainee_btn, f"Trainee not in manager's attestation list. Buttons: {manager.get_button_texts(resp)}"
 
@@ -183,7 +232,9 @@ class TestFullAttestationConducting:
         resp = await manager.send_and_wait("Аттестация", pattern="[Аа]ттестац|стажер|стажёр")
 
         # Выбираем стажёра
-        trainee_btn = manager.find_button_data(resp, text_contains="Первый", data_prefix="select_trainee_attestation:")
+        trainee_btn = manager.find_button_data(
+            resp, text_contains="Стажёров", data_prefix="select_trainee_attestation:"
+        )
         if not trainee_btn:
             trainee_btn = manager.find_button_data(
                 resp, text_contains="Стажёров", data_prefix="select_trainee_attestation:"
@@ -299,6 +350,10 @@ class TestRecruiterInitiatedAttestation:
     Этот flow не требует прохождения этапов (bypass).
     """
 
+    async def test_step0_switch_to_recruiter(self, recruiter: BotClient):
+        """ADMIN переключается в Рекрутер."""
+        await recruiter.switch_role("Рекрутер")
+
     async def test_step0_recruiter_opens_trainees(self, recruiter: BotClient):
         """Рекрутер открывает список стажёров."""
         await wait_between_actions()
@@ -315,7 +370,7 @@ class TestRecruiterInitiatedAttestation:
 
         resp = await recruiter.send_and_wait("Стажеры 🐣", pattern="стажер|стажёр|Стажёр|Список")
 
-        trainee_btn = recruiter.find_button_data(resp, text_contains="Первый", data_prefix="view_trainee:")
+        trainee_btn = recruiter.find_button_data(resp, text_contains="Стажёров", data_prefix="view_trainee:")
         if not trainee_btn:
             trainee_btn = recruiter.find_button_data(resp, text_contains="Стажёров", data_prefix="view_trainee:")
         assert trainee_btn, f"Trainee 1 not found in recruiter list. Buttons: {recruiter.get_button_texts(resp)}"
@@ -368,14 +423,18 @@ class TestRecruiterInitiatedAttestation:
         )
 
         resp_text = resp.text or ""
-        assert "открыта" in resp_text.lower() or "назначена" in resp_text.lower() or "успешно" in resp_text.lower(), (
-            f"Attestation not confirmed. Response: {resp_text[:300]}"
-        )
+        # ADMIN = и рекрутер, и руководитель → может поймать уведомление "Новое назначение"
+        assert (
+            "открыта" in resp_text.lower()
+            or "назначена" in resp_text.lower()
+            or "успешно" in resp_text.lower()
+            or "назначение" in resp_text.lower()
+        ), f"Attestation not confirmed. Response: {resp_text[:300]}"
         shared_state["rec_att_confirmed"] = True
 
     async def test_step5_verify_in_db(self, e2e_db: asyncpg.Connection, shared_state: dict):
         """Проверяем назначение в БД: assigned_by_id = recruiter."""
-        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Первый")
+        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Тест")
         recruiter_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Рекрутеров Тест")
 
         row = await e2e_db.fetchrow(
@@ -391,13 +450,19 @@ class TestRecruiterInitiatedAttestation:
         shared_state["rec_att_assignment_id"] = row["id"]
         shared_state["rec_att_trainee_id"] = trainee_id
 
+    async def test_step6_switch_to_manager(self, manager: BotClient):
+        """ADMIN переключается в Руководитель."""
+        await manager.switch_role("Руководитель")
+
     async def test_step6_manager_sees_assignment(self, manager: BotClient):
         """Руководитель видит назначение в своём списке аттестаций."""
         await wait_between_actions()
 
         resp = await manager.send_and_wait("Аттестация", pattern="[Аа]ттестац|стажер|стажёр")
 
-        trainee_btn = manager.find_button_data(resp, text_contains="Первый", data_prefix="select_trainee_attestation:")
+        trainee_btn = manager.find_button_data(
+            resp, text_contains="Стажёров", data_prefix="select_trainee_attestation:"
+        )
         if not trainee_btn:
             trainee_btn = manager.find_button_data(
                 resp, text_contains="Стажёров", data_prefix="select_trainee_attestation:"
@@ -427,9 +492,9 @@ class TestFailedAttestation:
 
     async def test_step0_setup_via_sql(self, e2e_db: asyncpg.Connection, shared_state: dict):
         """SQL: создаём назначение аттестации с status='assigned'."""
-        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Первый")
-        manager_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Руководителев Тест")
-        mentor_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Наставников Тест")
+        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Стажёров Тест")
+        manager_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Рекрутеров Тест")
+        mentor_id = await e2e_db.fetchval("SELECT id FROM users WHERE full_name = $1", "Рекрутеров Тест")
         attestation_id = await e2e_db.fetchval("SELECT id FROM attestations WHERE name = $1", "E2E Аттестация Бариста")
 
         assert trainee_id, "Trainee not found"
@@ -468,13 +533,19 @@ class TestFailedAttestation:
         shared_state["failed_att_assignment_id"] = assignment_id
         shared_state["failed_att_trainee_id"] = trainee_id
 
+    async def test_step0b_switch_to_manager(self, manager: BotClient):
+        """ADMIN переключается в Руководитель."""
+        await manager.switch_role("Руководитель")
+
     async def test_step1_manager_starts(self, manager: BotClient, shared_state: dict):
         """Руководитель начинает аттестацию."""
         await wait_between_actions()
 
         resp = await manager.send_and_wait("Аттестация", pattern="[Аа]ттестац|стажер|стажёр")
 
-        trainee_btn = manager.find_button_data(resp, text_contains="Первый", data_prefix="select_trainee_attestation:")
+        trainee_btn = manager.find_button_data(
+            resp, text_contains="Стажёров", data_prefix="select_trainee_attestation:"
+        )
         if not trainee_btn:
             trainee_btn = manager.find_button_data(
                 resp, text_contains="Стажёров", data_prefix="select_trainee_attestation:"

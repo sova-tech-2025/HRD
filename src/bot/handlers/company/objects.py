@@ -564,7 +564,7 @@ async def callback_delete_object(callback: CallbackQuery, state: FSMContext, ses
         data = await state.get_data()
         company_id = data.get("company_id")
 
-        # Проверяем, можно ли удалить объект (включает все проверки: user_objects, internship_object_id, work_object_id)
+        # Проверяем, можно ли удалить объект (по internship_object_id / work_object_id)
         users_in_object = await get_object_users(session, object_id, company_id=company_id)
         if users_in_object:
             error_msg = f"❌ В объекте есть пользователи ({len(users_in_object)} чел.)"

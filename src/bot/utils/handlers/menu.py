@@ -8,8 +8,21 @@ from bot.config import (
     TRAINEE_MENU_IMAGE_FILE_ID,
     TRAINEE_MENU_IMAGE_PATH,
 )
-from bot.keyboards.keyboards import get_keyboard_by_role, get_mentor_inline_menu, get_trainee_inline_menu
+from bot.keyboards.keyboards import (
+    get_admin_role_picker_keyboard,
+    get_keyboard_by_role,
+    get_mentor_inline_menu,
+    get_trainee_inline_menu,
+)
 from bot.utils.logger import logger
+
+
+async def send_admin_menu(message: Message, user):
+    """Отправляет ADMIN-меню с выбором ЛК."""
+    await message.answer(
+        "Вы в роли ADMIN\n\nВыберите ЛК, в который хотите перейти:",
+        reply_markup=get_admin_role_picker_keyboard(),
+    )
 
 
 async def send_role_welcome(message: Message, user, primary_role: str):

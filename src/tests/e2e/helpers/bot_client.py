@@ -285,6 +285,15 @@ class BotClient:
             self.client.remove_event_handler(on_new)
             self.client.remove_event_handler(on_edit)
 
+    async def switch_role(self, role: str) -> Message:
+        """Переключить ADMIN на указанную роль через /start."""
+        resp = await self.send_and_wait("/start", contains="Выберите ЛК")
+        return await self.click_and_wait(
+            resp,
+            data=f"admin_role:{role}".encode(),
+            wait_pattern="Добро пожаловать|Главное меню",
+        )
+
     @staticmethod
     def get_button_texts(message: Message) -> list[str]:
         """Извлечь тексты всех inline-кнопок из сообщения."""

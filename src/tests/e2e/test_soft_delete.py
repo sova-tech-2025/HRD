@@ -39,6 +39,10 @@ class TestCreateEntitiesForDeletion:
         self.state = shared_state
         self.state.setdefault("delete_test", {})
 
+    async def test_switch_to_recruiter(self, recruiter: BotClient):
+        """ADMIN переключается в Рекрутер для операций удаления."""
+        await recruiter.switch_role("Рекрутер")
+
     # --- Группа для удаления ---
 
     async def test_create_group_for_deletion(self, recruiter: BotClient):
@@ -467,9 +471,8 @@ class TestDeleteUser:
     """
     Удаление пользователя через UI.
 
-    Используем «Руководителев Тест» — он гарантированно активирован
-    и виден в списке. Тест order=10, выполняется последним, так что
-    удаление руководителя не сломает другие сценарии.
+    Создаём dummy-пользователя через SQL (ADMIN и trainee нужны для тестов),
+    затем удаляем его. Выполняется последним (order=10).
     """
 
     @pytest.fixture(autouse=True)
@@ -477,13 +480,39 @@ class TestDeleteUser:
         self.state = shared_state
 
     async def test_resolve_user_id(self, e2e_db, shared_state):
-        """Получаем ID Руководителева из БД."""
-        row = await e2e_db.fetchrow("SELECT id FROM users WHERE full_name = 'Руководителев Тест' AND is_active = true")
-        assert row, "User 'Руководителев Тест' not found in DB"
-        shared_state["delete_test"]["user_id"] = row["id"]
+        """Создаём dummy-пользователя для удаления через SQL."""
+        # Получаем company_id, group_id из существующего пользователя
+        admin_id = shared_state.get("admin_user_id")
+        company_id = await e2e_db.fetchval("SELECT company_id FROM users WHERE id = $1", admin_id)
+        group_id = await e2e_db.fetchval(
+            "SELECT id FROM groups WHERE company_id = $1 AND is_active = true LIMIT 1", company_id
+        )
+        role_id = await e2e_db.fetchval("SELECT id FROM roles WHERE name = 'Сотрудник'")
+
+        # Создаём dummy-пользователя
+        user_id = await e2e_db.fetchval(
+            """
+            INSERT INTO users (tg_id, full_name, phone_number, is_active, is_activated, company_id, registration_date)
+            VALUES (999999999, 'Удаляемый Пользователь', '+79009999999', true, true, $1, NOW())
+            RETURNING id
+            """,
+            company_id,
+        )
+        assert user_id, "Failed to create dummy user"
+
+        # Назначаем роль
+        if role_id:
+            await e2e_db.execute("INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)", user_id, role_id)
+        # Привязываем к группе
+        if group_id:
+            await e2e_db.execute("INSERT INTO user_groups (user_id, group_id) VALUES ($1, $2)", user_id, group_id)
+
+        shared_state["delete_test"]["user_id"] = user_id
+        shared_state["delete_test"]["user_name"] = "Удаляемый Пользователь"
 
     async def test_delete_user_via_ui(self, recruiter: BotClient):
-        """Рекрутер удаляет 'Руководителев Тест' через UI."""
+        """Рекрутер удаляет dummy-пользователя через UI."""
+        dt = self.state["delete_test"]
         await wait_between_actions()
 
         # Все пользователи → фильтр → список → выбрать → удалить → подтвердить
@@ -492,18 +521,17 @@ class TestDeleteUser:
         # Показать всех пользователей
         resp = await recruiter.click_and_wait(resp, data=b"uf_all", wait_pattern="пользовател|Выбери")
 
-        # Находим Руководителева
-        user_btn = recruiter.find_button_data(resp, text_contains="Руководителев", data_prefix="uf_user:")
+        # Находим dummy-пользователя
+        user_btn = recruiter.find_button_data(resp, text_contains="Удаляемый", data_prefix="uf_user:")
         if not user_btn:
-            # Может быть на второй странице
             next_page_btn = recruiter.find_button_data(resp, data_prefix="uf_upage:")
             if next_page_btn:
                 resp = await recruiter.click_and_wait(resp, data=next_page_btn, wait_pattern="пользовател")
-                user_btn = recruiter.find_button_data(resp, text_contains="Руководителев", data_prefix="uf_user:")
+                user_btn = recruiter.find_button_data(resp, text_contains="Удаляемый", data_prefix="uf_user:")
         assert user_btn, f"User button not found. Buttons: {recruiter.get_button_texts(resp)}"
 
         # Открываем карточку пользователя
-        resp = await recruiter.click_and_wait(resp, data=user_btn, wait_pattern="Пользователь|Руководителев")
+        resp = await recruiter.click_and_wait(resp, data=user_btn, wait_pattern="Пользователь|Удаляемый")
 
         # Нажимаем "Редактировать" чтобы попасть в редактор
         edit_btn = recruiter.find_button_data(resp, data_prefix="edit_user:")
