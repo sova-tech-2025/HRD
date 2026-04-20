@@ -1429,7 +1429,6 @@ async def get_all_objects(session: AsyncSession, company_id: int = None) -> List
 
         query = (
             select(Object)
-            .options(selectinload(Object.users).selectinload(User.roles))
             .where(Object.is_active == True, Object.company_id == company_id)
             .order_by(Object.name)
         )
