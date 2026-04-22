@@ -214,6 +214,51 @@ class TestMentorExamMenu:
 
 
 # =========================================================================
+# Класс 3.1: Регрессия бага — inline-кнопка «Экзамены 📝» в меню Наставника
+# =========================================================================
+
+
+class TestMentorInlineExamButton:
+    """Регрессия: главное меню Наставника отправляется как фото с inline-кнопками.
+
+    Кнопка «Экзамены 📝» имеет callback_data="exam_menu". До фикса show_exam_menu
+    делал edit_text на сообщении-фото → Bad Request: there is no text in the message
+    to edit, ошибка глушилась, пользователь видел молчание.
+    """
+
+    async def test_step1_click_inline_exam_button(self, mentor: BotClient):
+        """Открыть главное меню (фото) и кликнуть inline-кнопку exam_menu."""
+        # switch_role шлёт /start → admin_role:Наставник и возвращает фото-меню
+        # (welcome-message + mentor photo-menu). ADMIN'у /start всегда чистит state,
+        # поэтому повторный send("/start") покажет «Выберите ЛК», а не меню роли.
+        await mentor.switch_role("Наставник")
+        await wait_between_actions()
+
+        # Ищем среди последних входящих сообщений то, где есть inline-кнопка exam_menu
+        # (фото-меню Наставника). switch_role может вернуть «Добро пожаловать» без
+        # inline-кнопок, если settling не успел поймать photo-меню, поэтому достаём явно.
+        messages = await mentor.get_messages(limit=5)
+        main_menu = None
+        for msg in messages:
+            if msg.out:
+                continue
+            if mentor.find_button_data(msg, data_prefix="exam_menu") == b"exam_menu":
+                main_menu = msg
+                break
+        assert main_menu is not None, "Inline-кнопка exam_menu не найдена в последних сообщениях Наставника."
+
+        # До фикса этот клик не давал ответа — show_exam_menu падал на edit_text фото.
+        resp = await mentor.click_and_wait(main_menu, data=b"exam_menu", wait_pattern="РЕДАКТОР")
+
+        buttons = mentor.get_button_texts(resp)
+        # Наставник должен видеть «Сдать экзамен» и список экзаменов.
+        assert any("Сдать экзамен" in b for b in buttons), f"No 'Сдать' button. Buttons: {buttons}"
+        assert any("E2E Экзамен Кофе" in b for b in buttons), (
+            f"Список экзаменов пуст — вероятно, company_id не определился. Buttons: {buttons}"
+        )
+
+
+# =========================================================================
 # Класс 4: Меню руководителя
 # =========================================================================
 

@@ -1427,11 +1427,7 @@ async def get_all_objects(session: AsyncSession, company_id: int = None) -> List
             logger.warning("get_all_objects вызван с company_id=None - возвращаем пустой список для безопасности")
             return []
 
-        query = (
-            select(Object)
-            .where(Object.is_active == True, Object.company_id == company_id)
-            .order_by(Object.name)
-        )
+        query = select(Object).where(Object.is_active == True, Object.company_id == company_id).order_by(Object.name)
 
         result = await session.execute(query)
         return result.scalars().all()
@@ -4966,7 +4962,6 @@ async def get_attestation_by_id(
 
     repo = AssessmentRepository(session)
     return await repo.get_by_id(attestation_id, company_id)
-
 
 
 # ===== ФУНКЦИИ ДЛЯ ПРОХОЖДЕНИЯ ТРАЕКТОРИЙ СТАЖЕРАМИ =====
