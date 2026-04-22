@@ -386,7 +386,12 @@ class TestDeleteKBMaterial:
             material_btn = recruiter.find_button_data(resp, data_prefix="kb_material:")
         assert material_btn, f"Material button not found. Buttons: {recruiter.get_button_texts(resp)}"
 
-        resp = await recruiter.click_and_wait(resp, data=material_btn, wait_pattern="Материал|материал|Удаляемый")
+        # Матчим только контрольное сообщение «⚙️ Управление материалом: …»,
+        # в котором находятся inline-кнопки управления (Удалить / Назад / Главное меню).
+        # Первое сообщение после клика — edit_text карточки материала без кнопок —
+        # тоже попадало под прежний паттерн «Материал|Удаляемый» и выигрывало гонку
+        # в SETTLE_DELAY, из-за чего test видел buttons=[].
+        resp = await recruiter.click_and_wait(resp, data=material_btn, wait_pattern="Управление материалом")
 
         # Нажимаем "Удалить материал"
         delete_btn = recruiter.find_button_data(resp, data_prefix="kb_delete_material:")

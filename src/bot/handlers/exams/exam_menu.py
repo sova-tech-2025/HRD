@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.db import get_user_by_tg_id
+from bot.database.db import ensure_company_id, get_user_by_tg_id
 from bot.keyboards.keyboards import (
     get_exam_card_keyboard,
     get_exam_confirm_delete_keyboard,
@@ -55,12 +55,13 @@ async def _get_user_exam_roles(user, active_role: str = None) -> dict:
 async def show_exam_menu(message_or_callback, state: FSMContext, session: AsyncSession, user=None):
     """Показ главного меню экзаменов"""
     try:
+        tg_id = (
+            message_or_callback.from_user.id
+            if hasattr(message_or_callback, "from_user")
+            else message_or_callback.message.from_user.id
+        )
+
         if user is None:
-            tg_id = (
-                message_or_callback.from_user.id
-                if hasattr(message_or_callback, "from_user")
-                else message_or_callback.message.from_user.id
-            )
             user = await get_user_by_tg_id(session, tg_id)
 
         if not user:
@@ -69,7 +70,7 @@ async def show_exam_menu(message_or_callback, state: FSMContext, session: AsyncS
         data = await state.get_data()
         active_role = data.get("role") if data.get("is_admin") else None
         roles = await _get_user_exam_roles(user, active_role=active_role)
-        company_id = data.get("company_id")
+        company_id = await ensure_company_id(session, state, tg_id)
 
         exams = await AssessmentRepository(session).get_all(company_id, assessment_type="exam")
 
@@ -78,7 +79,13 @@ async def show_exam_menu(message_or_callback, state: FSMContext, session: AsyncS
         keyboard = get_exam_menu_keyboard(exams, **roles)
 
         if isinstance(message_or_callback, CallbackQuery):
-            await message_or_callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+            # Главное меню Наставника/Стажёра — фото-сообщение, edit_text на нём упадёт.
+            # Удаляем и отправляем новое; для текстового сообщения это тоже корректно.
+            try:
+                await message_or_callback.message.delete()
+            except Exception:
+                pass
+            await message_or_callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
         else:
             await message_or_callback.answer(text, parse_mode="HTML", reply_markup=keyboard)
 
