@@ -350,17 +350,22 @@ class TestTraineeExcludedFromExamAssignment:
         assert exam_btn, f"Exam not found. Buttons: {recruiter.get_button_texts(resp)}"
         resp = await recruiter.click_and_wait(resp, data=exam_btn, wait_pattern="E2E Экзамен Кофе")
 
-        # Нажимаем «Назначить»
+        # Нажимаем «Назначить» — попадаем в меню фильтров экзаменатора
         assign_btn = recruiter.find_button_data(resp, data_prefix="exam_assign:")
         assert assign_btn, f"Assign button not found. Buttons: {recruiter.get_button_texts(resp)}"
-        resp = await recruiter.click_and_wait(resp, data=assign_btn, wait_pattern="Экзаменатор|экзаменатор")
+        resp = await recruiter.click_and_wait(resp, data=assign_btn, wait_pattern="способ поиска")
+
+        # Фильтр экзаменатора: «Все пользователи»
+        exf_all_btn = recruiter.find_button_data(resp, data_prefix="exf_all")
+        assert exf_all_btn, f"'All examiners' button not found. Buttons: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=exf_all_btn, wait_pattern="Найдено|экзаменатора")
 
         # Выбираем экзаменатора (admin = "Рекрутеров Тест" с ролью Руководитель)
-        examiner_btn = recruiter.find_button_data(resp, text_contains="Рекрутеров", data_prefix="exam_examiner:")
+        examiner_btn = recruiter.find_button_data(resp, text_contains="Рекрутеров", data_prefix="exf_user:")
         assert examiner_btn, f"Examiner not found. Buttons: {recruiter.get_button_texts(resp)}"
         resp = await recruiter.click_and_wait(resp, data=examiner_btn, wait_pattern="Сдающий|способ поиска")
 
-        # Нажимаем «Все пользователи»
+        # Нажимаем «Все пользователи» (сдающие)
         all_btn = recruiter.find_button_data(resp, data_prefix="ef_all")
         assert all_btn, f"'All users' button not found. Buttons: {recruiter.get_button_texts(resp)}"
         resp = await recruiter.click_and_wait(resp, data=all_btn, wait_pattern="Найдено|Выбери")
@@ -383,7 +388,7 @@ class TestExamAssignment:
     """Рекрутер назначает экзамен: экзаменатор=Рекрутеров, сдающий=Стажёров."""
 
     async def test_step1_open_exam_card_and_assign(self, recruiter: BotClient, shared_state: dict):
-        """Рекрутер открывает карточку экзамена и нажимает «Назначить»."""
+        """Рекрутер открывает карточку экзамена и нажимает «Назначить» (попадает в меню фильтров экзаменатора)."""
         await wait_between_actions()
 
         resp = await recruiter.send_and_wait("Экзамены 📝", pattern="РЕДАКТОР")
@@ -395,17 +400,23 @@ class TestExamAssignment:
         assign_btn = recruiter.find_button_data(resp, data_prefix="exam_assign:")
         assert assign_btn, f"Assign button not found. Buttons: {recruiter.get_button_texts(resp)}"
 
-        resp = await recruiter.click_and_wait(resp, data=assign_btn, wait_pattern="Экзаменатор|экзаменатор")
+        # После клика «Назначить» показывается меню фильтров экзаменатора
+        resp = await recruiter.click_and_wait(resp, data=assign_btn, wait_pattern="способ поиска")
 
         shared_state["exam_assign_resp"] = resp
 
     async def test_step2_select_examiner(self, recruiter: BotClient, shared_state: dict):
-        """Рекрутер выбирает руководителя как экзаменатора."""
+        """Рекрутер выбирает «Все пользователи» в фильтре и затем экзаменатора."""
         resp = shared_state.get("exam_assign_resp")
         if not resp:
             pytest.skip("No assign response from previous step")
 
-        examiner_btn = recruiter.find_button_data(resp, text_contains="Рекрутеров", data_prefix="exam_examiner:")
+        # Фильтр экзаменатора: «Все пользователи»
+        exf_all_btn = recruiter.find_button_data(resp, data_prefix="exf_all")
+        assert exf_all_btn, f"'All examiners' button not found. Buttons: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=exf_all_btn, wait_pattern="Найдено|экзаменатора")
+
+        examiner_btn = recruiter.find_button_data(resp, text_contains="Рекрутеров", data_prefix="exf_user:")
         assert examiner_btn, f"Examiner button not found. Buttons: {recruiter.get_button_texts(resp)}"
 
         resp = await recruiter.click_and_wait(resp, data=examiner_btn, wait_pattern="Сдающий|способ поиска")

@@ -347,29 +347,35 @@ class AssessmentAssignmentRepository(BaseRepository):
             return False
 
     async def get_examiners(self, company_id: int = None) -> List[User]:
-        """Получение списка экзаменаторов (руководители + сотрудники + рекрутеры)"""
-        try:
-            query = (
-                select(User)
-                .options(selectinload(User.roles))
-                .join(user_roles, User.id == user_roles.c.user_id)
-                .join(Role, user_roles.c.role_id == Role.id)
-                .where(
-                    admin_inclusive_role_filter(["Руководитель", "Сотрудник", "Рекрутер"]),
-                    User.is_active == True,
-                    User.is_activated == True,
-                )
-            )
+        """Получение списка экзаменаторов (руководители + сотрудники + рекрутеры).
 
-            if company_id is not None:
-                query = query.where(User.company_id == company_id)
+        Обёртка над ``get_examiners_for_assignment`` без фильтров — сохранена
+        для обратной совместимости со старыми вызовами.
+        """
+        return await self.get_examiners_for_assignment(company_id=company_id)
 
-            result = await self.session.execute(query)
-            return list(result.scalars().unique().all())
+    _EXAMINER_ROLES: List[str] = ["Руководитель", "Сотрудник", "Рекрутер"]
 
-        except Exception as e:
-            logger.error(f"Ошибка получения экзаменаторов: {e}")
-            return []
+    async def get_examiners_for_assignment(
+        self,
+        company_id: int = None,
+        filter_type: str = "all",
+        filter_id: int = None,
+        search_query: str = None,
+    ) -> List[User]:
+        """Получение экзаменаторов с фильтрацией (группа/объект/роль/поиск ФИО).
+
+        Whitelist ролей: ``Руководитель``, ``Сотрудник``, ``Рекрутер`` (ADMIN
+        проходит через ``admin_inclusive_role_filter``).
+        """
+        return await self._search_users(
+            company_id=company_id,
+            role_whitelist=self._EXAMINER_ROLES,
+            exclude_trainees=False,
+            filter_type=filter_type,
+            filter_id=filter_id,
+            search_query=search_query,
+        )
 
     async def get_for_examinee(self, examinee_id: int, company_id: int = None) -> List[TraineeAttestation]:
         """Получение назначенных экзаменов для сдающего"""
@@ -443,20 +449,41 @@ class AssessmentAssignmentRepository(BaseRepository):
         filter_id: int = None,
         search_query: str = None,
     ) -> List[User]:
-        """Получение пользователей для назначения экзамена с фильтрацией"""
-        try:
-            # Исключаем стажёров — по ТЗ им нельзя назначить экзамен
-            # Но не исключаем ADMIN, даже если у него нет других ролей
-            admin_user_ids = (
-                select(user_roles.c.user_id).join(Role, user_roles.c.role_id == Role.id).where(Role.name == "ADMIN")
-            )
-            trainee_role_subquery = (
-                select(user_roles.c.user_id)
-                .join(Role, user_roles.c.role_id == Role.id)
-                .where(Role.name.in_(["Стажер", "Стажёр"]))
-                .where(user_roles.c.user_id.not_in(admin_user_ids))
-            )
+        """Получение пользователей-сдающих для назначения экзамена с фильтрацией.
 
+        Стажёры исключаются из списка (им экзамены не назначают).
+        """
+        return await self._search_users(
+            company_id=company_id,
+            role_whitelist=None,
+            exclude_trainees=True,
+            filter_type=filter_type,
+            filter_id=filter_id,
+            search_query=search_query,
+        )
+
+    async def _search_users(
+        self,
+        company_id: int,
+        *,
+        role_whitelist: Optional[List[str]] = None,
+        exclude_trainees: bool = False,
+        filter_type: str = "all",
+        filter_id: Optional[int] = None,
+        search_query: Optional[str] = None,
+    ) -> List[User]:
+        """Общая реализация поиска пользователей с пагинацией на стороне UI.
+
+        Args:
+            company_id: изоляция по компании.
+            role_whitelist: если задан — оставить только пользователей с этими
+                ролями (ADMIN всегда проходит через ``admin_inclusive_role_filter``).
+            exclude_trainees: исключить стажёров (но не ADMIN).
+            filter_type: ``all`` | ``group`` | ``object`` | ``role`` | ``search``.
+            filter_id: id группы/объекта/роли для соответствующего фильтра.
+            search_query: подстрока для поиска по ``full_name`` (ilike).
+        """
+        try:
             query = (
                 select(User)
                 .options(
@@ -466,12 +493,42 @@ class AssessmentAssignmentRepository(BaseRepository):
                     selectinload(User.internship_object),
                 )
                 .where(
-                    User.is_active == True,
-                    User.is_activated == True,
-                    User.company_id == company_id,
-                    User.id.not_in(trainee_role_subquery),
+                    User.is_active == True,  # noqa: E712
+                    User.is_activated == True,  # noqa: E712
                 )
             )
+
+            if company_id is not None:
+                query = query.where(User.company_id == company_id)
+
+            # role_whitelist требует join c user_roles + Role для Role.name.
+            # filter_type == "role" тоже работает через user_roles — тогда
+            # достаточно одного join, но условие по id роли добавляем
+            # отдельно. Делаем один общий join, если хоть что-то из двух
+            # требуется.
+            role_filter_by_id = filter_type == "role" and filter_id is not None
+            needs_role_join = bool(role_whitelist) or role_filter_by_id
+            if needs_role_join:
+                query = query.join(user_roles, User.id == user_roles.c.user_id).join(
+                    Role, user_roles.c.role_id == Role.id
+                )
+            if role_whitelist:
+                # ADMIN всегда в whitelist независимо от списка.
+                query = query.where(admin_inclusive_role_filter(role_whitelist))
+            if role_filter_by_id:
+                query = query.where(user_roles.c.role_id == filter_id)
+
+            if exclude_trainees:
+                admin_user_ids = (
+                    select(user_roles.c.user_id).join(Role, user_roles.c.role_id == Role.id).where(Role.name == "ADMIN")
+                )
+                trainee_role_subquery = (
+                    select(user_roles.c.user_id)
+                    .join(Role, user_roles.c.role_id == Role.id)
+                    .where(Role.name.in_(["Стажер", "Стажёр"]))
+                    .where(user_roles.c.user_id.not_in(admin_user_ids))
+                )
+                query = query.where(User.id.not_in(trainee_role_subquery))
 
             if filter_type == "group" and filter_id is not None:
                 query = query.join(user_groups, User.id == user_groups.c.user_id).where(
@@ -487,7 +544,7 @@ class AssessmentAssignmentRepository(BaseRepository):
             return list(result.scalars().unique().all())
 
         except Exception as e:
-            logger.error(f"Ошибка получения пользователей для экзамена: {e}")
+            logger.error(f"Ошибка поиска пользователей: {e}")
             return []
 
     async def cleanup_duplicates(self, user_id: int) -> int:

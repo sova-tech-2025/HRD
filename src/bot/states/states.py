@@ -405,9 +405,11 @@ class ExamStates(StatesGroup):
     viewing_exam = State()
 
     # Назначение экзамена
-    selecting_examiner = State()  # Выбор экзаменатора
+    selecting_examiner_filter = State()  # Выбор способа поиска экзаменатора (фильтры)
+    searching_examiner_by_name = State()  # Поиск экзаменатора по ФИО
+    selecting_examiner = State()  # Выбор экзаменатора из отфильтрованного списка
     selecting_examinee_filter = State()  # Выбор способа поиска сдающего
-    searching_examinee_by_name = State()  # Поиск по ФИО
+    searching_examinee_by_name = State()  # Поиск сдающего по ФИО
     selecting_examinee = State()  # Выбор сдающего из списка
     viewing_examinee_card = State()  # Карточка сдающего перед назначением
 
