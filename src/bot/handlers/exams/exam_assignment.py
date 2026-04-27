@@ -108,27 +108,6 @@ async def callback_exam_assign(callback: CallbackQuery, state: FSMContext, sessi
         log_user_error(callback.from_user.id, "exam_assign_error", str(e))
 
 
-@router.callback_query(F.data == "exam_back_to_card")
-async def callback_exam_back_to_card(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
-    """Возврат к карточке экзамена."""
-    try:
-        await callback.answer()
-        data = await state.get_data()
-        exam_id = data.get("assign_exam_id") or data.get("current_exam_id")
-        if exam_id:
-            callback.data = f"exam_view:{exam_id}"
-            await state.set_state(ExamStates.main_menu)
-            from bot.handlers.exams.exam_menu import callback_exam_view
-
-            await callback_exam_view(callback, state, session)
-        else:
-            from bot.handlers.exams.exam_menu import show_exam_menu
-
-            await show_exam_menu(callback, state, session)
-    except Exception as e:
-        log_user_error(callback.from_user.id, "exam_back_to_card_error", str(e))
-
-
 # ================== Фильтрация экзаменаторов ==================
 
 
@@ -537,7 +516,10 @@ async def callback_exam_filter_groups(callback: CallbackQuery, state: FSMContext
         log_user_error(callback.from_user.id, "exam_filter_groups_error", str(e))
 
 
-@router.callback_query(F.data.startswith(exam_filters.prefix + "_gpage:"))
+@router.callback_query(
+    F.data.startswith(exam_filters.prefix + "_gpage:"),
+    ExamStates.selecting_examinee_filter,
+)
 async def callback_exam_examinee_group_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Пагинация групп (сдающие)."""
     try:
@@ -587,7 +569,10 @@ async def callback_exam_filter_objects(callback: CallbackQuery, state: FSMContex
         log_user_error(callback.from_user.id, "exam_filter_objects_error", str(e))
 
 
-@router.callback_query(F.data.startswith(exam_filters.prefix + "_opage:"))
+@router.callback_query(
+    F.data.startswith(exam_filters.prefix + "_opage:"),
+    ExamStates.selecting_examinee_filter,
+)
 async def callback_exam_examinee_object_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Пагинация объектов (сдающие)."""
     try:
@@ -634,7 +619,10 @@ async def callback_exam_filter_roles(callback: CallbackQuery, state: FSMContext,
         log_user_error(callback.from_user.id, "exam_filter_roles_error", str(e))
 
 
-@router.callback_query(F.data.startswith(exam_filters.prefix + "_rpage:"))
+@router.callback_query(
+    F.data.startswith(exam_filters.prefix + "_rpage:"),
+    ExamStates.selecting_examinee_filter,
+)
 async def callback_exam_examinee_role_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Пагинация ролей (сдающие)."""
     try:
