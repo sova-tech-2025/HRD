@@ -169,7 +169,14 @@ async def callback_exam_create(callback: CallbackQuery, state: FSMContext, sessi
         await callback.answer()
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
-        if not user or not _user_has_role(user, "Рекрутер"):
+        if not user:
+            await callback.message.edit_text("❌ Только рекрутер может создавать экзамены.")
+            return
+
+        data = await state.get_data()
+        active_role = data.get("role") if data.get("is_admin") else None
+        is_recruiter = active_role == "Рекрутер" if active_role else _user_has_role(user, "Рекрутер")
+        if not is_recruiter:
             await callback.message.edit_text("❌ Только рекрутер может создавать экзамены.")
             return
 
