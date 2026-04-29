@@ -37,8 +37,8 @@ from bot.keyboards.keyboards import (
     get_user_editor_keyboard,
     get_user_groups_multiselect_keyboard,
     get_user_info_keyboard,
-    user_edit_filters,
 )
+from bot.keyboards.user_filters import user_edit_filters
 from bot.states.states import UserEditStates
 from bot.utils.auth.auth import check_auth
 from bot.utils.logger import log_user_action, log_user_error

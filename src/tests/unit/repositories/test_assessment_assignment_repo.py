@@ -858,3 +858,125 @@ class TestGetForExaminee:
         result = await repo.get_for_examinee(examinee_id=10, company_id=1)
 
         assert result == []
+
+
+# ==========================================================================
+# get_users_for_exam_assignment() filter_type="role"
+# ==========================================================================
+
+
+class TestGetUsersForExamAssignmentByRole:
+    """Фильтрация сдающих по ролям (новая опция из ТЗ)."""
+
+    @pytest.mark.asyncio
+    async def test_filter_by_role(self):
+        """filter_type='role' выполняет запрос и возвращает пользователей роли."""
+        session = AsyncMock()
+        user1 = MagicMock(id=1, full_name="Руководитель Иванов")
+        session.execute.return_value = make_scalars_unique_result([user1])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_users_for_exam_assignment(company_id=1, filter_type="role", filter_id=2)
+
+        assert len(result) == 1
+        session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_filter_by_role_without_id_falls_back(self):
+        """Если filter_id=None, фильтр по роли не применяется (возвращаем всех без стажёров)."""
+        session = AsyncMock()
+        session.execute.return_value = make_scalars_unique_result([])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_users_for_exam_assignment(company_id=1, filter_type="role", filter_id=None)
+
+        assert result == []
+        session.execute.assert_awaited_once()
+
+
+# ==========================================================================
+# get_examiners_for_assignment() — экзаменаторы с фильтрами
+# ==========================================================================
+
+
+class TestGetExaminersForAssignment:
+    """Фильтрация экзаменаторов (whitelist ролей: Руководитель, Сотрудник, Рекрутер)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_all_examiners(self):
+        """Без фильтра возвращает всех экзаменаторов."""
+        session = AsyncMock()
+        user1 = MagicMock(id=1, full_name="Руководитель Тест")
+        user2 = MagicMock(id=2, full_name="Сотрудник Тест")
+        user3 = MagicMock(id=3, full_name="Рекрутер Тест")
+        session.execute.return_value = make_scalars_unique_result([user1, user2, user3])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_examiners_for_assignment(company_id=1)
+
+        assert len(result) == 3
+        session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_filter_by_group(self):
+        session = AsyncMock()
+        session.execute.return_value = make_scalars_unique_result([MagicMock(id=1)])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_examiners_for_assignment(company_id=1, filter_type="group", filter_id=5)
+
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_filter_by_object(self):
+        session = AsyncMock()
+        session.execute.return_value = make_scalars_unique_result([MagicMock(id=1)])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_examiners_for_assignment(company_id=1, filter_type="object", filter_id=3)
+
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_filter_by_role(self):
+        session = AsyncMock()
+        session.execute.return_value = make_scalars_unique_result([MagicMock(id=1)])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_examiners_for_assignment(company_id=1, filter_type="role", filter_id=2)
+
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_filter_by_search(self):
+        session = AsyncMock()
+        user = MagicMock(id=1, full_name="Рекрутеров Тест")
+        session.execute.return_value = make_scalars_unique_result([user])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_examiners_for_assignment(company_id=1, filter_type="search", search_query="Рекрутеров")
+
+        assert len(result) == 1
+        assert result[0].full_name == "Рекрутеров Тест"
+
+    @pytest.mark.asyncio
+    async def test_error_returns_empty_list(self):
+        session = AsyncMock()
+        session.execute.side_effect = Exception("DB error")
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_examiners_for_assignment(company_id=1)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_legacy_get_examiners_delegates_to_for_assignment(self):
+        """get_examiners() — тонкая обёртка над get_examiners_for_assignment()."""
+        session = AsyncMock()
+        session.execute.return_value = make_scalars_unique_result([MagicMock(id=1), MagicMock(id=2)])
+
+        repo = AssessmentAssignmentRepository(session)
+        result = await repo.get_examiners(company_id=1)
+
+        assert len(result) == 2
+        session.execute.assert_awaited_once()
