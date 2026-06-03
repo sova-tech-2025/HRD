@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.database.db import (
     check_user_permission,
     ensure_company_id,
-    get_all_activated_users,
     get_all_groups,
     get_all_objects,
     get_group_by_id,
@@ -17,9 +16,6 @@ from bot.database.db import (
     get_user_by_tg_id,
     get_user_roles,
     get_user_with_details,
-    get_users_by_group,
-    get_users_by_object,
-    search_activated_users_by_name,
     update_user_full_name,
     update_user_group,
     update_user_groups,
@@ -39,6 +35,9 @@ from bot.keyboards.keyboards import (
     get_user_info_keyboard,
 )
 from bot.keyboards.user_filters import user_edit_filters
+from bot.repositories.franchisee_repo import FranchiseeRepository
+from bot.repositories.scope import can_assign_role, get_scope_object_ids
+from bot.repositories.scoped_user_repo import ScopedUserRepository
 from bot.states.states import UserEditStates
 from bot.utils.auth.auth import check_auth
 from bot.utils.logger import log_user_action, log_user_error
@@ -127,19 +126,23 @@ async def cmd_all_users(message: Message, session: AsyncSession, state: FSMConte
         await message.answer("Пользователь не найден")
         return
 
-    if not await check_user_permission(session, user.id, "manage_groups"):
+    if not await check_user_permission(session, user.id, "manage_users"):
         await message.answer("❌ У тебя нет прав для управления пользователями")
         log_user_error(message.from_user.id, "all_users_access_denied", "Insufficient permissions")
         return
+
+    scope = await get_scope_object_ids(session, user)
 
     # Получение company_id из контекста (добавлен CompanyMiddleware)
     company_id = await ensure_company_id(session, state, message.from_user.id)
     # Получаем группы и объекты для фильтров
     groups = await get_all_groups(session, company_id)
     objects = await get_all_objects(session, company_id)
+    if scope is not None:
+        objects = [o for o in objects if o.id in scope]
 
     # Проверяем, есть ли пользователи вообще
-    users = await get_all_activated_users(session, company_id=company_id)
+    users = await ScopedUserRepository(session).list_activated(company_id, scope)
     if not users:
         await message.answer("📭 Нет активированных пользователей в системе")
         return
@@ -174,7 +177,9 @@ async def callback_filter_all_users(callback: CallbackQuery, state: FSMContext, 
 
         data = await state.get_data()
         company_id = data.get("company_id")
-        users = await get_all_activated_users(session, company_id=company_id)
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        scope = await get_scope_object_ids(session, user)
+        users = await ScopedUserRepository(session).list_activated(company_id, scope)
 
         if not users:
             await callback.message.edit_text("📭 Нет активированных пользователей в системе")
@@ -279,7 +284,8 @@ async def callback_filter_group(callback: CallbackQuery, state: FSMContext, sess
             await callback.answer("Группа не найдена", show_alert=True)
             return
 
-        users = await get_users_by_group(session, group_id, company_id=user.company_id)
+        scope = await get_scope_object_ids(session, user)
+        users = await ScopedUserRepository(session).list_by_group(group_id, user.company_id, scope)
 
         text = f"🗂️ <b>ГРУППА: {group.name}</b> 🗂️\n\n📊 Пользователей в группе: <b>{len(users)}</b>\n\n"
 
@@ -291,9 +297,10 @@ async def callback_filter_group(callback: CallbackQuery, state: FSMContext, sess
         else:
             text += "В данной группе пока нет пользователей."
             company_id = await ensure_company_id(session, state, callback.from_user.id)
-            keyboard = user_edit_filters.filter_menu(
-                await get_all_groups(session, company_id), await get_all_objects(session, company_id)
-            )
+            objects = await get_all_objects(session, company_id)
+            if scope is not None:
+                objects = [o for o in objects if o.id in scope]
+            keyboard = user_edit_filters.filter_menu(await get_all_groups(session, company_id), objects)
             await state.set_state(UserEditStates.waiting_for_filter_selection)
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
@@ -325,7 +332,8 @@ async def callback_filter_object(callback: CallbackQuery, state: FSMContext, ses
             await callback.answer("Объект не найден", show_alert=True)
             return
 
-        users = await get_users_by_object(session, object_id, company_id=user.company_id)
+        scope = await get_scope_object_ids(session, user)
+        users = await ScopedUserRepository(session).list_by_object(object_id, user.company_id, scope)
 
         text = f"📍 <b>ОБЪЕКТ: {obj.name}</b> 📍\n\n📊 Пользователей на объекте: <b>{len(users)}</b>\n\n"
 
@@ -337,9 +345,10 @@ async def callback_filter_object(callback: CallbackQuery, state: FSMContext, ses
         else:
             text += "К данному объекту пока не привязаны пользователи."
             company_id = await ensure_company_id(session, state, callback.from_user.id)
-            keyboard = user_edit_filters.filter_menu(
-                await get_all_groups(session, company_id), await get_all_objects(session, company_id)
-            )
+            objects = await get_all_objects(session, company_id)
+            if scope is not None:
+                objects = [o for o in objects if o.id in scope]
+            keyboard = user_edit_filters.filter_menu(await get_all_groups(session, company_id), objects)
             await state.set_state(UserEditStates.waiting_for_filter_selection)
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
@@ -390,7 +399,9 @@ async def process_search_query_all_users(message: Message, state: FSMContext, se
         # Выполняем поиск
         data = await state.get_data()
         company_id = data.get("company_id")
-        users = await search_activated_users_by_name(session, query, company_id=company_id)
+        searcher = await get_user_by_tg_id(session, message.from_user.id)
+        scope = await get_scope_object_ids(session, searcher)
+        users = await ScopedUserRepository(session).search_by_name(query, company_id, scope)
 
         if not users:
             # Пользователи не найдены
@@ -504,6 +515,14 @@ async def callback_edit_user(callback: CallbackQuery, state: FSMContext, session
             await callback.answer("Пользователь не найден", show_alert=True)
             return
 
+        editor = await get_user_by_tg_id(session, callback.from_user.id)
+        scope = await get_scope_object_ids(session, editor)
+        if not ScopedUserRepository.can_edit(user, scope):
+            await callback.answer(
+                "❌ Этот пользователь вне твоих объектов — редактирование недоступно", show_alert=True
+            )
+            return
+
         # Формируем меню редактора
         role_name = user.roles[0].name if user.roles else "Нет роли"
         group_name = format_user_groups(user)
@@ -559,10 +578,14 @@ async def callback_back_to_filters(callback: CallbackQuery, state: FSMContext, s
 
         # Получение company_id из контекста (добавлен CompanyMiddleware)
         company_id = await ensure_company_id(session, state, callback.from_user.id)
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        scope = await get_scope_object_ids(session, user)
         # Получаем группы и объекты для фильтров
         groups = await get_all_groups(session, company_id)
         objects = await get_all_objects(session, company_id)
-        users = await get_all_activated_users(session, company_id=company_id)
+        if scope is not None:
+            objects = [o for o in objects if o.id in scope]
+        users = await ScopedUserRepository(session).list_activated(company_id, scope)
 
         text = (
             "👥 <b>УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ</b> 👥\n\n"
@@ -979,6 +1002,12 @@ async def cancel_edit_role(callback: CallbackQuery, state: FSMContext, session: 
 async def process_new_role(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     """Обработка выбора новой роли"""
     new_role = callback.data.split(":")[1]
+
+    actor = await get_user_by_tg_id(session, callback.from_user.id)
+    actor_scope = await get_scope_object_ids(session, actor) if actor else None
+    if not can_assign_role(actor_scope, new_role):
+        await callback.answer("❌ Эту роль ты назначать не можешь", show_alert=True)
+        return
 
     data = await state.get_data()
     editing_user_id = data.get("editing_user_id")
@@ -1434,13 +1463,20 @@ async def process_confirm_change(callback: CallbackQuery, session: AsyncSession,
         await state.clear()
         return
 
+    # Получаем company_id для изоляции
+    company_id = data.get("company_id")
+
+    scope = await get_scope_object_ids(session, recruiter)
+    target = await get_user_by_id(session, editing_user_id)
+    if not target or not ScopedUserRepository.can_edit(target, scope):
+        await callback.answer("❌ Этот пользователь вне твоих объектов — редактирование недоступно", show_alert=True)
+        await state.clear()
+        return
+
     # Выполняем соответствующее обновление
     success = False
     error_message = "Неизвестная ошибка"
     bot = callback.bot
-
-    # Получаем company_id для изоляции
-    company_id = data.get("company_id")
 
     if edit_type == "full_name":
         success = await update_user_full_name(
@@ -1461,6 +1497,10 @@ async def process_confirm_change(callback: CallbackQuery, session: AsyncSession,
     elif edit_type == "role":
         success = await update_user_role(session, editing_user_id, new_value, recruiter.id, bot, company_id=company_id)
         error_message = "❌ Ошибка при изменении роли"
+        if success:
+            old_role = data.get("old_value")
+            if old_role == "Франчайзи" and new_value != "Франчайзи":
+                await FranchiseeRepository(session).clear_objects(editing_user_id)
     elif edit_type == "group":
         success = await update_user_group(session, editing_user_id, new_value, recruiter.id, bot, company_id=company_id)
         error_message = "❌ Ошибка при изменении группы"
@@ -1528,6 +1568,17 @@ async def process_confirm_change(callback: CallbackQuery, session: AsyncSession,
             # Получаем клавиатуру редактора
             keyboard = get_user_editor_keyboard(role_name in ["Стажер", "Стажёр"])
 
+            if edit_type == "role" and new_value == "Франчайзи":
+                keyboard.inline_keyboard.insert(
+                    0,
+                    [
+                        InlineKeyboardButton(
+                            text="📍 Объекты Франчайзи",
+                            callback_data=f"franchisee_objects:{editing_user_id}",
+                        )
+                    ],
+                )
+
             await callback.message.edit_text(success_message, reply_markup=keyboard, parse_mode="HTML")
 
             # Устанавливаем правильное состояние и данные для корректной работы кнопки "Назад"
@@ -1590,6 +1641,14 @@ async def callback_delete_user(callback: CallbackQuery, state: FSMContext, sessi
             await callback.answer("Пользователь не найден")
             return
 
+        deleter = await get_user_by_tg_id(session, callback.from_user.id)
+        scope = await get_scope_object_ids(session, deleter)
+        if not ScopedUserRepository.can_edit(user, scope):
+            await callback.answer(
+                "❌ Этот пользователь вне твоих объектов — редактирование недоступно", show_alert=True
+            )
+            return
+
         warning_text = (
             f"⚠️ <b>ПРЕДУПРЕЖДЕНИЕ</b> ⚠️\n\n"
             f"Ты собираешься ПОЛНОСТЬЮ УДАЛИТЬ пользователя:\n"
@@ -1645,6 +1704,13 @@ async def callback_confirm_delete_user(callback: CallbackQuery, state: FSMContex
         # Проверяем, что удаляемый пользователь принадлежит той же компании
         if user.company_id != current_user.company_id:
             await callback.answer("❌ Нельзя удалить пользователя из другой компании.", show_alert=True)
+            return
+
+        scope = await get_scope_object_ids(session, current_user)
+        if not ScopedUserRepository.can_edit(user, scope):
+            await callback.answer(
+                "❌ Этот пользователь вне твоих объектов — редактирование недоступно", show_alert=True
+            )
             return
 
         # Сохраняем filter_type перед удалением и очисткой состояния

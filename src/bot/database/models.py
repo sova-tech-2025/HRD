@@ -35,6 +35,13 @@ user_groups = Table(
     Column("group_id", Integer, ForeignKey("groups.id"), primary_key=True),
 )
 
+user_work_objects = Table(
+    "user_work_objects",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+    Column("object_id", Integer, ForeignKey("objects.id"), primary_key=True),
+)
+
 
 class User(Base):
     """Модель пользователя"""
@@ -62,6 +69,9 @@ class User(Base):
     # Связи для объектов стажировки и работы
     internship_object = relationship("Object", foreign_keys=[internship_object_id])
     work_object = relationship("Object", foreign_keys=[work_object_id])
+
+    # Набор объектов работы для роли «Франчайзи» (scoped-администрирование)
+    work_objects = relationship("Object", secondary=user_work_objects)
 
     # Связи для наставничества
     mentoring_relationships = relationship("Mentorship", foreign_keys="Mentorship.mentor_id", back_populates="mentor")

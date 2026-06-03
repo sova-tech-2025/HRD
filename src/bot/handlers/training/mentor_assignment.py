@@ -12,11 +12,12 @@ from bot.database.db import (
     assign_mentor_to_trainee,
     check_user_permission,
     ensure_company_id,
-    get_available_mentors_for_trainee,
-    get_trainees_without_mentor,
+    get_user_by_id,
     get_user_by_tg_id,
 )
 from bot.keyboards.keyboards import get_main_menu_keyboard
+from bot.repositories.scope import get_scope_object_ids, in_scope
+from bot.repositories.scoped_user_repo import ScopedUserRepository
 from bot.states.states import MentorAssignmentStates
 from bot.utils.auth.auth import check_auth
 from bot.utils.logger import log_user_action, log_user_error
@@ -40,7 +41,7 @@ async def cmd_assign_mentor(message: Message, state: FSMContext, session: AsyncS
             return
 
         # Проверка прав доступа (только рекрутеры)
-        has_permission = await check_user_permission(session, user.id, "manage_groups")
+        has_permission = await check_user_permission(session, user.id, "assign_mentors")
         if not has_permission:
             await message.answer(
                 "❌ <b>Недостаточно прав</b>\n\n"
@@ -52,7 +53,10 @@ async def cmd_assign_mentor(message: Message, state: FSMContext, session: AsyncS
             return
 
         # Получаем список стажеров без наставника
-        trainees_without_mentor = await get_trainees_without_mentor(session, company_id=user.company_id)
+        scope = await get_scope_object_ids(session, user)
+        trainees_without_mentor = await ScopedUserRepository(session).list_trainees_without_mentor(
+            company_id=user.company_id, scope=scope
+        )
 
         if not trainees_without_mentor:
             await message.answer(
@@ -127,7 +131,9 @@ async def callback_select_trainee(callback: CallbackQuery, state: FSMContext, se
             return
 
         # Получаем доступных наставников для этого стажера
-        available_mentors = await get_available_mentors_for_trainee(session, trainee_id, company_id=trainee.company_id)
+        actor = await get_user_by_tg_id(session, callback.from_user.id)
+        scope = await get_scope_object_ids(session, actor) if actor else None
+        available_mentors = await ScopedUserRepository(session).list_mentors(company_id=trainee.company_id, scope=scope)
 
         if not available_mentors:
             await callback.message.edit_text(
@@ -280,6 +286,16 @@ async def callback_confirm_mentor_assignment(callback: CallbackQuery, state: FSM
             await callback.message.edit_text("Ошибка: данные не найдены")
             return
 
+        scope = await get_scope_object_ids(session, recruiter)
+        guard_trainee = await get_user_by_id(session, trainee_id)
+        guard_mentor = await get_user_by_id(session, mentor_id)
+        if not in_scope(scope, getattr(guard_trainee, "internship_object_id", None)) or not in_scope(
+            scope, getattr(guard_mentor, "work_object_id", None)
+        ):
+            await callback.message.edit_text("❌ Доступно только в рамках твоих объектов")
+            await state.clear()
+            return
+
         # Назначаем наставника
         from main import bot
 
@@ -375,13 +391,16 @@ async def callback_assign_mentor(callback: CallbackQuery, state: FSMContext, ses
             return
 
         # Проверка прав доступа
-        has_permission = await check_user_permission(session, user.id, "manage_groups")
+        has_permission = await check_user_permission(session, user.id, "assign_mentors")
         if not has_permission:
             await callback.message.edit_text("❌ <b>Недостаточно прав</b>", parse_mode="HTML")
             return
 
         # Получаем список стажеров без наставника
-        trainees_without_mentor = await get_trainees_without_mentor(session, company_id=user.company_id)
+        scope = await get_scope_object_ids(session, user)
+        trainees_without_mentor = await ScopedUserRepository(session).list_trainees_without_mentor(
+            company_id=user.company_id, scope=scope
+        )
 
         if not trainees_without_mentor:
             await callback.message.edit_text(

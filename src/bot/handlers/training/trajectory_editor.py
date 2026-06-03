@@ -14,6 +14,7 @@ from bot.database.db import (
     add_test_to_session_from_editor,
     check_session_has_trainees,
     check_stage_has_trainees,
+    check_user_permission,
     ensure_company_id,
     get_all_active_tests,
     get_all_groups,
@@ -50,6 +51,66 @@ from bot.utils.logger import log_user_action, log_user_error
 from bot.utils.validation.input import validate_name
 
 router = Router()
+
+
+async def _is_trajectory_view_only(session: AsyncSession, user_id: int) -> bool:
+    user = await get_user_by_tg_id(session, user_id)
+    if not user:
+        return True
+    return not await check_user_permission(session, user.id, "manage_groups")
+
+
+async def _reject_if_view_only(callback: CallbackQuery, session: AsyncSession) -> bool:
+    if await _is_trajectory_view_only(session, callback.from_user.id):
+        await callback.answer("🔒 Просмотр без редактирования", show_alert=True)
+        return True
+    return False
+
+
+def _get_trajectory_editor_view_keyboard(stages: list, path_id: int) -> InlineKeyboardMarkup:
+    keyboard = []
+    for stage in sorted(stages, key=lambda s: s.order_number):
+        keyboard.append(
+            [InlineKeyboardButton(text=f"Этап {stage.order_number}", callback_data=f"edit_stage_view:{stage.id}")]
+        )
+    keyboard.append([InlineKeyboardButton(text="Аттестация", callback_data=f"edit_trajectory_attestation:{path_id}")])
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="edit_trajectory")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def _get_stage_editor_view_keyboard(stage, sessions: list, path_id: int) -> InlineKeyboardMarkup:
+    keyboard = []
+    for sess in sorted(sessions, key=lambda s: s.order_number):
+        keyboard.append(
+            [InlineKeyboardButton(text=f"Сессия {sess.order_number}", callback_data=f"edit_session_view:{sess.id}")]
+        )
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"editor_main_menu:{path_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def _get_session_tests_view_keyboard(tests: list, session_id: int, stage_id: int) -> InlineKeyboardMarkup:
+    keyboard = []
+    for test in tests:
+        keyboard.append([InlineKeyboardButton(text=test.name, callback_data=f"test:{test.id}")])
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_stage_view:{stage_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def _get_trajectory_attestation_view_keyboard(
+    path_id: int, has_attestation: bool = False, attestation_id: int = None
+) -> InlineKeyboardMarkup:
+    keyboard = []
+    if has_attestation:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="👁️ Просмотреть", callback_data=f"view_trajectory_attestation:{path_id}:{attestation_id}"
+                )
+            ]
+        )
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"editor_main_menu:{path_id}")])
+    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 # ===============================
@@ -144,7 +205,10 @@ async def _show_editor_main_menu(
     # Получаем этапы для клавиатуры
     stages = sorted(learning_path.stages, key=lambda s: s.order_number) if learning_path.stages else []
 
-    keyboard = get_trajectory_editor_main_keyboard(stages, path_id)
+    if await _is_trajectory_view_only(session, user_id):
+        keyboard = _get_trajectory_editor_view_keyboard(stages, path_id)
+    else:
+        keyboard = get_trajectory_editor_main_keyboard(stages, path_id)
 
     # Пытаемся отредактировать сообщение, если не получается - отправляем новое
     try:
@@ -212,7 +276,10 @@ async def _show_stage_editor(message: Message, state: FSMContext, session: Async
     # Форматируем вид для редактирования этапа
     text = format_stage_editor_view(learning_path, stage)
 
-    keyboard = get_stage_editor_keyboard(stage, sessions, learning_path.id)
+    if await _is_trajectory_view_only(session, user_id):
+        keyboard = _get_stage_editor_view_keyboard(stage, sessions, learning_path.id)
+    else:
+        keyboard = get_stage_editor_keyboard(stage, sessions, learning_path.id)
 
     # Пытаемся отредактировать сообщение, если не получается - отправляем новое
     try:
@@ -292,7 +359,10 @@ async def _show_session_editor(
     # Форматируем вид для управления тестами
     text = format_session_tests_editor_view(learning_path, stage, learning_session, tests)
 
-    keyboard = get_session_tests_keyboard(tests, session_id, stage.id)
+    if await _is_trajectory_view_only(session, user_id):
+        keyboard = _get_session_tests_view_keyboard(tests, session_id, stage.id)
+    else:
+        keyboard = get_session_tests_keyboard(tests, session_id, stage.id)
 
     # Пытаемся отредактировать сообщение, если не получается - отправляем новое
     try:
@@ -375,6 +445,8 @@ async def callback_edit_stage_view(callback: CallbackQuery, state: FSMContext, s
 async def callback_edit_stage_name(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Начало редактирования названия этапа"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         stage_id = int(callback.data.split(":")[1])
@@ -446,6 +518,8 @@ async def callback_delete_stage(callback: CallbackQuery, state: FSMContext, sess
     if not user:
         await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
         return
+    if await _reject_if_view_only(callback, session):
+        return
 
     try:
         await callback.answer()
@@ -505,6 +579,8 @@ async def callback_delete_stage(callback: CallbackQuery, state: FSMContext, sess
 async def callback_confirm_delete_stage(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Подтверждение и удаление этапа"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         stage_id = int(callback.data.split(":")[1])
@@ -569,6 +645,8 @@ async def callback_edit_session_view(callback: CallbackQuery, state: FSMContext,
 async def callback_edit_session_name(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Начало редактирования названия сессии"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         session_id = int(callback.data.split(":")[1])
@@ -635,6 +713,8 @@ async def process_session_name(message: Message, state: FSMContext, session: Asy
 async def callback_delete_session(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Подтверждение удаления сессии"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         session_id = int(callback.data.split(":")[1])
@@ -699,6 +779,8 @@ async def callback_delete_session(callback: CallbackQuery, state: FSMContext, se
 async def callback_confirm_delete_session(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Подтверждение и удаление сессии"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         session_id = int(callback.data.split(":")[1])
@@ -755,6 +837,8 @@ async def callback_confirm_delete_session(callback: CallbackQuery, state: FSMCon
 async def callback_add_test_to_session(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Добавление теста в сессию - выбор теста"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         session_id = int(callback.data.split(":")[1])
@@ -805,6 +889,8 @@ async def callback_add_test_to_session(callback: CallbackQuery, state: FSMContex
 async def callback_select_test_for_session(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Выбор теста для добавления в сессию"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         parts = callback.data.split(":")
@@ -847,6 +933,8 @@ async def callback_remove_test_from_session(callback: CallbackQuery, state: FSMC
     user = await get_user_by_tg_id(session, callback.from_user.id)
     if not user:
         await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    if await _reject_if_view_only(callback, session):
         return
 
     try:
@@ -923,7 +1011,10 @@ async def callback_edit_trajectory_attestation(callback: CallbackQuery, state: F
         else:
             text += "<b>Аттестация:</b> не назначена\n\n"
 
-        keyboard = get_trajectory_attestation_management_keyboard(path_id, has_attestation, attestation_id)
+        if await _is_trajectory_view_only(session, callback.from_user.id):
+            keyboard = _get_trajectory_attestation_view_keyboard(path_id, has_attestation, attestation_id)
+        else:
+            keyboard = get_trajectory_attestation_management_keyboard(path_id, has_attestation, attestation_id)
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
@@ -945,6 +1036,8 @@ async def callback_edit_trajectory_attestation(callback: CallbackQuery, state: F
 async def callback_select_attestation_for_trajectory(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Выбор аттестации для траектории"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         path_id = int(callback.data.split(":")[1])
@@ -984,6 +1077,8 @@ async def callback_select_attestation_for_trajectory(callback: CallbackQuery, st
 async def callback_confirm_attestation_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Подтверждение выбора аттестации"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         parts = callback.data.split(":")
@@ -1131,6 +1226,8 @@ async def callback_editor_attestation_page_next(callback: CallbackQuery, state: 
 async def callback_remove_trajectory_attestation(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Удаление аттестации из траектории"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         path_id = int(callback.data.split(":")[1])
@@ -1206,6 +1303,8 @@ async def callback_attestations_page(callback: CallbackQuery, state: FSMContext,
 async def callback_edit_trajectory_group(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Выбор группы для траектории"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         path_id = int(callback.data.split(":")[1])
@@ -1245,6 +1344,8 @@ async def callback_edit_trajectory_group(callback: CallbackQuery, state: FSMCont
 async def callback_confirm_group_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Подтверждение выбора группы"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         parts = callback.data.split(":")
@@ -1293,6 +1394,8 @@ async def callback_add_stage_to_trajectory(callback: CallbackQuery, state: FSMCo
     user = await get_user_by_tg_id(session, callback.from_user.id)
     if not user:
         await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return
+    if await _reject_if_view_only(callback, session):
         return
 
     try:
@@ -1393,6 +1496,8 @@ async def process_creating_stage_name(message: Message, state: FSMContext, sessi
 async def callback_add_session_to_stage(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Начало создания новой сессии в этапе"""
     try:
+        if await _reject_if_view_only(callback, session):
+            return
         await callback.answer()
 
         stage_id = int(callback.data.split(":")[1])

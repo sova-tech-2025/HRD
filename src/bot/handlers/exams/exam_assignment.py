@@ -22,6 +22,7 @@ from bot.database.db import (
 from bot.keyboards.keyboards import is_main_menu_text
 from bot.keyboards.user_filters import exam_filters, examiner_filters
 from bot.repositories import AssessmentAssignmentRepository, AssessmentRepository
+from bot.repositories.scope import get_scope_object_ids, in_scope
 from bot.states.states import ExamStates
 from bot.utils.logger import log_user_action, log_user_error
 
@@ -29,6 +30,21 @@ router = Router()
 
 
 # ================== Общие утилиты ==================
+
+
+async def _actor_scope(session: AsyncSession, tg_id: int) -> set[int] | None:
+    """Область видимости объектов назначающего (None — без ограничений)."""
+    actor = await get_user_by_tg_id(session, tg_id)
+    if not actor:
+        return None
+    return await get_scope_object_ids(session, actor)
+
+
+def _filter_by_scope(users: list, scope: set[int] | None) -> list:
+    """Оставляет только кандидатов, чей объект работы входит в область видимости."""
+    if scope is None:
+        return users
+    return [u for u in users if in_scope(scope, u.work_object_id)]
 
 
 async def _roles_for_examiners(session: AsyncSession) -> list:
@@ -130,8 +146,18 @@ async def _show_examiner_filter_menu(callback: CallbackQuery, state: FSMContext,
     await state.set_state(ExamStates.selecting_examiner_filter)
 
 
-async def _show_examiner_list(callback: CallbackQuery, state: FSMContext, examiners: list, *, page: int = 0) -> None:
+async def _show_examiner_list(
+    callback: CallbackQuery,
+    state: FSMContext,
+    examiners: list,
+    *,
+    page: int = 0,
+    session: AsyncSession | None = None,
+) -> None:
     """Показ результатов фильтрации экзаменаторов."""
+    if session is not None:
+        scope = await _actor_scope(session, callback.from_user.id)
+        examiners = _filter_by_scope(examiners, scope)
     if not examiners:
         await callback.message.edit_text(
             "❌ Экзаменаторы не найдены.",
@@ -172,7 +198,7 @@ async def callback_exam_examiner_filter_all(callback: CallbackQuery, state: FSMC
             company_id=company_id, filter_type="all"
         )
         await state.update_data(examiner_filter_type="all", examiner_filter_id=None)
-        await _show_examiner_list(callback, state, examiners)
+        await _show_examiner_list(callback, state, examiners, session=session)
     except Exception as e:
         log_user_error(callback.from_user.id, "exam_examiner_filter_all_error", str(e))
 
@@ -225,7 +251,7 @@ async def callback_exam_examiner_group_selected(callback: CallbackQuery, state: 
             company_id=company_id, filter_type="group", filter_id=group_id
         )
         await state.update_data(examiner_filter_type="group", examiner_filter_id=group_id)
-        await _show_examiner_list(callback, state, examiners)
+        await _show_examiner_list(callback, state, examiners, session=session)
     except Exception as e:
         log_user_error(callback.from_user.id, "exam_examiner_group_selected_error", str(e))
 
@@ -278,7 +304,7 @@ async def callback_exam_examiner_object_selected(callback: CallbackQuery, state:
             company_id=company_id, filter_type="object", filter_id=object_id
         )
         await state.update_data(examiner_filter_type="object", examiner_filter_id=object_id)
-        await _show_examiner_list(callback, state, examiners)
+        await _show_examiner_list(callback, state, examiners, session=session)
     except Exception as e:
         log_user_error(callback.from_user.id, "exam_examiner_object_selected_error", str(e))
 
@@ -326,7 +352,7 @@ async def callback_exam_examiner_role_selected(callback: CallbackQuery, state: F
             company_id=company_id, filter_type="role", filter_id=role_id
         )
         await state.update_data(examiner_filter_type="role", examiner_filter_id=role_id)
-        await _show_examiner_list(callback, state, examiners)
+        await _show_examiner_list(callback, state, examiners, session=session)
     except Exception as e:
         log_user_error(callback.from_user.id, "exam_examiner_role_selected_error", str(e))
 
@@ -360,6 +386,9 @@ async def process_exam_examiner_search_query(message: Message, state: FSMContext
         examiners = await AssessmentAssignmentRepository(session).get_examiners_for_assignment(
             company_id=company_id, filter_type="search", search_query=query
         )
+
+        scope = await _actor_scope(session, message.from_user.id)
+        examiners = _filter_by_scope(examiners, scope)
 
         if not examiners:
             await message.answer(f"❌ По запросу «{query}» экзаменаторов не найдено. Попробуйте другое имя:")
@@ -414,6 +443,11 @@ async def callback_exam_examiner_selected(callback: CallbackQuery, state: FSMCon
         examiner = await get_user_by_id(session, examiner_id)
         if not examiner:
             await callback.message.edit_text("Экзаменатор не найден")
+            return
+
+        scope = await _actor_scope(session, callback.from_user.id)
+        if not in_scope(scope, examiner.work_object_id):
+            await callback.answer("Экзаменатор вне твоих объектов", show_alert=True)
             return
 
         data = await state.get_data()
@@ -493,7 +527,7 @@ async def callback_exam_filter_all(callback: CallbackQuery, state: FSMContext, s
         users = await AssessmentAssignmentRepository(session).get_users_for_exam_assignment(
             company_id, filter_type="all"
         )
-        await _show_examinee_list(callback, state, users)
+        await _show_examinee_list(callback, state, users, session=session)
     except Exception as e:
         log_user_error(callback.from_user.id, "exam_filter_all_error", str(e))
 
@@ -546,7 +580,7 @@ async def callback_exam_group_selected(callback: CallbackQuery, state: FSMContex
             company_id, filter_type="group", filter_id=group_id
         )
         await state.update_data(exam_filter_type="group", exam_filter_id=group_id)
-        await _show_examinee_list(callback, state, users)
+        await _show_examinee_list(callback, state, users, session=session)
     except Exception as e:
         log_user_error(callback.from_user.id, "exam_group_selected_error", str(e))
 
@@ -599,7 +633,7 @@ async def callback_exam_object_selected(callback: CallbackQuery, state: FSMConte
             company_id, filter_type="object", filter_id=object_id
         )
         await state.update_data(exam_filter_type="object", exam_filter_id=object_id)
-        await _show_examinee_list(callback, state, users)
+        await _show_examinee_list(callback, state, users, session=session)
     except Exception as e:
         log_user_error(callback.from_user.id, "exam_object_selected_error", str(e))
 
@@ -647,7 +681,7 @@ async def callback_exam_role_selected(callback: CallbackQuery, state: FSMContext
             company_id, filter_type="role", filter_id=role_id
         )
         await state.update_data(exam_filter_type="role", exam_filter_id=role_id)
-        await _show_examinee_list(callback, state, users)
+        await _show_examinee_list(callback, state, users, session=session)
     except Exception as e:
         log_user_error(callback.from_user.id, "exam_role_selected_error", str(e))
 
@@ -682,6 +716,9 @@ async def process_exam_search_query(message: Message, state: FSMContext, session
             company_id, filter_type="search", search_query=query
         )
 
+        scope = await _actor_scope(session, message.from_user.id)
+        users = _filter_by_scope(users, scope)
+
         if not users:
             await message.answer(
                 f"❌ По запросу «{query}» никого не найдено. Попробуй другое имя:",
@@ -703,8 +740,13 @@ async def process_exam_search_query(message: Message, state: FSMContext, session
         log_user_error(message.from_user.id, "process_exam_search_error", str(e))
 
 
-async def _show_examinee_list(callback: CallbackQuery, state: FSMContext, users: list):
+async def _show_examinee_list(
+    callback: CallbackQuery, state: FSMContext, users: list, session: AsyncSession | None = None
+):
     """Показ списка сдающих."""
+    if session is not None:
+        scope = await _actor_scope(session, callback.from_user.id)
+        users = _filter_by_scope(users, scope)
     if not users:
         await callback.message.edit_text(
             "❌ Пользователи не найдены.",
@@ -762,6 +804,11 @@ async def callback_exam_examinee_selected(callback: CallbackQuery, state: FSMCon
         examinee = await get_user_by_id(session, examinee_id)
         if not examinee:
             await callback.message.edit_text("Пользователь не найден")
+            return
+
+        scope = await _actor_scope(session, callback.from_user.id)
+        if not in_scope(scope, examinee.work_object_id):
+            await callback.answer("Сдающий вне твоих объектов", show_alert=True)
             return
 
         data = await state.get_data()

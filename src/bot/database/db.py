@@ -120,6 +120,12 @@ async def init_db():
     await update_role_permissions_for_existing_db()
     await migrate_new_tables()
     await update_existing_users_role_date()
+
+    # Провижининг роли «Франчайзи»: вынесен в репозиторий, db.py не расширяется
+    from bot.repositories.role_provisioning import RoleProvisioningRepository
+
+    async with async_session() as session:
+        await RoleProvisioningRepository(session).provision_franchisee_role()
     # Только диагностика дубликатов, НЕ автоматическая очистка
     await cleanup_all_duplicate_attestations_on_startup()
 

@@ -78,6 +78,9 @@ def get_role_selection_keyboard(is_editing: bool = False) -> InlineKeyboardMarku
         ("Руководитель", "Руководитель"),
     ]
 
+    if is_editing:
+        all_roles.append(("Франчайзи", "Франчайзи"))
+
     keyboard_buttons = [
         [InlineKeyboardButton(text=display_name, callback_data=f"role:{role_name}")]
         for display_name, role_name in all_roles
@@ -125,6 +128,27 @@ def get_recruiter_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="Новые пользователи ➕")],
             [KeyboardButton(text="Помощь ❓")],
             [KeyboardButton(text="Компания 🏢")],
+        ],
+        resize_keyboard=True,
+    )
+    return keyboard
+
+
+def get_franchisee_keyboard() -> ReplyKeyboardMarkup:
+    """Меню для роли Франчайзи: scoped-администрирование без управления контентом."""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Мой профиль 🦸🏻‍♂️")],
+            [KeyboardButton(text="Рассылка ✈️")],
+            [KeyboardButton(text="Тесты 📄")],
+            [KeyboardButton(text="Экзамены 📝")],
+            [KeyboardButton(text="Наставники 🦉")],
+            [KeyboardButton(text="Стажеры 🐣")],
+            [KeyboardButton(text="Траектория 📖")],
+            [KeyboardButton(text="База знаний 📁️")],
+            [KeyboardButton(text="Все пользователи 🚸")],
+            [KeyboardButton(text="Новые пользователи ➕")],
+            [KeyboardButton(text="Помощь ❓")],
         ],
         resize_keyboard=True,
     )
@@ -241,6 +265,7 @@ def get_admin_role_picker_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Рекрутер", callback_data="admin_role:Рекрутер")],
+            [InlineKeyboardButton(text="Франчайзи", callback_data="admin_role:Франчайзи")],
             [InlineKeyboardButton(text="Руководитель", callback_data="admin_role:Руководитель")],
             [InlineKeyboardButton(text="Наставник", callback_data="admin_role:Наставник")],
             [InlineKeyboardButton(text="Сотрудник", callback_data="admin_role:Сотрудник")],
@@ -279,6 +304,8 @@ def get_keyboard_by_role(roles) -> ReplyKeyboardMarkup:
         return None  # ADMIN использует inline-меню, не reply keyboard
     if "Рекрутер" in role_names:
         return get_recruiter_keyboard()
+    elif "Франчайзи" in role_names:
+        return get_franchisee_keyboard()
     elif "Руководитель" in role_names:
         return get_manager_keyboard()
     elif "Наставник" in role_names:

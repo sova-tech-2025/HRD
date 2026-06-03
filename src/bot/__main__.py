@@ -26,7 +26,7 @@ from bot.handlers.knowledge import knowledge_base
 from bot.handlers.management import employee_transition, manager_attestation, manager_menu
 from bot.handlers.tests import broadcast, test_taking, tests
 from bot.handlers.training import learning_paths, mentor_assignment, mentorship, trainee_trajectory, trajectory_editor
-from bot.handlers.users import admin, role_permissions, user_activation, user_edit
+from bot.handlers.users import admin, franchisee, role_permissions, user_activation, user_edit
 from bot.middlewares.bot_middleware import BotMiddleware
 from bot.middlewares.company_middleware import CompanyMiddleware
 from bot.middlewares.db_middleware import DatabaseMiddleware
@@ -63,6 +63,7 @@ dp.include_router(auth.router)
 dp.include_router(company.router)  # Управление компаниями - ВАЖНО: после auth
 dp.include_router(registration.router)  # Регистрация - используется при присоединении к компании
 dp.include_router(admin.router)
+dp.include_router(franchisee.router)  # Настройка объектов роли «Франчайзи»
 dp.include_router(role_permissions.router)
 dp.include_router(broadcast.router)  # Массовая рассылка тестов (Task 8) - ДОЛЖЕН БЫТЬ РАНЬШЕ tests.router
 dp.include_router(tests.router)

@@ -184,12 +184,13 @@ async def cmd_knowledge_base_universal(message: Message, state: FSMContext, sess
             await state.set_state(KnowledgeBaseStates.main_menu)
             log_user_action(message.from_user.id, "knowledge_base_opened", "Открыта база знаний (рекрутер)")
 
-        # ПРОСМОТР БАЗЫ ЗНАНИЙ - для Стажеров, Сотрудников, Наставников и Руководителей
+        # ПРОСМОТР БАЗЫ ЗНАНИЙ - для Стажеров, Сотрудников, Наставников, Руководителей и Франчайзи
         elif (
             "Стажер" in user_roles
             or "Сотрудник" in user_roles
             or "Наставник" in user_roles
             or "Руководитель" in user_roles
+            or "Франчайзи" in user_roles
         ):
             has_permission = await check_user_permission(session, user.id, "view_knowledge_base")
             if not has_permission:
@@ -233,6 +234,8 @@ async def cmd_knowledge_base_universal(message: Message, state: FSMContext, sess
                 role_name = "наставник"
             elif "Руководитель" in user_roles:
                 role_name = "руководитель"
+            elif "Франчайзи" in user_roles:
+                role_name = "франчайзи"
 
             log_user_action(
                 message.from_user.id, f"{role_name}_knowledge_base_opened", f"Открыта база знаний ({role_name})"
