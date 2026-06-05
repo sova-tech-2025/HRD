@@ -693,22 +693,24 @@ def get_broadcast_main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+BROADCAST_ROLE_NAMES = {
+    "trainee": "Стажер",
+    "employee": "Сотрудник",
+    "mentor": "Наставник",
+    "recruiter": "Рекрутер",
+    "manager": "Руководитель",
+    "franchisee": "Франчайзи",
+}
+
+
 def get_broadcast_roles_selection_keyboard(selected_roles: list = None) -> InlineKeyboardMarkup:
     """Клавиатура выбора ролей для рассылки"""
     if selected_roles is None:
         selected_roles = []
 
-    roles = [
-        ("Стажер", "trainee"),
-        ("Сотрудник", "employee"),
-        ("Наставник", "mentor"),
-        ("Рекрутер", "recruiter"),
-        ("Руководитель", "manager"),
-    ]
-
     keyboard = InlineKeyboardBuilder()
 
-    for role_display, role_key in roles:
+    for role_key, role_display in BROADCAST_ROLE_NAMES.items():
         checkmark = "✅ " if role_key in selected_roles else ""
         keyboard.button(text=f"{checkmark}{role_display}", callback_data=f"broadcast_role:{role_key}")
 
@@ -719,7 +721,7 @@ def get_broadcast_roles_selection_keyboard(selected_roles: list = None) -> Inlin
         keyboard.row(InlineKeyboardButton(text="➡️ Далее", callback_data="broadcast_roles_next"))
 
     # Динамический текст кнопки "Все роли" / "Снять все"
-    all_roles_set = {"trainee", "employee", "mentor", "recruiter", "manager"}
+    all_roles_set = set(BROADCAST_ROLE_NAMES)
     if set(selected_roles) == all_roles_set:
         all_button_text = "❌ Снять все"
     else:

@@ -95,16 +95,25 @@ class TestScenario5_BroadcastTestAccess:
             await wait_between_actions(1.0)
             resp = await recruiter.get_last_message()
 
-        # Отправляем рассылку
+        # Кнопка "Отправить" на шаге групп открывает шаг выбора объектов (Шаг 7)
         send_btn = recruiter.find_button_data(resp, data_prefix="broadcast_send")
-        if not send_btn:
-            send_btn = recruiter.find_button_data(resp, text_contains="Отправить")
         assert send_btn, f"Send broadcast button not found. Buttons: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=send_btn, wait_pattern="Выбор объектов|объект")
 
+        # Выбираем все объекты
+        all_objects_btn = recruiter.find_button_data(resp, data_prefix="broadcast_objects_all")
+        if all_objects_btn:
+            await recruiter.click_button(resp, data=all_objects_btn)
+            await wait_between_actions(1.0)
+            resp = await recruiter.get_last_message()
+
+        # Финальная отправка рассылки
+        objects_send_btn = recruiter.find_button_data(resp, data_prefix="broadcast_objects_send")
+        assert objects_send_btn, f"Objects send button not found. Buttons: {recruiter.get_button_texts(resp)}"
         resp = await recruiter.click_and_wait(
             resp,
-            data=send_btn,
-            wait_pattern="отправлен|Рассылка|доставлен|успешно",
+            data=objects_send_btn,
+            wait_pattern="успешно отправил|Статистика|Уведомлений отправлено",
             timeout=30.0,
         )
 

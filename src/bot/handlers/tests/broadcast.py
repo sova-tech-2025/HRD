@@ -37,6 +37,7 @@ from bot.database.db import (
     send_broadcast_notification,
 )
 from bot.keyboards.keyboards import (
+    BROADCAST_ROLE_NAMES,
     get_broadcast_folders_keyboard,
     get_broadcast_groups_selection_keyboard,
     get_broadcast_main_menu_keyboard,
@@ -484,14 +485,7 @@ async def show_groups_selection(
 
     # Добавляем информацию о ролях
     if selected_roles:
-        role_names = {
-            "trainee": "Стажер",
-            "employee": "Сотрудник",
-            "mentor": "Наставник",
-            "recruiter": "Рекрутер",
-            "manager": "Руководитель",
-        }
-        selected_display = [role_names.get(r, r) for r in selected_roles]
+        selected_display = [BROADCAST_ROLE_NAMES.get(r, r) for r in selected_roles]
         info_lines.append(f"🟢 <b>Роли:</b> {', '.join(selected_display)}\n")
 
     info_lines.append("\n🟡 <b>Выбери группы для рассылки👇</b>")
@@ -740,14 +734,7 @@ async def callback_toggle_broadcast_role(callback: CallbackQuery, state: FSMCont
         await state.update_data(selected_roles=selected_roles)
 
         # Обновляем клавиатуру
-        role_names = {
-            "trainee": "Стажер",
-            "employee": "Сотрудник",
-            "mentor": "Наставник",
-            "recruiter": "Рекрутер",
-            "manager": "Руководитель",
-        }
-        selected_display = [role_names[r] for r in selected_roles]
+        selected_display = [BROADCAST_ROLE_NAMES[r] for r in selected_roles]
 
         info_text = (
             "✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"
@@ -777,7 +764,7 @@ async def callback_select_all_roles(callback: CallbackQuery, state: FSMContext, 
     try:
         data = await state.get_data()
         current_roles = data.get("selected_roles", [])
-        all_roles = ["trainee", "employee", "mentor", "recruiter", "manager"]
+        all_roles = list(BROADCAST_ROLE_NAMES)
 
         # TOGGLE: Если все выбраны → снять все, иначе → выбрать все
         if set(current_roles) == set(all_roles):
@@ -804,7 +791,7 @@ async def callback_select_all_roles(callback: CallbackQuery, state: FSMContext, 
             info_text = (
                 "✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"
                 "📝 <b>Шаг 5 из 6: Выбор ролей</b>\n\n"
-                "✅ Выбраны все роли: Стажер, Сотрудник, Наставник, Рекрутер, Руководитель\n\n"
+                f"✅ Выбраны все роли: {', '.join(BROADCAST_ROLE_NAMES.values())}\n\n"
                 "💡 <i>Рассылка будет отправлена всем пользователям выбранных групп</i>"
             )
 
@@ -1098,14 +1085,7 @@ async def callback_send_broadcast_with_objects(callback: CallbackQuery, state: F
 
         target_role_names = None
         if selected_roles:
-            role_mapping = {
-                "trainee": "Стажер",
-                "employee": "Сотрудник",
-                "mentor": "Наставник",
-                "recruiter": "Рекрутер",
-                "manager": "Руководитель",
-            }
-            target_role_names = [role_mapping[r] for r in selected_roles]
+            target_role_names = [BROADCAST_ROLE_NAMES[r] for r in selected_roles]
 
         all_users = []
         group_names = []
