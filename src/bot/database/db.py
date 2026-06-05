@@ -1922,17 +1922,17 @@ async def assign_mentor(
             logger.error(f"Пользователь назначающий с ID {assigned_by_id} не найден")
             return None
 
-        # Проверяем, что наставник имеет подходящую роль
+        # Проверяем, что наставник имеет подходящую роль (ADMIN допускается как мульти-роль)
         mentor_roles = await get_user_roles(session, mentor_id)
         role_names = [role.name for role in mentor_roles]
-        if not any(role in ["Наставник", "Сотрудник", "Руководитель"] for role in role_names):
+        if not any(role in ["Наставник", "Сотрудник", "Руководитель", "ADMIN"] for role in role_names):
             logger.error(f"Пользователь {mentor_id} не может быть наставником (неподходящая роль)")
             return None
 
-        # Проверяем, что стажер имеет роль стажера
+        # Проверяем, что стажер имеет роль стажера (ADMIN допускается как мульти-роль)
         trainee_roles = await get_user_roles(session, trainee_id)
         trainee_role_names = [role.name for role in trainee_roles]
-        if "Стажер" not in trainee_role_names:
+        if "Стажер" not in trainee_role_names and "ADMIN" not in trainee_role_names:
             logger.error(f"Пользователь {trainee_id} не является стажером")
             return None
 
