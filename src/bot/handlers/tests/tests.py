@@ -72,9 +72,15 @@ async def cmd_tests_main(message: Message, state: FSMContext, session: AsyncSess
             await message.answer("❌ Ты не зарегистрирован в системе.")
             return
 
+        # ADMIN под ЛК «Франчайзи» работает как Франчайзи (без управления контентом),
+        # несмотря на god-mode права роли ADMIN
+        data = await state.get_data()
+        active_role = data.get("role") if data.get("is_admin") else None
+        is_franchisee_lk = active_role == "Франчайзи"
+
         # Проверяем права на создание тестов (только рекрутеры)
         has_permission = await check_user_permission(session, user.id, "create_tests")
-        if has_permission:
+        if has_permission and not is_franchisee_lk:
             await message.answer(
                 "📄 <b>УПРАВЛЕНИЕ ТЕСТАМИ</b>\n\nВыбери действие:",
                 parse_mode="HTML",
@@ -113,17 +119,6 @@ async def get_creator_name(session: AsyncSession, creator_id: int) -> str:
     except Exception as e:
         logger.error(f"Ошибка получения имени создателя {creator_id}: {e}")
         return "Неизвестен"
-
-
-def _get_test_view_actions_keyboard(test_id: int) -> InlineKeyboardMarkup:
-    """Клавиатура карточки теста для зрителя (Франчайзи): только материалы и результаты"""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📚 Материалы", callback_data=f"view_materials:{test_id}")],
-            [InlineKeyboardButton(text="📊 Результаты", callback_data=f"test_results:{test_id}")],
-            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_tests")],
-        ]
-    )
 
 
 async def _show_tests_view_list(message_or_message, state: FSMContext, session: AsyncSession, user) -> None:
@@ -1090,6 +1085,8 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
     # Получаем данные состояния для определения контекста
     state_data = await state.get_data()
     context = state_data.get("test_context", "management")  # По умолчанию - управление
+    # ADMIN под ЛК «Франчайзи» работает как Франчайзи (без управления контентом)
+    active_role = state_data.get("role") if state_data.get("is_admin") else None
 
     # Если у пользователя есть доступ (через рассылку или индивидуально), показываем интерфейс прохождения
     # Но ТОЛЬКО если контекст = 'taking' (из "Мои тесты")
@@ -1101,7 +1098,7 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
     is_recruiter = "Рекрутер" in role_names
     is_trainee = "Стажер" in role_names
     is_employee = "Сотрудник" in role_names
-    is_franchisee = "Франчайзи" in role_names
+    is_franchisee = "Франчайзи" in role_names or active_role == "Франчайзи"
     can_create = await check_user_permission(session, user.id, "create_tests")
 
     # Проверяем роль пользователя для определения интерфейса
@@ -1140,10 +1137,11 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
         # Устанавливаем состояние для корректной работы кнопки "Начать тест"
         await state.update_data(selected_test_id=test_id)
         await state.set_state(TestTakingStates.waiting_for_test_start)
-    elif is_franchisee and not can_create:
-        # Франчайзи: просмотр без управления (только материалы и результаты)
+    elif is_franchisee and (active_role == "Франчайзи" or not can_create):
+        # Франчайзи: взаимодействие без управления контентом — назначение доступа,
+        # материалы и результаты, но без редактирования и удаления тестов
         await callback.message.edit_text(
-            test_info, parse_mode="HTML", reply_markup=_get_test_view_actions_keyboard(test_id)
+            test_info, parse_mode="HTML", reply_markup=get_test_actions_keyboard(test_id, "mentor")
         )
         await callback.answer()
     elif is_mentor and context != "taking":

@@ -26,6 +26,8 @@ FRANCHISEE_PERMISSIONS = [
     "view_test_results",
     "view_knowledge_base",
     "view_tests",
+    "take_tests",
+    "grant_test_access",
     "view_learning_paths",
     "send_broadcast",
 ]

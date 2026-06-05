@@ -4,6 +4,7 @@ from bot.keyboards.keyboards import (
     get_admin_role_picker_keyboard,
     get_franchisee_keyboard,
     get_keyboard_by_role,
+    get_test_actions_keyboard,
 )
 from bot.repositories.role_provisioning import FRANCHISEE_PERMISSIONS, NEW_PERMISSIONS
 from bot.utils.bot.roles import ROLE_PRIORITY, get_primary_role
@@ -20,6 +21,7 @@ class TestFranchiseeKeyboard:
             "Мой профиль 🦸🏻‍♂️",
             "Рассылка ✈️",
             "Тесты 📄",
+            "Мои тесты 📋",
             "Экзамены 📝",
             "Наставники 🦉",
             "Стажеры 🐣",
@@ -32,8 +34,16 @@ class TestFranchiseeKeyboard:
 
     def test_excludes_content_management_buttons(self):
         texts = _reply_texts(get_franchisee_keyboard())
-        for forbidden in ["Группы 🗂️", "Объекты 📍", "Мои тесты 📋", "Компания 🏢"]:
+        for forbidden in ["Группы 🗂️", "Объекты 📍", "Компания 🏢"]:
             assert forbidden not in texts
+
+    def test_test_card_allows_assign_but_not_delete(self):
+        """Карточка теста для Франчайзи (роль 'mentor'): можно назначать доступ, нельзя удалять/редактировать."""
+        markup = get_test_actions_keyboard(1, "mentor")
+        texts = {btn.text for row in markup.inline_keyboard for btn in row}
+        assert any("Предоставить доступ" in t for t in texts), texts
+        assert not any("Удалить" in t for t in texts), texts
+        assert not any("Редактировать" in t for t in texts), texts
 
     def test_get_keyboard_by_role_returns_franchisee_menu(self):
         texts = _reply_texts(get_keyboard_by_role("Франчайзи"))
@@ -61,8 +71,12 @@ class TestProvisioningPermissions:
         for perm in ["manage_users", "manage_trainees", "assign_mentors", "view_test_results", "send_broadcast"]:
             assert perm in FRANCHISEE_PERMISSIONS
 
+    def test_franchisee_can_interact_with_tests(self):
+        for perm in ["view_tests", "take_tests", "grant_test_access"]:
+            assert perm in FRANCHISEE_PERMISSIONS
+
     def test_franchisee_lacks_content_permissions(self):
-        for perm in ["create_tests", "edit_tests", "manage_groups", "manage_objects", "manage_roles", "take_tests"]:
+        for perm in ["create_tests", "edit_tests", "manage_groups", "manage_objects", "manage_roles"]:
             assert perm not in FRANCHISEE_PERMISSIONS
 
     def test_new_permissions_declared(self):

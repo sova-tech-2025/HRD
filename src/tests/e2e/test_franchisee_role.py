@@ -14,8 +14,17 @@ pytestmark = [
     pytest.mark.asyncio(loop_scope="session"),
 ]
 
-EXPECTED_BUTTONS = ["Все пользователи", "Новые пользователи", "Стажеры", "Наставники", "Рассылка", "Тесты", "Экзамены"]
-FORBIDDEN_BUTTONS = ["Группы", "Объекты", "Компания", "Мои тесты"]
+EXPECTED_BUTTONS = [
+    "Все пользователи",
+    "Новые пользователи",
+    "Стажеры",
+    "Наставники",
+    "Рассылка",
+    "Тесты",
+    "Мои тесты",
+    "Экзамены",
+]
+FORBIDDEN_BUTTONS = ["Группы", "Объекты", "Компания"]
 
 
 class TestFranchiseeMenu:
@@ -46,6 +55,24 @@ class TestFranchiseeMenu:
         text = resp.raw_text or ""
         assert "доступна только для авторизованных" not in text, f"Франчайзи получил отказ в БЗ: {text!r}"
         assert "нет прав для просмотра" not in text, f"Франчайзи получил отказ по правам: {text!r}"
+
+    async def test_franchisee_test_card_can_assign_not_delete(self, admin):
+        """ADMIN → ЛК Франчайзи: «Тесты» открывают просмотр (не управление),
+        карточка теста разрешает назначение доступа, но не редактирование/удаление."""
+        await admin.switch_role("Франчайзи")
+
+        resp = await admin.send_and_wait("Тесты 📄", pattern="Список доступных тестов|нет созданных тестов")
+        text = resp.raw_text or ""
+        assert "УПРАВЛЕНИЕ ТЕСТАМИ" not in text, f"Франчайзи не должен видеть меню управления: {text!r}"
+
+        test_btn = admin.find_button_data(resp, data_prefix="test:")
+        assert test_btn, f"Нет тестов в списке. Кнопки: {admin.get_button_data(resp)}"
+
+        resp = await admin.click_and_wait(resp, data=test_btn, wait_pattern="Детальная информация о тесте")
+        texts = admin.get_button_texts(resp)
+        assert any("Предоставить доступ" in t for t in texts), f"Нет кнопки назначения доступа: {texts}"
+        assert not any("Удалить" in t for t in texts), f"Франчайзи видит кнопку удаления теста: {texts}"
+        assert not any("Редактировать" in t for t in texts), f"Франчайзи видит кнопку редактирования: {texts}"
 
 
 @pytest.mark.order(96)

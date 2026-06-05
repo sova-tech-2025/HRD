@@ -141,6 +141,7 @@ def get_franchisee_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="Мой профиль 🦸🏻‍♂️")],
             [KeyboardButton(text="Рассылка ✈️")],
             [KeyboardButton(text="Тесты 📄")],
+            [KeyboardButton(text="Мои тесты 📋")],
             [KeyboardButton(text="Экзамены 📝")],
             [KeyboardButton(text="Наставники 🦉")],
             [KeyboardButton(text="Стажеры 🐣")],
