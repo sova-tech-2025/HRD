@@ -520,11 +520,16 @@ async def cmd_company_management(message: Message, state: FSMContext, session: A
             await message.answer("❌ Ты не состоишь ни в одной компании")
             return
 
-        # Проверка, что пользователь - рекрутер
+        # Проверка, что пользователь - рекрутер (с учётом активной FSM-роли ADMIN)
         from bot.database.db import get_user_roles
 
-        roles = await get_user_roles(session, user.id)
-        role_names = [role.name for role in roles]
+        data = await state.get_data()
+        active_role = data.get("role") if data.get("is_admin") else None
+        if active_role:
+            role_names = [active_role]
+        else:
+            roles = await get_user_roles(session, user.id)
+            role_names = [role.name for role in roles]
 
         if "Рекрутер" not in role_names:
             await message.answer("❌ Эта функция доступна только рекрутерам")

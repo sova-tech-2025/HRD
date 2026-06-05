@@ -31,6 +31,22 @@ class TestFranchiseeMenu:
         for forbidden in FORBIDDEN_BUTTONS:
             assert not any(forbidden in t for t in texts), f"Лишняя кнопка '{forbidden}'. Кнопки: {texts}"
 
+    async def test_franchisee_can_open_knowledge_base(self, admin):
+        """ADMIN → ЛК Франчайзи: кнопка «База знаний» открывает раздел, а не выдаёт отказ.
+
+        Регрессия: cmd_knowledge_base_universal раньше брал роль только из БД (ADMIN)
+        и не учитывал активную FSM-роль, из-за чего Франчайзи получал
+        «❌ База знаний доступна только для авторизованных пользователей».
+        """
+        await admin.switch_role("Франчайзи")
+        resp = await admin.send_and_wait(
+            "База знаний 📁️",
+            pattern="Выбери раздел|нет доступных материалов|РЕДАКТОР БАЗЫ ЗНАНИЙ",
+        )
+        text = resp.raw_text or ""
+        assert "доступна только для авторизованных" not in text, f"Франчайзи получил отказ в БЗ: {text!r}"
+        assert "нет прав для просмотра" not in text, f"Франчайзи получил отказ по правам: {text!r}"
+
 
 @pytest.mark.order(96)
 class TestFranchiseeScope:

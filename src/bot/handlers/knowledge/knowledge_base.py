@@ -144,8 +144,10 @@ async def cmd_knowledge_base_universal(message: Message, state: FSMContext, sess
             await message.answer("❌ Ты не зарегистрирован в системе.")
             return
 
-        # Определяем роль пользователя
-        user_roles = [role.name for role in user.roles]
+        # Определяем роль пользователя с учётом активной FSM-роли ADMIN
+        data = await state.get_data()
+        active_role = data.get("role") if data.get("is_admin") else None
+        user_roles = [active_role] if active_role else [role.name for role in user.roles]
 
         # РЕКРУТЕР - управление базой знаний (ТЗ 9-1 шаг 1)
         if "Рекрутер" in user_roles:

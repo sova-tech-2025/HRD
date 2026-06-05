@@ -175,8 +175,10 @@ async def cmd_trajectory(message: Message, state: FSMContext, session: AsyncSess
             await message.answer("Ты не зарегистрирован в системе.")
             return
 
-        # Траектории доступны ТОЛЬКО стажерам
-        user_roles = [role.name for role in user.roles]
+        # Траектории доступны ТОЛЬКО стажерам (с учётом активной FSM-роли ADMIN)
+        data = await state.get_data()
+        active_role = data.get("role") if data.get("is_admin") else None
+        user_roles = [active_role] if active_role else [role.name for role in user.roles]
         if "Стажер" not in user_roles:
             await message.answer(
                 "❌ <b>Доступ запрещен</b>\n\n"
