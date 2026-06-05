@@ -980,3 +980,21 @@ class TestGetExaminersForAssignment:
 
         assert len(result) == 2
         session.execute.assert_awaited_once()
+
+
+class TestGetManagers:
+    """get_managers() — список проводящих аттестацию после траектории."""
+
+    @pytest.mark.asyncio
+    async def test_includes_franchisee_role(self):
+        """В фильтр ролей входят Руководитель и Франчайзи (Франчайзи — управляющий по объектам)."""
+        session = AsyncMock()
+        session.execute.return_value = make_scalars_result([])
+
+        repo = AssessmentAssignmentRepository(session)
+        await repo.get_managers(group_id=1, company_id=1)
+
+        stmt = session.execute.call_args.args[0]
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "Руководитель" in compiled, f"Нет роли Руководитель в запросе: {compiled}"
+        assert "Франчайзи" in compiled, f"Франчайзи не попал в список проводящих аттестацию: {compiled}"
