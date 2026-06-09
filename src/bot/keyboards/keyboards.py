@@ -727,12 +727,38 @@ def get_broadcast_roles_selection_keyboard(selected_roles: list = None) -> Inlin
     else:
         all_button_text = "🌐 Все роли"
 
+    keyboard.row(InlineKeyboardButton(text="👤 Выбрать сотрудника", callback_data="broadcast_select_employee"))
+
     keyboard.row(
         InlineKeyboardButton(text=all_button_text, callback_data="broadcast_roles_all"),
         InlineKeyboardButton(text="❌ Отмена", callback_data="cancel"),
     )
 
     return keyboard.as_markup()
+
+
+def get_broadcast_employees_keyboard(
+    candidates: list, selected_ids, page: int = 0, per_page: int = 6
+) -> InlineKeyboardMarkup:
+    """Клавиатура поимённого выбора сотрудников для рассылки (галочки, поиск, пагинация).
+
+    candidates — список dict {"id", "name"}; selected_ids — выбранные id.
+    """
+    selected = set(selected_ids)
+    kb = PaginatedKeyboard(candidates, page=page, per_page=per_page, page_callback="bc_emp_page")
+
+    def _render(c):
+        mark = "✅ " if c["id"] in selected else ""
+        return (f"{mark}{c['name']}", f"bc_emp_toggle:{c['id']}")
+
+    kb.add_items(_render)
+
+    footer = [[InlineKeyboardButton(text="🔍 Поиск по ФИО", callback_data="bc_emp_search")]]
+    if selected:
+        footer.append([InlineKeyboardButton(text="➡️ Далее", callback_data="bc_emp_next")])
+    footer.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+    kb.add_footer(footer)
+    return kb.build()
 
 
 def get_question_edit_keyboard(question_id: int) -> InlineKeyboardMarkup:
