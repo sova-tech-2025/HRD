@@ -528,6 +528,7 @@ async def callback_edit_user(callback: CallbackQuery, state: FSMContext, session
         group_name = format_user_groups(user)
         groups_label = get_groups_label(user)
         is_trainee = role_name in ["Стажер", "Стажёр"]
+        is_franchisee = any(r.name == "Франчайзи" for r in user.roles)
 
         text = (
             f"🦸🏻‍♂️ <b>Пользователь:</b> {user.full_name}\n\n"
@@ -558,7 +559,7 @@ async def callback_edit_user(callback: CallbackQuery, state: FSMContext, session
 
         text += "\n<b>Выбери параметр для изменения:</b>"
 
-        keyboard = get_user_editor_keyboard(is_trainee)
+        keyboard = get_user_editor_keyboard(is_trainee, is_franchisee=is_franchisee, franchisee_user_id=user_id)
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         await state.update_data(editing_user_id=user_id)

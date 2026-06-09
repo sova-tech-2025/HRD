@@ -5,6 +5,7 @@ from bot.keyboards.keyboards import (
     get_franchisee_keyboard,
     get_keyboard_by_role,
     get_test_actions_keyboard,
+    get_user_editor_keyboard,
 )
 from bot.repositories.role_provisioning import FRANCHISEE_PERMISSIONS, NEW_PERMISSIONS
 from bot.utils.bot.roles import ROLE_PRIORITY, get_primary_role
@@ -54,6 +55,25 @@ class TestFranchiseeKeyboard:
         markup = get_admin_role_picker_keyboard()
         callbacks = {btn.callback_data for row in markup.inline_keyboard for btn in row}
         assert "admin_role:Франчайзи" in callbacks
+
+
+class TestUserEditorFranchiseeObjects:
+    @staticmethod
+    def _callbacks(markup):
+        return {btn.callback_data for row in markup.inline_keyboard for btn in row}
+
+    def test_franchisee_objects_button_shown_for_franchisee(self):
+        markup = get_user_editor_keyboard(is_franchisee=True, franchisee_user_id=42)
+        assert "franchisee_objects:42" in self._callbacks(markup)
+
+    def test_no_franchisee_objects_button_for_regular_user(self):
+        callbacks = self._callbacks(get_user_editor_keyboard())
+        assert not any(str(cb).startswith("franchisee_objects:") for cb in callbacks)
+
+    def test_editor_always_has_core_actions(self):
+        callbacks = self._callbacks(get_user_editor_keyboard(is_franchisee=True, franchisee_user_id=1))
+        assert "edit_work_object" in callbacks
+        assert "delete_user" in callbacks
 
 
 class TestRolePriority:

@@ -1322,7 +1322,9 @@ def get_object_delete_confirmation_keyboard(object_id: int) -> InlineKeyboardMar
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_user_editor_keyboard(is_trainee: bool = False) -> InlineKeyboardMarkup:
+def get_user_editor_keyboard(
+    is_trainee: bool = False, is_franchisee: bool = False, franchisee_user_id: int | None = None
+) -> InlineKeyboardMarkup:
     """Клавиатура для редактора пользователя"""
     keyboard = [
         [InlineKeyboardButton(text="Имя", callback_data="edit_full_name")],
@@ -1336,6 +1338,18 @@ def get_user_editor_keyboard(is_trainee: bool = False) -> InlineKeyboardMarkup:
         keyboard.append([InlineKeyboardButton(text="Объект стажировки", callback_data="edit_internship_object")])
 
     keyboard.append([InlineKeyboardButton(text="Объект работы", callback_data="edit_work_object")])
+
+    # Для Франчайзи — редактирование набора объектов (scoped-администрирование),
+    # чтобы можно было открыть/закрыть объект без переназначения роли
+    if is_franchisee and franchisee_user_id is not None:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="📍 Объекты Франчайзи", callback_data=f"franchisee_objects:{franchisee_user_id}"
+                )
+            ]
+        )
+
     keyboard.append([InlineKeyboardButton(text="🗑️ Удалить пользователя", callback_data="delete_user")])
     keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_view_user")])
     keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])

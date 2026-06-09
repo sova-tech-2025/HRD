@@ -134,3 +134,48 @@ class TestFranchiseeScope:
         joined = " ".join(texts)
         assert "Альфа" in joined, f"Франчайзи не видит сотрудника своего объекта. Кнопки: {texts}"
         assert "Бета" not in joined, f"Франчайзи видит сотрудника ЧУЖОГО объекта (утечка scope). Кнопки: {texts}"
+
+    async def test_admin_can_edit_franchisee_objects_via_user_card(self, admin, e2e_db):
+        """Через карточку пользователя (редактор) можно добавить Франчайзи объект
+        без переназначения роли — сценарий «Франчайзи открыл дополнительный объект»."""
+        trainee_id = await e2e_db.fetchval("SELECT id FROM users WHERE phone_number = '+79001000002'")
+        before = await e2e_db.fetchval("SELECT count(*) FROM user_work_objects WHERE user_id = $1", trainee_id)
+        assert before == 1, f"Предусловие: у Франчайзи должен быть 1 объект, есть {before}"
+
+        await admin.switch_role("Рекрутер")
+        resp = await admin.send_and_wait("Все пользователи 🚸", pattern="фильтрац|способ|пользоват")
+        resp = await admin.click_and_wait(resp, data=b"uf_all", wait_pattern="ПОЛЬЗОВАТЕЛЕЙ|Найдено|пользоват")
+
+        user_btn = admin.find_button_data(resp, text_contains="Стажёров", data_prefix="uf_user:")
+        for _ in range(5):
+            if user_btn:
+                break
+            next_btn = admin.find_button_data(resp, data_prefix="uf_upage:")
+            if not next_btn:
+                break
+            resp = await admin.click_and_wait(resp, data=next_btn, wait_pattern="пользоват")
+            user_btn = admin.find_button_data(resp, text_contains="Стажёров", data_prefix="uf_user:")
+        assert user_btn, f"Франчайзи не найден в списке. Кнопки: {admin.get_button_texts(resp)}"
+
+        resp = await admin.click_and_wait(resp, data=user_btn, wait_pattern="Пользователь|Стажёров")
+        edit_btn = admin.find_button_data(resp, data_prefix="edit_user:")
+        assert edit_btn, f"Нет кнопки редактирования. Кнопки: {admin.get_button_texts(resp)}"
+        resp = await admin.click_and_wait(resp, data=edit_btn, wait_pattern="параметр для изменения|Редакт")
+
+        # Ключевая проверка: для существующего Франчайзи в редакторе есть кнопка «Объекты Франчайзи»
+        fr_btn = admin.find_button_data(resp, data_prefix="franchisee_objects:")
+        assert fr_btn, f"Нет кнопки «Объекты Франчайзи» в редакторе. Кнопки: {admin.get_button_texts(resp)}"
+
+        resp = await admin.click_and_wait(resp, data=fr_btn, wait_pattern="Объекты Франчайзи")
+
+        # Выбираем все доступные объекты (добавляем второй) и сохраняем
+        all_btn = admin.find_button_data(resp, data_prefix="fr_obj_all")
+        assert all_btn, f"Нет кнопки выбора всех объектов. Кнопки: {admin.get_button_texts(resp)}"
+        resp = await admin.click_and_wait(resp, data=all_btn, wait_pattern="Выбрано")
+
+        done_btn = admin.find_button_data(resp, data_prefix="fr_obj_done")
+        assert done_btn, f"Нет кнопки сохранения. Кнопки: {admin.get_button_texts(resp)}"
+        resp = await admin.click_and_wait(resp, data=done_btn, wait_pattern="сохранены")
+
+        after = await e2e_db.fetchval("SELECT count(*) FROM user_work_objects WHERE user_id = $1", trainee_id)
+        assert after > before and after >= 2, f"Объект Франчайзи не добавился: было {before}, стало {after}"
