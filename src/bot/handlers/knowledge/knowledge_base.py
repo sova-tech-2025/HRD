@@ -34,6 +34,7 @@ from bot.database.db import (
     set_folder_access_groups,
     update_knowledge_folder_name,
 )
+from bot.database.models import KnowledgeMaterial
 from bot.keyboards.keyboards import (
     get_employee_folder_materials_keyboard,
     get_employee_knowledge_folders_keyboard,
@@ -65,6 +66,72 @@ router = Router()
 # ===============================
 # Вспомогательные функции
 # ===============================
+
+
+async def send_material_attachments(callback: CallbackQuery, material: KnowledgeMaterial, message_text: str) -> None:
+    """Отправляет текст материала и вложения (превью-фото/документы, основной файл) в чат."""
+    if material.photos and len(material.photos) > 0:
+        try:
+            photo_ids = []
+            doc_ids = []
+            for item in material.photos:
+                if isinstance(item, dict):
+                    (doc_ids if item.get("kind") == "document" else photo_ids).append(item.get("id"))
+                else:
+                    photo_ids.append(item)
+
+            if photo_ids:
+                if len(photo_ids) == 1:
+                    await callback.bot.send_photo(
+                        chat_id=callback.message.chat.id,
+                        photo=photo_ids[0],
+                        caption=message_text,
+                        parse_mode="HTML",
+                    )
+                else:
+                    media_group = []
+                    for i, file_id in enumerate(photo_ids, 1):
+                        if i == 1:
+                            media_group.append(InputMediaPhoto(media=file_id, caption=message_text, parse_mode="HTML"))
+                        else:
+                            media_group.append(InputMediaPhoto(media=file_id))
+                    await callback.bot.send_media_group(chat_id=callback.message.chat.id, media=media_group)
+            else:
+                await callback.message.edit_text(message_text, parse_mode="HTML")
+
+            if doc_ids:
+                if len(doc_ids) == 1:
+                    await callback.bot.send_document(chat_id=callback.message.chat.id, document=doc_ids[0])
+                else:
+                    docs_group = [InputMediaDocument(media=fid) for fid in doc_ids]
+                    await callback.bot.send_media_group(chat_id=callback.message.chat.id, media=docs_group)
+
+        except Exception as media_error:
+            logger.error(f"Ошибка отправки media для материала {material.name}: {media_error}")
+            await callback.message.edit_text(message_text, parse_mode="HTML")
+    else:
+        await callback.message.edit_text(message_text, parse_mode="HTML")
+
+    if material.material_type != "link":
+        try:
+            if material.material_type == "video":
+                await callback.bot.send_video(chat_id=callback.message.chat.id, video=material.content)
+            elif material.material_type == "photo":
+                try:
+                    await callback.bot.send_photo(chat_id=callback.message.chat.id, photo=material.content)
+                except Exception as inner_error:
+                    logger.error(
+                        f"Ошибка отправки фото как photo для {material.name}: {inner_error}. Пробуем как document"
+                    )
+                    await callback.bot.send_document(chat_id=callback.message.chat.id, document=material.content)
+            else:
+                await callback.bot.send_document(chat_id=callback.message.chat.id, document=material.content)
+        except Exception as file_error:
+            logger.error(f"Ошибка отправки файла {material.name}: {file_error}")
+            await callback.bot.send_message(
+                chat_id=callback.message.chat.id, text=f"⚠️ Ошибка при отправке файла {material.name}."
+            )
+
 
 # ===============================
 # Обработчики для рекрутера и сотрудника (база знаний)
@@ -1228,95 +1295,8 @@ async def callback_view_material(callback: CallbackQuery, state: FSMContext, ses
             f"🟢 Описание: {description_display}{photos_display}"
         )
 
-        # Сначала отправляем фото/документы БЕЗ кнопок, соблюдая ограничения Telegram
-        if material.photos and len(material.photos) > 0:
-            try:
-                photo_ids = []
-                doc_ids = []
-                for item in material.photos:
-                    if isinstance(item, dict):
-                        (doc_ids if item.get("kind") == "document" else photo_ids).append(item.get("id"))
-                    else:
-                        photo_ids.append(item)
+        await send_material_attachments(callback, material, message_text)
 
-                # 1) Если есть фото — отправляем их одним media group, caption на первом
-                if photo_ids:
-                    if len(photo_ids) == 1:
-                        # Одно фото — отправляем через send_photo
-                        await callback.bot.send_photo(
-                            chat_id=callback.message.chat.id,
-                            photo=photo_ids[0],
-                            caption=message_text,
-                            parse_mode="HTML",
-                        )
-                    else:
-                        # Несколько фото — используем media_group
-                        media_group = []
-                        for i, file_id in enumerate(photo_ids, 1):
-                            if i == 1:
-                                media_group.append(
-                                    InputMediaPhoto(media=file_id, caption=message_text, parse_mode="HTML")
-                                )
-                            else:
-                                media_group.append(InputMediaPhoto(media=file_id))
-                        await callback.bot.send_media_group(chat_id=callback.message.chat.id, media=media_group)
-                else:
-                    # Если фото нет — отправим текст отдельным сообщением
-                    await callback.message.edit_text(message_text, parse_mode="HTML")
-
-                # 2) Документы (изображения без сжатия) нельзя смешивать с фото — отправляем группой документов
-                if doc_ids:
-                    if len(doc_ids) == 1:
-                        # Один документ — отправляем через send_document
-                        await callback.bot.send_document(chat_id=callback.message.chat.id, document=doc_ids[0])
-                    else:
-                        # Несколько документов — используем media_group
-                        docs_group = [InputMediaDocument(media=fid) for fid in doc_ids]
-                        # Текст уже отправлен: как caption первого фото или отдельным сообщением
-                        await callback.bot.send_media_group(chat_id=callback.message.chat.id, media=docs_group)
-
-            except Exception as media_error:
-                logger.error(f"Ошибка отправки media для материала {material.name}: {media_error}")
-                # Fallback: отправляем обычное сообщение БЕЗ кнопок
-                await callback.message.edit_text(message_text, parse_mode="HTML")
-        else:
-            # Если нет фото/документов-превью, отправляем только текст БЕЗ кнопок
-            await callback.message.edit_text(message_text, parse_mode="HTML")
-
-        # Затем отправляем файл
-        if material.material_type != "link":
-            try:
-                # Отправляем файл по file_id в зависимости от типа
-                if material.material_type == "video":
-                    await callback.bot.send_video(
-                        chat_id=callback.message.chat.id,
-                        video=material.content,  # file_id
-                    )
-                elif material.material_type == "photo":
-                    try:
-                        await callback.bot.send_photo(
-                            chat_id=callback.message.chat.id,
-                            photo=material.content,  # file_id
-                        )
-                    except Exception as inner_error:
-                        # Fallback: если это документ, ошибочно помеченный как фото — отправляем документом
-                        logger.error(
-                            f"Ошибка отправки фото как photo для {material.name}: {inner_error}. Пробуем как document"
-                        )
-                        await callback.bot.send_document(chat_id=callback.message.chat.id, document=material.content)
-                else:
-                    # Документы (pdf, doc, excel, изображения без сжатия и т.п.)
-                    await callback.bot.send_document(
-                        chat_id=callback.message.chat.id,
-                        document=material.content,  # file_id
-                    )
-            except Exception as file_error:
-                logger.error(f"Ошибка отправки файла {material.name}: {file_error}")
-                await callback.bot.send_message(
-                    chat_id=callback.message.chat.id, text=f"⚠️ Ошибка при отправке файла {material.name}."
-                )
-
-        # Отправляем кнопки управления отдельно
         await callback.bot.send_message(
             chat_id=callback.message.chat.id,
             text=f"⚙️ Управление материалом: {material.name}",
@@ -2281,92 +2261,8 @@ async def callback_employee_view_material(callback: CallbackQuery, state: FSMCon
             f"<b>Описание:</b>\n{description_display}"
         )
 
-        # Сначала отправляем фото/документы БЕЗ кнопок, соблюдая ограничения Telegram
-        if material.photos and len(material.photos) > 0:
-            try:
-                photo_ids = []
-                doc_ids = []
-                for item in material.photos:
-                    if isinstance(item, dict):
-                        (doc_ids if item.get("kind") == "document" else photo_ids).append(item.get("id"))
-                    else:
-                        photo_ids.append(item)
+        await send_material_attachments(callback, material, message_text)
 
-                # 1) Фото — одной медиагруппой с caption на первом
-                if photo_ids:
-                    if len(photo_ids) == 1:
-                        # Одно фото — отправляем через send_photo
-                        await callback.bot.send_photo(
-                            chat_id=callback.message.chat.id,
-                            photo=photo_ids[0],
-                            caption=message_text,
-                            parse_mode="HTML",
-                        )
-                    else:
-                        # Несколько фото — используем media_group
-                        media_group = []
-                        for i, file_id in enumerate(photo_ids, 1):
-                            if i == 1:
-                                media_group.append(
-                                    InputMediaPhoto(media=file_id, caption=message_text, parse_mode="HTML")
-                                )
-                            else:
-                                media_group.append(InputMediaPhoto(media=file_id))
-                        await callback.bot.send_media_group(chat_id=callback.message.chat.id, media=media_group)
-                else:
-                    # Если фото нет — отправим текст отдельным сообщением
-                    await callback.message.edit_text(message_text, parse_mode="HTML")
-
-                # 2) Документы-изображения — отдельной медиагруппой документов
-                if doc_ids:
-                    if len(doc_ids) == 1:
-                        # Один документ — отправляем через send_document
-                        await callback.bot.send_document(chat_id=callback.message.chat.id, document=doc_ids[0])
-                    else:
-                        # Несколько документов — используем media_group
-                        docs_group = [InputMediaDocument(media=fid) for fid in doc_ids]
-                        await callback.bot.send_media_group(chat_id=callback.message.chat.id, media=docs_group)
-
-            except Exception as media_error:
-                logger.error(f"Ошибка отправки media group для материала {material.name}: {media_error}")
-                # Fallback: отправляем обычное сообщение БЕЗ кнопок
-                await callback.message.edit_text(message_text, parse_mode="HTML")
-        else:
-            # Если нет фото/документов, отправляем только текст БЕЗ кнопок
-            await callback.message.edit_text(message_text, parse_mode="HTML")
-
-        # Затем отправляем файл
-        if material.material_type != "link":
-            try:
-                # Отправляем файл по file_id в зависимости от типа
-                if material.material_type == "video":
-                    await callback.bot.send_video(
-                        chat_id=callback.message.chat.id,
-                        video=material.content,  # file_id
-                    )
-                elif material.material_type == "photo":
-                    try:
-                        await callback.bot.send_photo(
-                            chat_id=callback.message.chat.id,
-                            photo=material.content,  # file_id
-                        )
-                    except Exception as inner_error:
-                        logger.error(f"Ошибка отправки фото: {inner_error}")
-                        await callback.bot.send_document(chat_id=callback.message.chat.id, document=material.content)
-                else:
-                    # Документы (pdf, doc, excel, etc.)
-                    await callback.bot.send_document(
-                        chat_id=callback.message.chat.id,
-                        document=material.content,  # file_id
-                    )
-            except Exception as file_error:
-                logger.error(f"Ошибка отправки файла {material.name}: {file_error}")
-                await callback.bot.send_message(
-                    chat_id=callback.message.chat.id,
-                    text=f"⚠️ Ошибка при отправке файла {material.name}. Попробуй позже.",
-                )
-
-        # Наконец, отправляем кнопки навигации отдельно
         await callback.bot.send_message(
             chat_id=callback.message.chat.id,
             text="📋 Навигация по материалам",
