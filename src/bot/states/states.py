@@ -371,6 +371,9 @@ class KnowledgeBaseStates(StatesGroup):
     employee_viewing_folder = State()
     employee_viewing_material = State()
 
+    waiting_for_search_query = State()
+    viewing_search_results = State()
+
 
 class CompanyCreationStates(StatesGroup):
     """Состояния для создания компании"""
