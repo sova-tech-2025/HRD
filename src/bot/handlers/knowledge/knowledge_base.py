@@ -45,6 +45,10 @@ from bot.keyboards.keyboards import (
     get_folder_rename_confirmation_keyboard,
     get_folder_view_keyboard,
     get_group_access_selection_keyboard,
+    get_kb_search_material_view_keyboard,
+    get_kb_search_no_results_keyboard,
+    get_kb_search_prompt_keyboard,
+    get_kb_search_results_keyboard,
     get_knowledge_base_main_keyboard,
     get_knowledge_folders_keyboard,
     get_material_delete_confirmation_keyboard,
@@ -53,6 +57,7 @@ from bot.keyboards.keyboards import (
     get_material_saved_keyboard,
     get_material_view_keyboard,
 )
+from bot.repositories.knowledge_repo import KnowledgeRepository
 from bot.states.states import KnowledgeBaseStates
 from bot.utils.auth.auth import check_auth
 from bot.utils.handlers.callback import ensure_callback_auth
@@ -1489,9 +1494,6 @@ async def callback_confirm_delete_material(callback: CallbackQuery, state: FSMCo
         content_display = material.content if material.material_type == "link" else "Файл"
         description_display = material.description if material.description else "Описание не указано"
 
-        # Удаляем материал (hard delete)
-        from bot.repositories.knowledge_repo import KnowledgeRepository
-
         success = await KnowledgeRepository(session).delete_material(material_id)
         if not success:
             await callback.message.edit_text("❌ Не удалось удалить материал")
@@ -2064,9 +2066,6 @@ async def callback_confirm_delete_folder(callback: CallbackQuery, state: FSMCont
         # Сохраняем название для отображения
         folder_name = folder.name
 
-        # Удаляем папку (hard delete)
-        from bot.repositories.knowledge_repo import KnowledgeRepository
-
         success = await KnowledgeRepository(session).delete_folder(folder_id, company_id=user.company_id)
         if not success:
             await callback.message.edit_text("❌ Не удалось удалить папку")
@@ -2325,3 +2324,263 @@ async def callback_employee_back_to_folders(callback: CallbackQuery, state: FSMC
 # ===============================
 # Общие обработчики
 # ===============================
+
+# ===============================
+# Поиск материалов по Базе Знаний
+# ===============================
+
+KB_SEARCH_PROMPT = "🔍 <b>Поиск материалов</b>\n\nВведи название материала из БЗ для поиска (минимум 2 символа):"
+
+
+async def render_kb_search_results(
+    target_message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    user_tg_id: int,
+    query: str,
+    page: int,
+    edit: bool,
+) -> None:
+    """Поиск материалов и отрисовка результатов (новым сообщением или редактированием)."""
+    company_id = await ensure_company_id(session, state, user_tg_id)
+    if company_id is None:
+        text = "❌ Не удалось определить компанию. Обнови сессию командой /start."
+        if edit:
+            await target_message.edit_text(text)
+        else:
+            await target_message.answer(text)
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    accessible_folder_ids = None
+    if data.get("kb_search_mode") == "viewer":
+        user = await get_user_by_tg_id(session, user_tg_id)
+        if not user:
+            text = "❌ Ты не зарегистрирован в системе."
+            if edit:
+                await target_message.edit_text(text)
+            else:
+                await target_message.answer(text)
+            return
+        folders = await get_accessible_knowledge_folders_for_user(session, user.id, company_id)
+        accessible_folder_ids = {folder.id for folder in folders}
+
+    repo = KnowledgeRepository(session)
+    materials = await repo.search_materials_by_name(query, company_id, accessible_folder_ids)
+
+    if not materials:
+        text = (
+            "🔍 <b>Результаты поиска</b>\n\n"
+            f"По запросу <b>'{query}'</b> ничего не найдено.\n\n"
+            "Попробуй изменить запрос или вернись назад."
+        )
+        markup = get_kb_search_no_results_keyboard()
+        await state.set_state(KnowledgeBaseStates.waiting_for_search_query)
+    else:
+        text = f"🔍 <b>Результаты поиска: '{query}'</b>\n\nНайдено материалов: {len(materials)}"
+        markup = get_kb_search_results_keyboard(materials, page)
+        await state.set_state(KnowledgeBaseStates.viewing_search_results)
+
+    if edit:
+        await target_message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+    else:
+        await target_message.answer(text, reply_markup=markup, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "kb_search")
+async def callback_kb_search(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Вход в поиск по БЗ из меню редактора или режима просмотра"""
+    try:
+        await callback.answer()
+
+        current_state = await state.get_state()
+        mode = "viewer" if current_state == KnowledgeBaseStates.employee_browsing.state else "editor"
+        await state.update_data(kb_search_mode=mode)
+
+        await callback.message.edit_text(
+            KB_SEARCH_PROMPT, reply_markup=get_kb_search_prompt_keyboard(), parse_mode="HTML"
+        )
+        await state.set_state(KnowledgeBaseStates.waiting_for_search_query)
+
+        log_user_action(callback.from_user.id, "kb_search_opened", f"Открыт поиск по БЗ ({mode})")
+
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка при открытии поиска")
+        log_user_error(callback.from_user.id, "kb_search_open_error", str(e))
+
+
+@router.message(KnowledgeBaseStates.waiting_for_search_query)
+async def process_kb_search_query(message: Message, state: FSMContext, session: AsyncSession):
+    """Обработка поискового запроса по материалам БЗ"""
+    try:
+        query = (message.text or "").strip()
+
+        if len(query) < 2:
+            await message.answer(
+                "❌ <b>Запрос слишком короткий</b>\n\nПожалуйста, введи минимум 2 символа для поиска:",
+                parse_mode="HTML",
+            )
+            return
+
+        await state.update_data(kb_search_query=query, kb_search_page=0)
+        await render_kb_search_results(message, state, session, message.from_user.id, query, page=0, edit=False)
+
+        log_user_action(message.from_user.id, "kb_search_performed", f"Поиск по БЗ: '{query}'")
+
+    except Exception as e:
+        await message.answer("Произошла ошибка при поиске материалов")
+        log_user_error(message.from_user.id, "kb_search_query_error", str(e))
+
+
+@router.callback_query(F.data.startswith("kb_search_page:"), StateFilter(KnowledgeBaseStates.viewing_search_results))
+async def callback_kb_search_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Пагинация результатов поиска по БЗ"""
+    try:
+        await callback.answer()
+
+        page = int(callback.data.split(":")[1])
+        data = await state.get_data()
+        query = data.get("kb_search_query", "")
+
+        await state.update_data(kb_search_page=page)
+        await render_kb_search_results(callback.message, state, session, callback.from_user.id, query, page, edit=True)
+
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка при просмотре результатов")
+        log_user_error(callback.from_user.id, "kb_search_page_error", str(e))
+
+
+@router.callback_query(F.data.startswith("kb_search_result:"), StateFilter(KnowledgeBaseStates.viewing_search_results))
+async def callback_kb_search_result(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Открытие материала из результатов поиска по БЗ"""
+    try:
+        await callback.answer()
+
+        material_id = int(callback.data.split(":")[1])
+
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text("❌ Не удалось определить компанию. Обнови сессию командой /start.")
+            await state.clear()
+            return
+
+        material = await get_knowledge_material_by_id(session, material_id)
+        if (
+            not material
+            or not material.folder
+            or not material.folder.is_active
+            or material.folder.company_id != company_id
+        ):
+            await callback.message.edit_text(
+                "❌ Материал не найден", reply_markup=get_kb_search_no_results_keyboard(), parse_mode="HTML"
+            )
+            await state.set_state(KnowledgeBaseStates.waiting_for_search_query)
+            return
+
+        data = await state.get_data()
+        if data.get("kb_search_mode") == "viewer":
+            user = await get_user_by_tg_id(session, callback.from_user.id)
+            if not user:
+                await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+                return
+            has_access = await check_folder_access(session, material.folder_id, user.id, company_id=company_id)
+            if not has_access:
+                await callback.message.edit_text(
+                    "❌ У тебя нет доступа к этому материалу.",
+                    reply_markup=get_kb_search_no_results_keyboard(),
+                    parse_mode="HTML",
+                )
+                await state.set_state(KnowledgeBaseStates.waiting_for_search_query)
+                return
+
+        if material.material_type == "link":
+            content_display = f"🔗 <a href='{material.content}'>Открыть ссылку</a>"
+        else:
+            content_display = "📎 Файл прикреплен ниже"
+        description_display = material.description if material.description else "Описание не указано"
+
+        message_text = (
+            f"📄 <b>{material.name}</b>\n\n"
+            f"📁 Папка: {material.folder.name}\n\n"
+            f"{content_display}\n\n"
+            f"<b>Описание:</b>\n{description_display}"
+        )
+
+        await send_material_attachments(callback, material, message_text)
+
+        await callback.bot.send_message(
+            chat_id=callback.message.chat.id,
+            text="📋 Навигация по результатам поиска",
+            reply_markup=get_kb_search_material_view_keyboard(),
+            parse_mode="HTML",
+        )
+
+        log_user_action(
+            callback.from_user.id, "kb_search_material_viewed", f"Из поиска открыт материал: {material.name}"
+        )
+
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка при просмотре материала")
+        log_user_error(callback.from_user.id, "kb_search_result_error", str(e))
+
+
+@router.callback_query(F.data == "kb_search_back_to_results", StateFilter(KnowledgeBaseStates.viewing_search_results))
+async def callback_kb_search_back_to_results(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Возврат от материала к результатам поиска"""
+    try:
+        await callback.answer()
+
+        data = await state.get_data()
+        query = data.get("kb_search_query", "")
+        page = data.get("kb_search_page", 0)
+
+        await render_kb_search_results(callback.message, state, session, callback.from_user.id, query, page, edit=True)
+
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка при возврате к результатам")
+        log_user_error(callback.from_user.id, "kb_search_back_error", str(e))
+
+
+@router.callback_query(F.data == "kb_search_retry")
+async def callback_kb_search_retry(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Новый поиск по БЗ"""
+    try:
+        await callback.answer()
+
+        await callback.message.edit_text(
+            KB_SEARCH_PROMPT, reply_markup=get_kb_search_prompt_keyboard(), parse_mode="HTML"
+        )
+        await state.set_state(KnowledgeBaseStates.waiting_for_search_query)
+
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка при открытии поиска")
+        log_user_error(callback.from_user.id, "kb_search_retry_error", str(e))
+
+
+@router.callback_query(F.data == "kb_search_cancel")
+async def callback_kb_search_cancel(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Выход из поиска к списку папок"""
+    try:
+        await callback.answer()
+
+        data = await state.get_data()
+        if data.get("kb_search_mode") == "viewer":
+            user = await get_user_by_tg_id(session, callback.from_user.id)
+            if not user:
+                await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
+                return
+            company_id = await ensure_company_id(session, state, callback.from_user.id)
+            accessible_folders = await get_accessible_knowledge_folders_for_user(session, user.id, company_id)
+            await callback.message.edit_text(
+                "📚 <b>База знаний</b>\n\nВыбери раздел для изучения материалов:",
+                reply_markup=get_employee_knowledge_folders_keyboard(accessible_folders),
+                parse_mode="HTML",
+            )
+            await state.set_state(KnowledgeBaseStates.employee_browsing)
+        else:
+            await show_main_folders_list(callback, state, session)
+
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка при возврате")
+        log_user_error(callback.from_user.id, "kb_search_cancel_error", str(e))
