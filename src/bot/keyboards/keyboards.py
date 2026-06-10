@@ -1734,10 +1734,9 @@ def get_knowledge_base_main_keyboard(has_folders: bool = False) -> InlineKeyboar
     """Основная клавиатура базы знаний для рекрутера (ТЗ 9-1 шаг 2)"""
     keyboard = [
         [InlineKeyboardButton(text="Создать папку", callback_data="kb_create_folder")],
+        [InlineKeyboardButton(text="🔍 Поиск", callback_data="kb_search")],
         [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
     ]
-
-    # Если папки есть, показываем их кнопки будут добавлены динамически
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -1745,12 +1744,11 @@ def get_knowledge_folders_keyboard(folders: list, show_create: bool = True) -> I
     """Клавиатура со списком всех папок базы знаний (ТЗ 9-2 шаг 2)"""
     keyboard = []
 
-    # Кнопки управления
     if show_create:
         keyboard.append([InlineKeyboardButton(text="Создать папку", callback_data="kb_create_folder")])
+    keyboard.append([InlineKeyboardButton(text="🔍 Поиск", callback_data="kb_search")])
     keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
 
-    # Папки (максимум 4-5 для читабельности)
     for folder in folders:
         folder_name = folder.name[:25] + "..." if len(folder.name) > 25 else folder.name
         keyboard.append([InlineKeyboardButton(text=f"{{ {folder_name} }}", callback_data=f"kb_folder:{folder.id}")])
@@ -1901,20 +1899,18 @@ def get_folder_deleted_keyboard(folder_id: int = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-# Клавиатуры для сотрудников (просмотр базы знаний)
 def get_employee_knowledge_folders_keyboard(folders: list) -> InlineKeyboardMarkup:
     """Клавиатура папок базы знаний для сотрудников"""
     keyboard = []
 
-    # Папки, доступные сотруднику (фильтруем только активные)
     for folder in folders:
-        if folder.is_active:  # Показываем только активные папки
+        if folder.is_active:
             folder_name = folder.name[:25] + "..." if len(folder.name) > 25 else folder.name
             keyboard.append(
                 [InlineKeyboardButton(text=f"📁 {folder_name}", callback_data=f"kb_emp_folder:{folder.id}")]
             )
 
-    # Кнопка возврата
+    keyboard.append([InlineKeyboardButton(text="🔍 Поиск", callback_data="kb_search")])
     keyboard.append([InlineKeyboardButton(text="⬅️ Назад к профилю", callback_data="back_to_employee_profile")])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -1943,6 +1939,56 @@ def get_employee_material_view_keyboard(folder_id: int) -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton(text="⬅️ Назад к материалам", callback_data=f"kb_emp_folder:{folder_id}")],
         [InlineKeyboardButton(text="📚 К папкам", callback_data="kb_emp_back_to_folders")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_kb_search_prompt_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура приглашения к вводу поискового запроса по БЗ"""
+    keyboard = [
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="kb_search_cancel")],
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_kb_search_no_results_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура пустых результатов поиска по БЗ"""
+    keyboard = [
+        [InlineKeyboardButton(text="🔄 Повторить поиск", callback_data="kb_search_retry")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="kb_search_cancel")],
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_kb_search_results_keyboard(materials: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
+    """Клавиатура результатов поиска материалов БЗ с пагинацией"""
+
+    def render_material(material):
+        material_name = material.name[:25] + "..." if len(material.name) > 25 else material.name
+        folder_name = material.folder.name[:20] + "..." if len(material.folder.name) > 20 else material.folder.name
+        return (f"📄 {material_name} (📁 {folder_name})", f"kb_search_result:{material.id}")
+
+    return (
+        PaginatedKeyboard(materials, page=page, per_page=per_page, page_callback="kb_search_page")
+        .add_items(render_material)
+        .add_footer(
+            [
+                [InlineKeyboardButton(text="🔄 Новый поиск", callback_data="kb_search_retry")],
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="kb_search_cancel")],
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+            ]
+        )
+        .build()
+    )
+
+
+def get_kb_search_material_view_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура после открытия материала из результатов поиска"""
+    keyboard = [
+        [InlineKeyboardButton(text="⬅️ Назад к результатам", callback_data="kb_search_back_to_results")],
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
