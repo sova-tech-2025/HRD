@@ -30,6 +30,7 @@ FRANCHISEE_PERMISSIONS = [
     "grant_test_access",
     "view_learning_paths",
     "send_broadcast",
+    "conduct_attestations",
 ]
 
 # Права, которые нужно доустановить Рекрутеру (поведение Рекрутера не сужается)

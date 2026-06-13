@@ -22,6 +22,7 @@ EXPECTED_BUTTONS = [
     "Рассылка",
     "Тесты",
     "Мои тесты",
+    "Аттестация",
     "Экзамены",
 ]
 FORBIDDEN_BUTTONS = ["Группы", "Объекты", "Компания"]
@@ -179,3 +180,91 @@ class TestFranchiseeScope:
 
         after = await e2e_db.fetchval("SELECT count(*) FROM user_work_objects WHERE user_id = $1", trainee_id)
         assert after > before and after >= 2, f"Объект Франчайзи не добавился: было {before}, стало {after}"
+
+
+@pytest.mark.order(97)
+class TestFranchiseeAttestation:
+    """Франчайзи может проводить аттестацию: право conduct_attestations + кнопка «Аттестация».
+
+    ВАЖНО: проверка идёт на РЕАЛЬНОМ Франчайзи (клиент trainee, конвертированный
+    в TestFranchiseeScope), а не через admin.switch_role — у ADMIN
+    check_user_permission всегда True (is_admin_user), что замаскировало бы
+    отсутствие права у роли Франчайзи.
+    """
+
+    FR_PHONE = "+79001000002"
+    EXAMINEE_TG = 990000050
+
+    async def _assign_attestation_to_franchisee(self, e2e_db, shared_state) -> dict:
+        company_id = await e2e_db.fetchval("SELECT id FROM companies WHERE name = $1", shared_state["company_name"])
+        franchisee_id = await e2e_db.fetchval("SELECT id FROM users WHERE phone_number = $1", self.FR_PHONE)
+        assert franchisee_id, "Реальный Франчайзи (из TestFranchiseeScope) не найден в БД"
+
+        # Страховка: гарантируем роль «Франчайзи» (на случай изменения порядка тестов)
+        franchisee_role = await e2e_db.fetchval("SELECT id FROM roles WHERE name = 'Франчайзи'")
+        await e2e_db.execute(
+            "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            franchisee_id,
+            franchisee_role,
+        )
+
+        # Стажёр той же компании, которого аттестует Франчайзи (manager_id = franchisee)
+        examinee_id = await e2e_db.fetchval(
+            """
+            INSERT INTO users (tg_id, full_name, phone_number, is_active, is_activated,
+                               company_id, registration_date, role_assigned_date)
+            VALUES ($1, 'Гамма Аттестуемый', '+79990000050', true, true, $2, now(), now())
+            ON CONFLICT (tg_id) DO UPDATE SET company_id = EXCLUDED.company_id
+            RETURNING id
+            """,
+            self.EXAMINEE_TG,
+            company_id,
+        )
+
+        attestation_id = await e2e_db.fetchval(
+            "SELECT id FROM attestations WHERE company_id = $1 ORDER BY id LIMIT 1", company_id
+        )
+        assert attestation_id, "В компании нет ни одной аттестации для назначения"
+
+        await e2e_db.execute("DELETE FROM trainee_attestations WHERE trainee_id = $1", examinee_id)
+        await e2e_db.execute(
+            """
+            INSERT INTO trainee_attestations
+                (trainee_id, manager_id, attestation_id, assigned_by_id, status, is_active, assigned_date)
+            VALUES ($1, $2, $3, $2, 'assigned', true, now())
+            """,
+            examinee_id,
+            franchisee_id,
+            attestation_id,
+        )
+        return {"franchisee_id": franchisee_id, "examinee_id": examinee_id}
+
+    async def test_franchisee_attestation_shows_assigned_trainee(self, trainee, e2e_db, shared_state):
+        """Реальный Франчайзи жмёт «Аттестация» → видит назначенного стажёра, а не отказ по правам."""
+        await self._assign_attestation_to_franchisee(e2e_db, shared_state)
+
+        # /start обновляет FSM реального Франчайзи (role=Франчайзи, company_id)
+        await trainee.send_and_wait("/start", pattern="Добро пожаловать|меню|Франчайзи")
+
+        resp = await trainee.send_and_wait(
+            "Аттестация ✔️", pattern="[Аа]ттестац|стажер|стажёр|готовы пройти|Недостаточно прав"
+        )
+        text = resp.raw_text or ""
+
+        assert "Недостаточно прав" not in text, (
+            f"Франчайзи получил отказ по правам — право conduct_attestations не выдано роли: {text!r}"
+        )
+
+        trainee_btn = trainee.find_button_data(resp, data_prefix="select_trainee_attestation:")
+        assert trainee_btn, (
+            f"Назначенный стажёр не виден Франчайзи в списке аттестаций. "
+            f"Текст: {text[:300]!r}, кнопки: {trainee.get_button_texts(resp)}"
+        )
+
+    async def test_cleanup(self, e2e_db):
+        """Очистка: удаляем созданного аттестуемого и его назначение."""
+        examinee_id = await e2e_db.fetchval("SELECT id FROM users WHERE tg_id = $1", self.EXAMINEE_TG)
+        if examinee_id:
+            await e2e_db.execute("DELETE FROM trainee_attestations WHERE trainee_id = $1", examinee_id)
+            await e2e_db.execute("DELETE FROM user_roles WHERE user_id = $1", examinee_id)
+            await e2e_db.execute("DELETE FROM users WHERE id = $1", examinee_id)
