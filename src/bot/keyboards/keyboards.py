@@ -78,6 +78,9 @@ def get_role_selection_keyboard(is_editing: bool = False) -> InlineKeyboardMarku
         ("Руководитель", "Руководитель"),
     ]
 
+    if is_editing:
+        all_roles.append(("Франчайзи", "Франчайзи"))
+
     keyboard_buttons = [
         [InlineKeyboardButton(text=display_name, callback_data=f"role:{role_name}")]
         for display_name, role_name in all_roles
@@ -125,6 +128,29 @@ def get_recruiter_keyboard() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="Новые пользователи ➕")],
             [KeyboardButton(text="Помощь ❓")],
             [KeyboardButton(text="Компания 🏢")],
+        ],
+        resize_keyboard=True,
+    )
+    return keyboard
+
+
+def get_franchisee_keyboard() -> ReplyKeyboardMarkup:
+    """Меню для роли Франчайзи: scoped-администрирование без управления контентом."""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Мой профиль 🦸🏻‍♂️")],
+            [KeyboardButton(text="Рассылка ✈️")],
+            [KeyboardButton(text="Тесты 📄")],
+            [KeyboardButton(text="Мои тесты 📋")],
+            [KeyboardButton(text="Аттестация ✔️")],
+            [KeyboardButton(text="Экзамены 📝")],
+            [KeyboardButton(text="Наставники 🦉")],
+            [KeyboardButton(text="Стажеры 🐣")],
+            [KeyboardButton(text="Траектория 📖")],
+            [KeyboardButton(text="База знаний 📁️")],
+            [KeyboardButton(text="Все пользователи 🚸")],
+            [KeyboardButton(text="Новые пользователи ➕")],
+            [KeyboardButton(text="Помощь ❓")],
         ],
         resize_keyboard=True,
     )
@@ -241,6 +267,7 @@ def get_admin_role_picker_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Рекрутер", callback_data="admin_role:Рекрутер")],
+            [InlineKeyboardButton(text="Франчайзи", callback_data="admin_role:Франчайзи")],
             [InlineKeyboardButton(text="Руководитель", callback_data="admin_role:Руководитель")],
             [InlineKeyboardButton(text="Наставник", callback_data="admin_role:Наставник")],
             [InlineKeyboardButton(text="Сотрудник", callback_data="admin_role:Сотрудник")],
@@ -279,6 +306,8 @@ def get_keyboard_by_role(roles) -> ReplyKeyboardMarkup:
         return None  # ADMIN использует inline-меню, не reply keyboard
     if "Рекрутер" in role_names:
         return get_recruiter_keyboard()
+    elif "Франчайзи" in role_names:
+        return get_franchisee_keyboard()
     elif "Руководитель" in role_names:
         return get_manager_keyboard()
     elif "Наставник" in role_names:
@@ -665,22 +694,24 @@ def get_broadcast_main_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
+BROADCAST_ROLE_NAMES = {
+    "trainee": "Стажер",
+    "employee": "Сотрудник",
+    "mentor": "Наставник",
+    "recruiter": "Рекрутер",
+    "manager": "Руководитель",
+    "franchisee": "Франчайзи",
+}
+
+
 def get_broadcast_roles_selection_keyboard(selected_roles: list = None) -> InlineKeyboardMarkup:
     """Клавиатура выбора ролей для рассылки"""
     if selected_roles is None:
         selected_roles = []
 
-    roles = [
-        ("Стажер", "trainee"),
-        ("Сотрудник", "employee"),
-        ("Наставник", "mentor"),
-        ("Рекрутер", "recruiter"),
-        ("Руководитель", "manager"),
-    ]
-
     keyboard = InlineKeyboardBuilder()
 
-    for role_display, role_key in roles:
+    for role_key, role_display in BROADCAST_ROLE_NAMES.items():
         checkmark = "✅ " if role_key in selected_roles else ""
         keyboard.button(text=f"{checkmark}{role_display}", callback_data=f"broadcast_role:{role_key}")
 
@@ -691,11 +722,13 @@ def get_broadcast_roles_selection_keyboard(selected_roles: list = None) -> Inlin
         keyboard.row(InlineKeyboardButton(text="➡️ Далее", callback_data="broadcast_roles_next"))
 
     # Динамический текст кнопки "Все роли" / "Снять все"
-    all_roles_set = {"trainee", "employee", "mentor", "recruiter", "manager"}
+    all_roles_set = set(BROADCAST_ROLE_NAMES)
     if set(selected_roles) == all_roles_set:
         all_button_text = "❌ Снять все"
     else:
         all_button_text = "🌐 Все роли"
+
+    keyboard.row(InlineKeyboardButton(text="👤 Выбрать сотрудника", callback_data="broadcast_select_employee"))
 
     keyboard.row(
         InlineKeyboardButton(text=all_button_text, callback_data="broadcast_roles_all"),
@@ -703,6 +736,30 @@ def get_broadcast_roles_selection_keyboard(selected_roles: list = None) -> Inlin
     )
 
     return keyboard.as_markup()
+
+
+def get_broadcast_employees_keyboard(
+    candidates: list, selected_ids, page: int = 0, per_page: int = 6
+) -> InlineKeyboardMarkup:
+    """Клавиатура поимённого выбора сотрудников для рассылки (галочки, поиск, пагинация).
+
+    candidates — список dict {"id", "name"}; selected_ids — выбранные id.
+    """
+    selected = set(selected_ids)
+    kb = PaginatedKeyboard(candidates, page=page, per_page=per_page, page_callback="bc_emp_page")
+
+    def _render(c):
+        mark = "✅ " if c["id"] in selected else ""
+        return (f"{mark}{c['name']}", f"bc_emp_toggle:{c['id']}")
+
+    kb.add_items(_render)
+
+    footer = [[InlineKeyboardButton(text="🔍 Поиск по ФИО", callback_data="bc_emp_search")]]
+    if selected:
+        footer.append([InlineKeyboardButton(text="➡️ Далее", callback_data="bc_emp_next")])
+    footer.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+    kb.add_footer(footer)
+    return kb.build()
 
 
 def get_question_edit_keyboard(question_id: int) -> InlineKeyboardMarkup:
@@ -1292,7 +1349,9 @@ def get_object_delete_confirmation_keyboard(object_id: int) -> InlineKeyboardMar
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_user_editor_keyboard(is_trainee: bool = False) -> InlineKeyboardMarkup:
+def get_user_editor_keyboard(
+    is_trainee: bool = False, is_franchisee: bool = False, franchisee_user_id: int | None = None
+) -> InlineKeyboardMarkup:
     """Клавиатура для редактора пользователя"""
     keyboard = [
         [InlineKeyboardButton(text="Имя", callback_data="edit_full_name")],
@@ -1306,6 +1365,18 @@ def get_user_editor_keyboard(is_trainee: bool = False) -> InlineKeyboardMarkup:
         keyboard.append([InlineKeyboardButton(text="Объект стажировки", callback_data="edit_internship_object")])
 
     keyboard.append([InlineKeyboardButton(text="Объект работы", callback_data="edit_work_object")])
+
+    # Для Франчайзи — редактирование набора объектов (scoped-администрирование),
+    # чтобы можно было открыть/закрыть объект без переназначения роли
+    if is_franchisee and franchisee_user_id is not None:
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    text="📍 Объекты Франчайзи", callback_data=f"franchisee_objects:{franchisee_user_id}"
+                )
+            ]
+        )
+
     keyboard.append([InlineKeyboardButton(text="🗑️ Удалить пользователя", callback_data="delete_user")])
     keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_view_user")])
     keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
@@ -1664,10 +1735,9 @@ def get_knowledge_base_main_keyboard(has_folders: bool = False) -> InlineKeyboar
     """Основная клавиатура базы знаний для рекрутера (ТЗ 9-1 шаг 2)"""
     keyboard = [
         [InlineKeyboardButton(text="Создать папку", callback_data="kb_create_folder")],
+        [InlineKeyboardButton(text="🔍 Поиск", callback_data="kb_search")],
         [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
     ]
-
-    # Если папки есть, показываем их кнопки будут добавлены динамически
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -1675,12 +1745,11 @@ def get_knowledge_folders_keyboard(folders: list, show_create: bool = True) -> I
     """Клавиатура со списком всех папок базы знаний (ТЗ 9-2 шаг 2)"""
     keyboard = []
 
-    # Кнопки управления
     if show_create:
         keyboard.append([InlineKeyboardButton(text="Создать папку", callback_data="kb_create_folder")])
+    keyboard.append([InlineKeyboardButton(text="🔍 Поиск", callback_data="kb_search")])
     keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
 
-    # Папки (максимум 4-5 для читабельности)
     for folder in folders:
         folder_name = folder.name[:25] + "..." if len(folder.name) > 25 else folder.name
         keyboard.append([InlineKeyboardButton(text=f"{{ {folder_name} }}", callback_data=f"kb_folder:{folder.id}")])
@@ -1831,20 +1900,18 @@ def get_folder_deleted_keyboard(folder_id: int = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-# Клавиатуры для сотрудников (просмотр базы знаний)
 def get_employee_knowledge_folders_keyboard(folders: list) -> InlineKeyboardMarkup:
     """Клавиатура папок базы знаний для сотрудников"""
     keyboard = []
 
-    # Папки, доступные сотруднику (фильтруем только активные)
     for folder in folders:
-        if folder.is_active:  # Показываем только активные папки
+        if folder.is_active:
             folder_name = folder.name[:25] + "..." if len(folder.name) > 25 else folder.name
             keyboard.append(
                 [InlineKeyboardButton(text=f"📁 {folder_name}", callback_data=f"kb_emp_folder:{folder.id}")]
             )
 
-    # Кнопка возврата
+    keyboard.append([InlineKeyboardButton(text="🔍 Поиск", callback_data="kb_search")])
     keyboard.append([InlineKeyboardButton(text="⬅️ Назад к профилю", callback_data="back_to_employee_profile")])
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -1873,6 +1940,56 @@ def get_employee_material_view_keyboard(folder_id: int) -> InlineKeyboardMarkup:
     keyboard = [
         [InlineKeyboardButton(text="⬅️ Назад к материалам", callback_data=f"kb_emp_folder:{folder_id}")],
         [InlineKeyboardButton(text="📚 К папкам", callback_data="kb_emp_back_to_folders")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_kb_search_prompt_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура приглашения к вводу поискового запроса по БЗ"""
+    keyboard = [
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="kb_search_cancel")],
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_kb_search_no_results_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура пустых результатов поиска по БЗ"""
+    keyboard = [
+        [InlineKeyboardButton(text="🔄 Повторить поиск", callback_data="kb_search_retry")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="kb_search_cancel")],
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_kb_search_results_keyboard(materials: list, page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
+    """Клавиатура результатов поиска материалов БЗ с пагинацией"""
+
+    def render_material(material):
+        material_name = material.name[:25] + "..." if len(material.name) > 25 else material.name
+        folder_name = material.folder.name[:20] + "..." if len(material.folder.name) > 20 else material.folder.name
+        return (f"📄 {material_name} (📁 {folder_name})", f"kb_search_result:{material.id}")
+
+    return (
+        PaginatedKeyboard(materials, page=page, per_page=per_page, page_callback="kb_search_page")
+        .add_items(render_material)
+        .add_footer(
+            [
+                [InlineKeyboardButton(text="🔄 Новый поиск", callback_data="kb_search_retry")],
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="kb_search_cancel")],
+                [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+            ]
+        )
+        .build()
+    )
+
+
+def get_kb_search_material_view_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура после открытия материала из результатов поиска"""
+    keyboard = [
+        [InlineKeyboardButton(text="⬅️ Назад к результатам", callback_data="kb_search_back_to_results")],
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 

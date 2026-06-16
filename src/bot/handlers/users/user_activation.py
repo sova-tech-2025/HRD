@@ -21,12 +21,19 @@ from bot.database.db import (
     search_unactivated_users_by_name,
 )
 from bot.keyboards.keyboards import get_main_menu_keyboard, get_new_users_list_keyboard
+from bot.repositories.scope import can_assign_role, get_scope_object_ids, in_scope
 from bot.states.states import UserActivationStates
 from bot.utils.auth.auth import check_auth
 from bot.utils.bot.commands import set_bot_commands
 from bot.utils.logger import log_user_action, log_user_error, logger
 
 router = Router()
+
+
+async def _scoped_objects(session: AsyncSession, tg_id: int, objects: list) -> list:
+    actor = await get_user_by_tg_id(session, tg_id)
+    scope = await get_scope_object_ids(session, actor) if actor else None
+    return [obj for obj in objects if in_scope(scope, obj.id)]
 
 
 async def show_role_selection(callback: CallbackQuery, state: FSMContext, session: AsyncSession, user_id: int):
@@ -40,6 +47,17 @@ async def show_role_selection(callback: CallbackQuery, state: FSMContext, sessio
     available_roles = await get_all_roles(session)
     if not available_roles:
         await callback.message.edit_text("❌ В системе нет доступных ролей для назначения.")
+        return False
+
+    actor = await get_user_by_tg_id(session, callback.from_user.id)
+    actor_scope = await get_scope_object_ids(session, actor) if actor else None
+    available_roles = [
+        role
+        for role in available_roles
+        if role.name not in {"ADMIN", "Франчайзи"} and can_assign_role(actor_scope, role.name)
+    ]
+    if not available_roles:
+        await callback.message.edit_text("❌ Нет ролей, доступных тебе для назначения.")
         return False
 
     # Формируем клавиатуру с ролями
@@ -149,6 +167,7 @@ async def show_work_object_selection(
         return False
     # Получаем список объектов
     objects = await get_all_objects(session, company_id)
+    objects = await _scoped_objects(session, callback.from_user.id, objects)
 
     if not objects:
         await callback.message.edit_text("❌ В системе нет объектов. Сначала создай объекты.")
@@ -194,7 +213,7 @@ async def cmd_new_users_list(message: Message, state: FSMContext, session: Async
         await message.answer("Пользователь не найден")
         return
 
-    if not await check_user_permission(session, user.id, "manage_groups"):
+    if not await check_user_permission(session, user.id, "manage_users"):
         await message.answer("❌ Недостаточно прав\nУ тебя нет прав для управления пользователями.")
         return
 
@@ -608,6 +627,7 @@ async def process_group_selection(callback: CallbackQuery, state: FSMContext, se
             return
         # Получаем список объектов для стажировки
         objects = await get_all_objects(session, company_id_for_objects)
+        objects = await _scoped_objects(session, callback.from_user.id, objects)
 
         if not objects:
             await callback.message.edit_text("❌ В системе нет объектов. Сначала создай объекты.")
@@ -734,6 +754,7 @@ async def process_back_to_previous_step(callback: CallbackQuery, state: FSMConte
                 return
             # Получаем список объектов для стажировки
             objects = await get_all_objects(session, company_id)
+            objects = await _scoped_objects(session, callback.from_user.id, objects)
 
             if not objects:
                 await callback.message.edit_text("❌ В системе нет объектов. Сначала создай объекты.")
@@ -978,7 +999,7 @@ async def callback_show_new_users(callback: CallbackQuery, state: FSMContext, se
         await callback.answer("Твой аккаунт деактивирован. Обратись к администратору.", show_alert=True)
         return
 
-    if not await check_user_permission(session, user.id, "manage_groups"):
+    if not await check_user_permission(session, user.id, "manage_users"):
         await callback.answer("❌ Недостаточно прав\nУ тебя нет прав для управления пользователями.", show_alert=True)
         return
 

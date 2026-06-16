@@ -16,7 +16,6 @@ from bot.database.db import (
     get_all_active_tests,
     get_available_learning_paths_for_mentor,
     get_available_managers_for_trainee,
-    get_available_mentors,
     get_learning_path_by_id,
     get_learning_path_stages,
     get_mentor_trainees,
@@ -54,7 +53,8 @@ from bot.keyboards.keyboards import (
     get_trainees_with_mentors_keyboard,
     get_unassigned_trainees_keyboard,
 )
-from bot.repositories import AssessmentAssignmentRepository, AssessmentRepository
+from bot.repositories import AssessmentAssignmentRepository, AssessmentRepository, ScopedUserRepository
+from bot.repositories.scope import get_scope_object_ids, in_scope
 from bot.utils.formatters.test_progress import get_test_status_icon
 from bot.utils.formatters.trajectory import generate_trajectory_progress_with_attestation_status
 from bot.utils.timezone import moscow_now
@@ -953,7 +953,9 @@ async def process_trainee_selection_for_assignment(callback: CallbackQuery, stat
         await callback.answer()
         return
 
-    available_mentors = await get_available_mentors(session, company_id=trainee.company_id)
+    actor = await get_user_by_tg_id(session, callback.from_user.id)
+    scope = await get_scope_object_ids(session, actor) if actor else None
+    available_mentors = await ScopedUserRepository(session).list_mentors(company_id=trainee.company_id, scope=scope)
 
     if not available_mentors:
         await callback.message.edit_text(
@@ -1057,6 +1059,15 @@ async def process_assignment_confirmation(callback: CallbackQuery, state: FSMCon
     company_id = await ensure_company_id(session, state, callback.from_user.id)
     if not company_id:
         company_id = user.company_id
+
+    scope = await get_scope_object_ids(session, user)
+    guard_trainee = await get_user_by_id(session, trainee_id)
+    guard_mentor = await get_user_by_id(session, mentor_id)
+    if not in_scope(scope, getattr(guard_trainee, "internship_object_id", None)) or not in_scope(
+        scope, getattr(guard_mentor, "work_object_id", None)
+    ):
+        await callback.answer("❌ Доступно только в рамках твоих объектов", show_alert=True)
+        return
 
     mentorship = await assign_mentor(session, mentor_id, trainee_id, user.id, bot, company_id)
 
@@ -1187,7 +1198,8 @@ async def show_mentors_list(callback: CallbackQuery, session: AsyncSession, page
         await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
         return
 
-    mentors = await get_available_mentors(session, company_id=user.company_id)
+    scope = await get_scope_object_ids(session, user)
+    mentors = await ScopedUserRepository(session).list_mentors(company_id=user.company_id, scope=scope)
 
     if not mentors:
         await callback.message.edit_text(
@@ -1320,7 +1332,8 @@ async def show_mentor_assignments(callback: CallbackQuery, session: AsyncSession
             return
 
         # Получаем всех наставников с их стажерами
-        mentors = await get_available_mentors(session, company_id=user.company_id)
+        scope = await get_scope_object_ids(session, user)
+        mentors = await ScopedUserRepository(session).list_mentors(company_id=user.company_id, scope=scope)
 
         if not mentors:
             await callback.message.edit_text(
@@ -1412,9 +1425,9 @@ async def callback_assignments_page(callback: CallbackQuery, state: FSMContext, 
         log_user_error(callback.from_user.id, "assignments_page_error", f"Invalid page data: {callback.data}")
 
 
-async def _get_trainees_with_mentors(session: AsyncSession, company_id: int) -> list:
+async def _get_trainees_with_mentors(session: AsyncSession, company_id: int, scope: set[int] | None = None) -> list:
     """Получить список стажёров с назначенными наставниками."""
-    mentors = await get_available_mentors(session, company_id=company_id)
+    mentors = await ScopedUserRepository(session).list_mentors(company_id=company_id, scope=scope)
     trainees_with_mentors = []
     seen_ids = set()
 
@@ -1436,7 +1449,8 @@ async def _show_reassign_trainees(callback: CallbackQuery, session: AsyncSession
         await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
         return
 
-    trainees_with_mentors = await _get_trainees_with_mentors(session, user.company_id)
+    scope = await get_scope_object_ids(session, user)
+    trainees_with_mentors = await _get_trainees_with_mentors(session, user.company_id, scope)
 
     if not trainees_with_mentors:
         await callback.message.edit_text(
@@ -1498,7 +1512,9 @@ async def callback_select_trainee_for_reassign(callback: CallbackQuery, state: F
         current_mentor = await get_trainee_mentor(session, trainee_id, company_id=trainee.company_id)
 
         # Получаем доступных наставников (исключая текущего)
-        available_mentors = await get_available_mentors(session, company_id=trainee.company_id)
+        actor = await get_user_by_tg_id(session, callback.from_user.id)
+        scope = await get_scope_object_ids(session, actor) if actor else None
+        available_mentors = await ScopedUserRepository(session).list_mentors(company_id=trainee.company_id, scope=scope)
         available_mentors = [m for m in available_mentors if not current_mentor or m.id != current_mentor.id]
 
         if not available_mentors:
@@ -1661,7 +1677,8 @@ async def cmd_list_mentors(message: Message, state: FSMContext, session: AsyncSe
         await message.answer("❌ У тебя нет прав для просмотра информации о наставничестве.")
         return
 
-    mentors = await get_available_mentors(session, company_id=user.company_id)
+    scope = await get_scope_object_ids(session, user)
+    mentors = await ScopedUserRepository(session).list_mentors(company_id=user.company_id, scope=scope)
 
     if not mentors:
         await message.answer(

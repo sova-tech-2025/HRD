@@ -50,6 +50,34 @@ from bot.utils.validation.input import validate_name
 router = Router()
 
 
+def _get_learning_paths_view_keyboard() -> InlineKeyboardMarkup:
+    keyboard = [
+        [InlineKeyboardButton(text="👁️Просмотреть", callback_data="edit_trajectory")],
+        [InlineKeyboardButton(text="🔍Аттестации", callback_data="manage_attestations")],
+        [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+async def _reject_if_lp_view_only(callback: CallbackQuery, session: AsyncSession) -> bool:
+    user = await get_user_by_tg_id(session, callback.from_user.id)
+    if not user or not await check_user_permission(session, user.id, "manage_groups"):
+        await callback.answer("🔒 Просмотр без редактирования", show_alert=True)
+        return True
+    return False
+
+
+def _get_attestations_view_keyboard(attestations: list) -> InlineKeyboardMarkup:
+    keyboard = []
+    for attestation in attestations:
+        keyboard.append(
+            [InlineKeyboardButton(text=attestation.name, callback_data=f"view_attestation:{attestation.id}")]
+        )
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_trajectories_main")])
+    keyboard.append([InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
 @router.message(F.text.in_(["Траектории", "Траектория 📖"]))
 async def cmd_learning_paths(message: Message, state: FSMContext, session: AsyncSession):
     """Обработчик команды 'Траектории'"""
@@ -70,7 +98,8 @@ async def cmd_learning_paths(message: Message, state: FSMContext, session: Async
 
         # Проверка прав доступа
         has_permission = await check_user_permission(session, user.id, "manage_groups")
-        if not has_permission:
+        can_view = await check_user_permission(session, user.id, "view_learning_paths")
+        if not has_permission and not can_view:
             await message.answer(
                 "❌ <b>Недостаточно прав</b>\n\n"
                 "У тебя нет прав для управления траекториями.\n"
@@ -80,16 +109,18 @@ async def cmd_learning_paths(message: Message, state: FSMContext, session: Async
             log_user_error(user.tg_id, "learning_paths_access_denied", "Попытка доступа без прав")
             return
 
-        # Показываем главное меню траекторий
-        text = (
-            "🗺️<b>РЕДАКТОР ТРАЕКТОРИЙ</b>🗺️\n\n"
-            "В данном меню ты можешь:\n\n"
-            "1 ➕Создать траекторию обучения\n"
-            "2 ✏️Изменить траекторию обучения\n"
-            "3 🗑️Удалить траекторию обучения"
-        )
-
-        await message.answer(text, reply_markup=get_learning_paths_main_keyboard(), parse_mode="HTML")
+        if has_permission:
+            text = (
+                "🗺️<b>РЕДАКТОР ТРАЕКТОРИЙ</b>🗺️\n\n"
+                "В данном меню ты можешь:\n\n"
+                "1 ➕Создать траекторию обучения\n"
+                "2 ✏️Изменить траекторию обучения\n"
+                "3 🗑️Удалить траекторию обучения"
+            )
+            await message.answer(text, reply_markup=get_learning_paths_main_keyboard(), parse_mode="HTML")
+        else:
+            text = "🗺️<b>ТРАЕКТОРИИ ОБУЧЕНИЯ</b>🗺️\n\nВыбери, что хочешь просмотреть:"
+            await message.answer(text, reply_markup=_get_learning_paths_view_keyboard(), parse_mode="HTML")
 
         await state.set_state(LearningPathStates.main_menu)
         log_user_action(user.tg_id, "opened_learning_paths", "Открыт редактор траекторий")
@@ -103,6 +134,8 @@ async def cmd_learning_paths(message: Message, state: FSMContext, session: Async
 async def callback_create_trajectory(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Начало создания траектории"""
     try:
+        if await _reject_if_lp_view_only(callback, session):
+            return
         await callback.answer()
 
         instruction_text = (
@@ -1743,11 +1776,17 @@ async def callback_manage_attestations(callback: CallbackQuery, state: FSMContex
         company_id = await ensure_company_id(session, state, callback.from_user.id)
         attestations = await AssessmentRepository(session).get_all(company_id)
 
-        text = "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\nВыбери нужную тебе аттестацию или создай новую"
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        can_manage = user and await check_user_permission(session, user.id, "manage_groups")
 
-        await callback.message.edit_text(
-            text, reply_markup=get_attestations_main_keyboard(attestations), parse_mode="HTML"
-        )
+        if can_manage:
+            text = "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\nВыбери нужную тебе аттестацию или создай новую"
+            keyboard = get_attestations_main_keyboard(attestations)
+        else:
+            text = "🔍<b>АТТЕСТАЦИИ</b>🔍\nВыбери аттестацию для просмотра"
+            keyboard = _get_attestations_view_keyboard(attestations)
+
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
         await state.set_state(AttestationStates.main_menu)
 
@@ -1760,6 +1799,8 @@ async def callback_manage_attestations(callback: CallbackQuery, state: FSMContex
 async def callback_create_attestation(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """ПУНКТ 5-6 ТЗ: Создание аттестации"""
     try:
+        if await _reject_if_lp_view_only(callback, session):
+            return
         await callback.answer()
 
         # ПУНКТ 6 ТЗ: Точное сообщение с инструкциями
@@ -2037,8 +2078,13 @@ async def callback_view_attestation(callback: CallbackQuery, state: FSMContext, 
         # Сбрасываем страницу при первом открытии
         await state.update_data(current_attestation_id=attestation_id, attestation_page=0)
 
+        view_user = await get_user_by_tg_id(session, callback.from_user.id)
+        can_manage = view_user and await check_user_permission(session, view_user.id, "manage_groups")
+
         # Используем универсальную функцию рендеринга
-        text, keyboard = await render_attestation_page(session, attestation_id, 0, company_id=company_id)
+        text, keyboard = await render_attestation_page(
+            session, attestation_id, 0, company_id=company_id, can_manage=can_manage
+        )
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
@@ -2048,7 +2094,7 @@ async def callback_view_attestation(callback: CallbackQuery, state: FSMContext, 
 
 
 async def render_attestation_page(
-    session: AsyncSession, attestation_id: int, page: int, company_id: int = None
+    session: AsyncSession, attestation_id: int, page: int, company_id: int = None, can_manage: bool = True
 ) -> tuple[str, InlineKeyboardMarkup]:
     """Универсальная функция рендеринга страницы аттестации"""
     attestation = await AssessmentRepository(session).get_by_id(attestation_id, company_id=company_id)
@@ -2113,9 +2159,12 @@ async def render_attestation_page(
         if nav_row:
             keyboard_buttons.append(nav_row)
 
+    if can_manage:
+        keyboard_buttons.append(
+            [InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"delete_attestation:{attestation_id}")]
+        )
     keyboard_buttons.extend(
         [
-            [InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"delete_attestation:{attestation_id}")],
             [InlineKeyboardButton(text="↩️ Назад к аттестациям", callback_data="back_to_attestations_list")],
             [InlineKeyboardButton(text="≡ Главное меню", callback_data="main_menu")],
         ]
@@ -2138,7 +2187,12 @@ async def callback_attestation_page_prev(callback: CallbackQuery, state: FSMCont
         new_page = max(0, current_page - 1)
         await state.update_data(attestation_page=new_page)
 
-        text, keyboard = await render_attestation_page(session, attestation_id, new_page, company_id=company_id)
+        page_user = await get_user_by_tg_id(session, callback.from_user.id)
+        can_manage = page_user and await check_user_permission(session, page_user.id, "manage_groups")
+
+        text, keyboard = await render_attestation_page(
+            session, attestation_id, new_page, company_id=company_id, can_manage=can_manage
+        )
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
     except Exception as e:
@@ -2166,7 +2220,12 @@ async def callback_attestation_page_next(callback: CallbackQuery, state: FSMCont
         new_page = min(current_page + 1, total_pages - 1)
         await state.update_data(attestation_page=new_page)
 
-        text, keyboard = await render_attestation_page(session, attestation_id, new_page, company_id=company_id)
+        page_user = await get_user_by_tg_id(session, callback.from_user.id)
+        can_manage = page_user and await check_user_permission(session, page_user.id, "manage_groups")
+
+        text, keyboard = await render_attestation_page(
+            session, attestation_id, new_page, company_id=company_id, can_manage=can_manage
+        )
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
     except Exception as e:
@@ -2184,11 +2243,17 @@ async def callback_back_to_attestations_list(callback: CallbackQuery, state: FSM
         company_id = await ensure_company_id(session, state, callback.from_user.id)
         attestations = await AssessmentRepository(session).get_all(company_id)
 
-        text = "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\nВыбери нужную тебе аттестацию или создай новую"
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        can_manage = user and await check_user_permission(session, user.id, "manage_groups")
 
-        await callback.message.edit_text(
-            text, reply_markup=get_attestations_main_keyboard(attestations), parse_mode="HTML"
-        )
+        if can_manage:
+            text = "🔍<b>РЕДАКТОР АТТЕСТАЦИЙ</b>🔍\nВыбери нужную тебе аттестацию или создай новую"
+            keyboard = get_attestations_main_keyboard(attestations)
+        else:
+            text = "🔍<b>АТТЕСТАЦИИ</b>🔍\nВыбери аттестацию для просмотра"
+            keyboard = _get_attestations_view_keyboard(attestations)
+
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
         await state.set_state(AttestationStates.main_menu)
 
@@ -2201,6 +2266,8 @@ async def callback_back_to_attestations_list(callback: CallbackQuery, state: FSM
 async def callback_delete_attestation_confirm(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Подтверждение удаления аттестации"""
     try:
+        if await _reject_if_lp_view_only(callback, session):
+            return
         await callback.answer()
 
         attestation_id = int(callback.data.split(":")[1])
@@ -2395,16 +2462,23 @@ async def callback_back_to_trajectories_main_from_attestations(
     try:
         await callback.answer()
 
-        # Показываем главное меню траекторий
-        text = (
-            "🗺️<b>РЕДАКТОР ТРАЕКТОРИЙ</b>🗺️\n\n"
-            "В данном меню ты можешь:\n\n"
-            "1 ➕Создать траекторию обучения\n"
-            "2 ✏️Изменить траекторию обучения\n"
-            "3 🗑️Удалить траекторию обучения"
-        )
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        can_manage = user and await check_user_permission(session, user.id, "manage_groups")
 
-        await callback.message.edit_text(text, reply_markup=get_learning_paths_main_keyboard(), parse_mode="HTML")
+        if can_manage:
+            text = (
+                "🗺️<b>РЕДАКТОР ТРАЕКТОРИЙ</b>🗺️\n\n"
+                "В данном меню ты можешь:\n\n"
+                "1 ➕Создать траекторию обучения\n"
+                "2 ✏️Изменить траекторию обучения\n"
+                "3 🗑️Удалить траекторию обучения"
+            )
+            keyboard = get_learning_paths_main_keyboard()
+        else:
+            text = "🗺️<b>ТРАЕКТОРИИ ОБУЧЕНИЯ</b>🗺️\n\nВыбери, что хочешь просмотреть:"
+            keyboard = _get_learning_paths_view_keyboard()
+
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
         await state.set_state(LearningPathStates.main_menu)
 
@@ -2420,6 +2494,8 @@ async def callback_back_to_trajectories_main_from_attestations(
 async def callback_delete_trajectory(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработчик кнопки удаления траектории"""
     try:
+        if await _reject_if_lp_view_only(callback, session):
+            return
         await callback.answer()
 
         # Получаем все траектории
@@ -2640,16 +2716,23 @@ async def callback_back_to_trajectories_main_universal(
     try:
         await callback.answer()
 
-        # Показываем главное меню траекторий
-        text = (
-            "🗺️<b>РЕДАКТОР ТРАЕКТОРИЙ</b>🗺️\n\n"
-            "В данном меню ты можешь:\n\n"
-            "1 ➕Создать траекторию обучения\n"
-            "2 ✏️Изменить траекторию обучения\n"
-            "3 🗑️Удалить траекторию обучения"
-        )
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        can_manage = user and await check_user_permission(session, user.id, "manage_groups")
 
-        await callback.message.edit_text(text, reply_markup=get_learning_paths_main_keyboard(), parse_mode="HTML")
+        if can_manage:
+            text = (
+                "🗺️<b>РЕДАКТОР ТРАЕКТОРИЙ</b>🗺️\n\n"
+                "В данном меню ты можешь:\n\n"
+                "1 ➕Создать траекторию обучения\n"
+                "2 ✏️Изменить траекторию обучения\n"
+                "3 🗑️Удалить траекторию обучения"
+            )
+            keyboard = get_learning_paths_main_keyboard()
+        else:
+            text = "🗺️<b>ТРАЕКТОРИИ ОБУЧЕНИЯ</b>🗺️\n\nВыбери, что хочешь просмотреть:"
+            keyboard = _get_learning_paths_view_keyboard()
+
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
         await state.set_state(LearningPathStates.main_menu)
 

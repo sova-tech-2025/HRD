@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import delete, select
+from sqlalchemy.orm import selectinload
 
 from bot.database.models import KnowledgeFolder, KnowledgeMaterial, folder_group_access
 from bot.repositories.base import BaseRepository
@@ -8,7 +9,7 @@ from bot.utils.logger import logger
 
 
 class KnowledgeRepository(BaseRepository):
-    """Репозиторий для удаления сущностей Базы Знаний (hard delete)."""
+    """Репозиторий Базы Знаний: удаление (hard delete) и поиск материалов."""
 
     async def delete_folder(self, folder_id: int, company_id: int) -> bool:
         """Физическое удаление папки со всеми материалами и связями."""
@@ -70,3 +71,40 @@ class KnowledgeRepository(BaseRepository):
             logger.error(f"Ошибка удаления материала {material_id}: {e}")
             await self.session.rollback()
             return False
+
+    async def search_materials_by_name(
+        self,
+        query: str,
+        company_id: int,
+        accessible_folder_ids: set[int] | None = None,
+    ) -> list[KnowledgeMaterial]:
+        """Поиск активных материалов по названию в рамках компании.
+
+        При accessible_folder_ids (режим просмотра) результаты ограничиваются
+        материалами из доступных пользователю папок.
+        """
+        try:
+            if accessible_folder_ids is not None and not accessible_folder_ids:
+                return []
+
+            stmt = (
+                select(KnowledgeMaterial)
+                .join(KnowledgeFolder, KnowledgeMaterial.folder_id == KnowledgeFolder.id)
+                .where(
+                    KnowledgeMaterial.name.ilike(f"%{query}%"),
+                    KnowledgeMaterial.is_active == True,  # noqa: E712
+                    KnowledgeFolder.is_active == True,  # noqa: E712
+                    KnowledgeFolder.company_id == company_id,
+                )
+                .options(selectinload(KnowledgeMaterial.folder))
+                .order_by(KnowledgeMaterial.name)
+            )
+            if accessible_folder_ids is not None:
+                stmt = stmt.where(KnowledgeMaterial.folder_id.in_(accessible_folder_ids))
+
+            result = await self.session.execute(stmt)
+            return list(result.scalars().all())
+
+        except Exception as e:
+            logger.error(f"Ошибка поиска материалов по запросу '{query}': {e}")
+            return []

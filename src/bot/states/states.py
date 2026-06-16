@@ -328,6 +328,8 @@ class BroadcastStates(StatesGroup):
     selecting_test = State()  # Выбор теста для рассылки (опционально)
     selecting_roles = State()  # Выбор ролей для рассылки
     selecting_groups = State()  # Выбор групп для рассылки
+    selecting_employees = State()  # Поимённый выбор сотрудников (без шага групп)
+    searching_employees = State()  # Ввод ФИО для поиска сотрудников
 
 
 class KnowledgeBaseStates(StatesGroup):
@@ -368,6 +370,9 @@ class KnowledgeBaseStates(StatesGroup):
     employee_browsing = State()
     employee_viewing_folder = State()
     employee_viewing_material = State()
+
+    waiting_for_search_query = State()
+    viewing_search_results = State()
 
 
 class CompanyCreationStates(StatesGroup):

@@ -95,16 +95,25 @@ class TestScenario5_BroadcastTestAccess:
             await wait_between_actions(1.0)
             resp = await recruiter.get_last_message()
 
-        # Отправляем рассылку
+        # Кнопка "Отправить" на шаге групп открывает шаг выбора объектов (Шаг 7)
         send_btn = recruiter.find_button_data(resp, data_prefix="broadcast_send")
-        if not send_btn:
-            send_btn = recruiter.find_button_data(resp, text_contains="Отправить")
         assert send_btn, f"Send broadcast button not found. Buttons: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=send_btn, wait_pattern="Выбор объектов|объект")
 
+        # Выбираем все объекты
+        all_objects_btn = recruiter.find_button_data(resp, data_prefix="broadcast_objects_all")
+        if all_objects_btn:
+            await recruiter.click_button(resp, data=all_objects_btn)
+            await wait_between_actions(1.0)
+            resp = await recruiter.get_last_message()
+
+        # Финальная отправка рассылки
+        objects_send_btn = recruiter.find_button_data(resp, data_prefix="broadcast_objects_send")
+        assert objects_send_btn, f"Objects send button not found. Buttons: {recruiter.get_button_texts(resp)}"
         resp = await recruiter.click_and_wait(
             resp,
-            data=send_btn,
-            wait_pattern="отправлен|Рассылка|доставлен|успешно",
+            data=objects_send_btn,
+            wait_pattern="успешно отправил|Статистика|Уведомлений отправлено",
             timeout=30.0,
         )
 
@@ -195,3 +204,64 @@ class TestScenario5_BroadcastTestAccess:
             assert not contains_access_denied(text), (
                 f"BUG: Employee denied access to specific broadcast test! Response: {text[:500]}"
             )
+
+
+class TestScenario5b_BroadcastByEmployee:
+    """Поимённая рассылка: на шаге 5 рекрутер выбирает конкретного сотрудника
+    по ФИО (шаг выбора групп пропускается) и отправляет ему рассылку."""
+
+    BROADCAST_TEXT = "E2E поимённая рассылка выбранному сотруднику"
+
+    async def test_step1_broadcast_to_selected_employee(self, recruiter: BotClient):
+        await wait_between_actions()
+
+        resp = await recruiter.send_and_wait("Рассылка ✈️", pattern="[Рр]ассылк|действие|Создать")
+        resp = await recruiter.click_and_wait(resp, data=b"create_broadcast", wait_pattern="текст|сообщение|Введи")
+        resp = await recruiter.send_and_wait(self.BROADCAST_TEXT, pattern="фото|Фото|изображени|материал")
+
+        skip_photo = recruiter.find_button_data(resp, data_prefix="broadcast_skip_photos")
+        if skip_photo:
+            resp = await recruiter.click_and_wait(resp, data=skip_photo, wait_pattern="материал|папк|тест|Выбери")
+        skip_material = recruiter.find_button_data(resp, data_prefix="broadcast_skip_material")
+        if skip_material:
+            resp = await recruiter.click_and_wait(resp, data=skip_material, wait_pattern="тест|Выбери тест")
+
+        await wait_between_actions(2.0)
+        resp = await recruiter.get_last_message()
+        skip_test = recruiter.find_button_data(resp, data_prefix="broadcast_skip_test")
+        assert skip_test, f"Нет кнопки пропуска теста. Кнопки: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=skip_test, wait_pattern="Выбор ролей|Шаг 5")
+
+        # Новая кнопка «Выбрать сотрудника»
+        emp_btn = recruiter.find_button_data(resp, data_prefix="broadcast_select_employee")
+        assert emp_btn, f"Нет кнопки «Выбрать сотрудника». Кнопки: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=emp_btn, wait_pattern="Выбор сотрудников")
+
+        # Поиск по ФИО
+        search_btn = recruiter.find_button_data(resp, data_prefix="bc_emp_search")
+        assert search_btn, f"Нет кнопки поиска. Кнопки: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=search_btn, wait_pattern="Введи ФИО|Поиск")
+        resp = await recruiter.send_and_wait("Стажёров", pattern="Результаты|никого|Выбрано")
+
+        # Отмечаем сотрудника
+        toggle_btn = recruiter.find_button_data(resp, text_contains="Стажёров", data_prefix="bc_emp_toggle:")
+        assert toggle_btn, f"Сотрудник не найден в результатах. Кнопки: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=toggle_btn, wait_pattern="Выбрано")
+
+        # Далее → сводка выбранных
+        next_btn = recruiter.find_button_data(resp, data_prefix="bc_emp_next")
+        assert next_btn, f"Нет кнопки «Далее». Кнопки: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(resp, data=next_btn, wait_pattern="Выбрано сотрудников|Отправить")
+
+        # Отправить
+        send_btn = recruiter.find_button_data(resp, data_prefix="bc_emp_send")
+        assert send_btn, f"Нет кнопки «Отправить». Кнопки: {recruiter.get_button_texts(resp)}"
+        resp = await recruiter.click_and_wait(
+            resp, data=send_btn, wait_pattern="отправлена выбранным|Уведомлений отправлено", timeout=30.0
+        )
+
+    async def test_step2_selected_employee_receives(self, trainee2: BotClient):
+        await wait_between_actions(5.0)
+        messages = await trainee2.get_messages(limit=15)
+        received = any((not m.out) and self.BROADCAST_TEXT in (m.text or "") for m in messages)
+        assert received, "Выбранный поимённо сотрудник не получил рассылку"

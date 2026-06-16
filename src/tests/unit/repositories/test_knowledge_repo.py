@@ -19,6 +19,13 @@ def make_scalar_one_or_none_result(value) -> MagicMock:
     return result
 
 
+def make_scalars_all_result(values) -> MagicMock:
+    """Создать мок результата session.execute() с scalars().all()."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = values
+    return result
+
+
 # ==========================================================================
 # delete_folder()
 # ==========================================================================
@@ -123,3 +130,79 @@ class TestDeleteMaterial:
 
         assert result is False
         session.commit.assert_not_awaited()
+
+
+# ==========================================================================
+# search_materials_by_name()
+# ==========================================================================
+
+
+class TestSearchMaterialsByName:
+    """Поиск материалов Базы Знаний по названию."""
+
+    @pytest.mark.asyncio
+    async def test_search_returns_materials(self):
+        """search_materials_by_name() возвращает найденные материалы."""
+        session = AsyncMock()
+
+        material = MagicMock()
+        material.name = "Инструкция по кассе"
+
+        session.execute = AsyncMock(return_value=make_scalars_all_result([material]))
+
+        repo = KnowledgeRepository(session)
+        materials = await repo.search_materials_by_name("касс", company_id=10)
+
+        assert materials == [material]
+        session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_search_query_filters_by_company_and_ilike(self):
+        """SQL-запрос содержит ilike по названию и изоляцию по company_id."""
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=make_scalars_all_result([]))
+
+        repo = KnowledgeRepository(session)
+        await repo.search_materials_by_name("касс", company_id=10)
+
+        stmt = session.execute.await_args.args[0]
+        sql = str(stmt).lower()
+        assert "like" in sql
+        assert "lower(" in sql
+        assert "company_id" in sql
+        assert "is_active" in sql
+
+    @pytest.mark.asyncio
+    async def test_search_with_accessible_folders_filters_by_folder_id(self):
+        """При переданных accessible_folder_ids запрос фильтрует по folder_id."""
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=make_scalars_all_result([]))
+
+        repo = KnowledgeRepository(session)
+        await repo.search_materials_by_name("касс", company_id=10, accessible_folder_ids={1, 2})
+
+        stmt = session.execute.await_args.args[0]
+        sql = str(stmt).lower()
+        assert "folder_id in" in sql
+
+    @pytest.mark.asyncio
+    async def test_search_empty_accessible_folders_returns_empty_without_query(self):
+        """Пустое множество доступных папок → [] без запроса к БД."""
+        session = AsyncMock()
+
+        repo = KnowledgeRepository(session)
+        materials = await repo.search_materials_by_name("касс", company_id=10, accessible_folder_ids=set())
+
+        assert materials == []
+        session.execute.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_search_error_returns_empty_list(self):
+        """Ошибка БД → пустой список."""
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=Exception("db error"))
+
+        repo = KnowledgeRepository(session)
+        materials = await repo.search_materials_by_name("касс", company_id=10)
+
+        assert materials == []

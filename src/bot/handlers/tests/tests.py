@@ -49,6 +49,7 @@ from bot.keyboards.keyboards import (
     get_yes_no_keyboard,
     is_main_menu_text,
 )
+from bot.repositories.scope import get_scope_object_ids, in_scope
 from bot.states.states import TestCreationStates, TestTakingStates
 from bot.utils.auth.auth import check_auth
 from bot.utils.logger import log_user_action, log_user_error, logger
@@ -71,23 +72,34 @@ async def cmd_tests_main(message: Message, state: FSMContext, session: AsyncSess
             await message.answer("❌ Ты не зарегистрирован в системе.")
             return
 
+        # ADMIN под ЛК «Франчайзи» работает как Франчайзи (без управления контентом),
+        # несмотря на god-mode права роли ADMIN
+        data = await state.get_data()
+        active_role = data.get("role") if data.get("is_admin") else None
+        is_franchisee_lk = active_role == "Франчайзи"
+
         # Проверяем права на создание тестов (только рекрутеры)
         has_permission = await check_user_permission(session, user.id, "create_tests")
-        if not has_permission:
+        if has_permission and not is_franchisee_lk:
+            await message.answer(
+                "📄 <b>УПРАВЛЕНИЕ ТЕСТАМИ</b>\n\nВыбери действие:",
+                parse_mode="HTML",
+                reply_markup=get_tests_main_keyboard(),
+            )
+            log_user_action(user.tg_id, "tests_main_menu", "Открыто меню управления тестами")
+            return
+
+        # Просмотр без управления (Франчайзи): доступ по view_tests
+        can_view = await check_user_permission(session, user.id, "view_tests")
+        if not can_view:
             await message.answer(
                 "❌ <b>Недостаточно прав</b>\n\nУ тебя нет прав для управления тестами.\nОбратись к администратору.",
                 parse_mode="HTML",
             )
             return
 
-        # Показываем меню управления тестами
-        await message.answer(
-            "📄 <b>УПРАВЛЕНИЕ ТЕСТАМИ</b>\n\nВыбери действие:",
-            parse_mode="HTML",
-            reply_markup=get_tests_main_keyboard(),
-        )
-
-        log_user_action(user.tg_id, "tests_main_menu", "Открыто меню управления тестами")
+        await _show_tests_view_list(message, state, session, user)
+        log_user_action(user.tg_id, "tests_main_view", "Открыт просмотр тестов (view-only)")
 
     except Exception as e:
         await message.answer("Произошла ошибка при открытии меню тестов")
@@ -107,6 +119,45 @@ async def get_creator_name(session: AsyncSession, creator_id: int) -> str:
     except Exception as e:
         logger.error(f"Ошибка получения имени создателя {creator_id}: {e}")
         return "Неизвестен"
+
+
+async def _show_tests_view_list(message_or_message, state: FSMContext, session: AsyncSession, user) -> None:
+    """Показ списка тестов для зрителя (Франчайзи) без управляющих кнопок"""
+    company_id = user.company_id
+    tests = await get_all_active_tests(session, company_id)
+    if not tests:
+        await message_or_message.answer(
+            "📋 <b>Список доступных тестов</b>\n\nВ системе пока нет созданных тестов.",
+            parse_mode="HTML",
+        )
+        return
+
+    page = 0
+    per_page = 5
+    page_tests = tests[:per_page]
+
+    tests_list = "\n\n".join(
+        [
+            f"<b>{i + 1}. {test.name}</b>\n"
+            f"   🎯 Порог: {test.threshold_score:.1f}/{test.max_score:.1f} б.\n"
+            f"   📅 Создан: {test.created_date.strftime('%d.%m.%Y')}\n"
+            f"   👤 Создатель: {await get_creator_name(session, test.creator_id)}"
+            for i, test in enumerate(page_tests)
+        ]
+    )
+
+    total_pages = (len(tests) + per_page - 1) // per_page
+    page_info = f"\n\n📄 Страница {page + 1}/{total_pages}" if total_pages > 1 else ""
+
+    message_text = f"📋 <b>Список доступных тестов</b>\n\n{tests_list}{page_info}\n\nВыбери тест для просмотра:"
+
+    await message_or_message.answer(
+        message_text,
+        parse_mode="HTML",
+        reply_markup=get_simple_test_selection_keyboard(tests, page, per_page, "all"),
+    )
+
+    await state.update_data(current_tests=tests, current_filter="all", current_page=page)
 
 
 # =================================
@@ -1034,6 +1085,8 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
     # Получаем данные состояния для определения контекста
     state_data = await state.get_data()
     context = state_data.get("test_context", "management")  # По умолчанию - управление
+    # ADMIN под ЛК «Франчайзи» работает как Франчайзи (без управления контентом)
+    active_role = state_data.get("role") if state_data.get("is_admin") else None
 
     # Если у пользователя есть доступ (через рассылку или индивидуально), показываем интерфейс прохождения
     # Но ТОЛЬКО если контекст = 'taking' (из "Мои тесты")
@@ -1045,6 +1098,8 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
     is_recruiter = "Рекрутер" in role_names
     is_trainee = "Стажер" in role_names
     is_employee = "Сотрудник" in role_names
+    is_franchisee = "Франчайзи" in role_names or active_role == "Франчайзи"
+    can_create = await check_user_permission(session, user.id, "create_tests")
 
     # Проверяем роль пользователя для определения интерфейса
     # ПРИОРИТЕТ 1: Если пользователь из "Мои тесты 📋" (context == 'taking') и имеет доступ,
@@ -1082,6 +1137,13 @@ async def process_test_selection(callback: CallbackQuery, state: FSMContext, ses
         # Устанавливаем состояние для корректной работы кнопки "Начать тест"
         await state.update_data(selected_test_id=test_id)
         await state.set_state(TestTakingStates.waiting_for_test_start)
+    elif is_franchisee and (active_role == "Франчайзи" or not can_create):
+        # Франчайзи: взаимодействие без управления контентом — назначение доступа,
+        # материалы и результаты, но без редактирования и удаления тестов
+        await callback.message.edit_text(
+            test_info, parse_mode="HTML", reply_markup=get_test_actions_keyboard(test_id, "mentor")
+        )
+        await callback.answer()
     elif is_mentor and context != "taking":
         # ПРИОРИТЕТ 2: Наставник из меню "Тесты стажеров" - показываем интерфейс УПРАВЛЕНИЯ
         can_edit = await check_user_permission(session, user.id, "edit_tests")
@@ -1954,6 +2016,15 @@ async def process_test_results(callback: CallbackQuery, state: FSMContext, sessi
         return
 
     results = await get_test_results_summary(session, test_id, company_id=user.company_id)
+
+    scope = await get_scope_object_ids(session, user)
+    if scope is not None:
+        scoped_results = []
+        for r in results:
+            result_user = await get_user_by_id(session, r.user_id)
+            if result_user and in_scope(scope, result_user.work_object_id):
+                scoped_results.append(r)
+        results = scoped_results
 
     if not results:
         await callback.message.edit_text(

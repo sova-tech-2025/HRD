@@ -3,11 +3,16 @@
 Включает выбор теста, выбор групп и отправку уведомлений.
 """
 
+import asyncio
+
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     InputMediaDocument,
     InputMediaPhoto,
     Message,
@@ -15,19 +20,26 @@ from aiogram.types import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.db import (
-    broadcast_test_to_groups,
     check_user_permission,
     ensure_company_id,
     get_all_active_tests,
     get_all_groups,
     get_all_knowledge_folders,
+    get_all_objects,
+    get_all_users_in_group,
     get_group_by_id,
     get_knowledge_folder_by_id,
     get_knowledge_material_by_id,
+    get_object_by_id,
     get_test_by_id,
+    get_user_by_id,
     get_user_by_tg_id,
+    grant_test_access,
+    send_broadcast_notification,
 )
 from bot.keyboards.keyboards import (
+    BROADCAST_ROLE_NAMES,
+    get_broadcast_employees_keyboard,
     get_broadcast_folders_keyboard,
     get_broadcast_groups_selection_keyboard,
     get_broadcast_main_menu_keyboard,
@@ -39,10 +51,39 @@ from bot.keyboards.keyboards import (
     get_broadcast_tests_keyboard,
     get_main_menu_keyboard,
 )
+from bot.repositories.scope import get_scope_object_ids, in_scope
+from bot.repositories.scoped_user_repo import ScopedUserRepository
 from bot.states.states import BroadcastStates
 from bot.utils.logger import log_user_action, log_user_error, logger
 
 router = Router()
+
+
+class BroadcastObjectStates(StatesGroup):
+    selecting_objects = State()
+
+
+def _get_broadcast_objects_keyboard(objects, selected_ids):
+    keyboard = []
+    for obj in objects:
+        mark = "✅ " if obj.id in selected_ids else "⬜️ "
+        keyboard.append([InlineKeyboardButton(text=f"{mark}{obj.name}", callback_data=f"broadcast_object:{obj.id}")])
+
+    all_selected = bool(objects) and {obj.id for obj in objects}.issubset(set(selected_ids))
+    select_all_text = "❎ Снять все" if all_selected else "🗂 Выбрать все доступные"
+    keyboard.append([InlineKeyboardButton(text=select_all_text, callback_data="broadcast_objects_all")])
+    keyboard.append([InlineKeyboardButton(text="📨 Отправить", callback_data="broadcast_objects_send")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+async def _resolve_available_objects(session: AsyncSession, tg_id: int, company_id: int):
+    user = await get_user_by_tg_id(session, tg_id)
+    scope = await get_scope_object_ids(session, user)
+    all_objects = await get_all_objects(session, company_id)
+    if scope is None:
+        return all_objects, scope
+    return [obj for obj in all_objects if obj.id in scope], scope
 
 
 # ===============================
@@ -60,8 +101,8 @@ async def cmd_broadcast(message: Message, state: FSMContext, session: AsyncSessi
             await message.answer("❌ Ты не зарегистрирован в системе.")
             return
 
-        # Проверяем права на создание тестов (только рекрутеры)
-        has_permission = await check_user_permission(session, user.id, "create_tests")
+        # Проверяем права на массовую рассылку
+        has_permission = await check_user_permission(session, user.id, "send_broadcast")
         if not has_permission:
             await message.answer(
                 "❌ <b>Недостаточно прав</b>\n\nУ тебя нет прав для массовой рассылки.\nОбратись к администратору.",
@@ -447,14 +488,7 @@ async def show_groups_selection(
 
     # Добавляем информацию о ролях
     if selected_roles:
-        role_names = {
-            "trainee": "Стажер",
-            "employee": "Сотрудник",
-            "mentor": "Наставник",
-            "recruiter": "Рекрутер",
-            "manager": "Руководитель",
-        }
-        selected_display = [role_names.get(r, r) for r in selected_roles]
+        selected_display = [BROADCAST_ROLE_NAMES.get(r, r) for r in selected_roles]
         info_lines.append(f"🟢 <b>Роли:</b> {', '.join(selected_display)}\n")
 
     info_lines.append("\n🟡 <b>Выбери группы для рассылки👇</b>")
@@ -590,8 +624,8 @@ async def callback_start_broadcast(callback: CallbackQuery, state: FSMContext, s
             await callback.message.edit_text("❌ Ты не зарегистрирован в системе.")
             return
 
-        # Проверяем права на создание тестов (только рекрутеры)
-        has_permission = await check_user_permission(session, user.id, "create_tests")
+        # Проверяем права на массовую рассылку
+        has_permission = await check_user_permission(session, user.id, "send_broadcast")
         if not has_permission:
             await callback.message.edit_text(
                 "❌ <b>Недостаточно прав</b>\n\n"
@@ -703,14 +737,7 @@ async def callback_toggle_broadcast_role(callback: CallbackQuery, state: FSMCont
         await state.update_data(selected_roles=selected_roles)
 
         # Обновляем клавиатуру
-        role_names = {
-            "trainee": "Стажер",
-            "employee": "Сотрудник",
-            "mentor": "Наставник",
-            "recruiter": "Рекрутер",
-            "manager": "Руководитель",
-        }
-        selected_display = [role_names[r] for r in selected_roles]
+        selected_display = [BROADCAST_ROLE_NAMES[r] for r in selected_roles]
 
         info_text = (
             "✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"
@@ -740,7 +767,7 @@ async def callback_select_all_roles(callback: CallbackQuery, state: FSMContext, 
     try:
         data = await state.get_data()
         current_roles = data.get("selected_roles", [])
-        all_roles = ["trainee", "employee", "mentor", "recruiter", "manager"]
+        all_roles = list(BROADCAST_ROLE_NAMES)
 
         # TOGGLE: Если все выбраны → снять все, иначе → выбрать все
         if set(current_roles) == set(all_roles):
@@ -767,7 +794,7 @@ async def callback_select_all_roles(callback: CallbackQuery, state: FSMContext, 
             info_text = (
                 "✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"
                 "📝 <b>Шаг 5 из 6: Выбор ролей</b>\n\n"
-                "✅ Выбраны все роли: Стажер, Сотрудник, Наставник, Рекрутер, Руководитель\n\n"
+                f"✅ Выбраны все роли: {', '.join(BROADCAST_ROLE_NAMES.values())}\n\n"
                 "💡 <i>Рассылка будет отправлена всем пользователям выбранных групп</i>"
             )
 
@@ -803,6 +830,252 @@ async def callback_proceed_to_groups(callback: CallbackQuery, state: FSMContext,
     except Exception as e:
         await callback.message.edit_text("Произошла ошибка")
         log_user_error(callback.from_user.id, "broadcast_proceed_groups_error", str(e))
+
+
+# ==============================================================================
+# Поимённый выбор сотрудников (альтернатива выбору ролей+групп)
+# ==============================================================================
+
+
+async def _bc_emp_company_scope(session: AsyncSession, state: FSMContext, tg_id: int):
+    """Возвращает (user, company_id, scope) для отправителя рассылки."""
+    user = await get_user_by_tg_id(session, tg_id)
+    data = await state.get_data()
+    company_id = data.get("company_id") or (user.company_id if user else None)
+    if company_id is None:
+        company_id = await ensure_company_id(session, state, tg_id)
+    scope = await get_scope_object_ids(session, user)
+    return user, company_id, scope
+
+
+async def _render_employee_selection(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    candidates = data.get("bc_emp_candidates", [])
+    selected = data.get("bc_emp_selected", [])
+    page = data.get("bc_emp_page", 0)
+    selected_ids = [s["id"] for s in selected]
+
+    text = (
+        "✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"
+        "👤 <b>Выбор сотрудников</b>\n\n"
+        "🟡 Отметь сотрудников (✅), которым отправить рассылку.\n"
+        "💡 <i>Можно искать по ФИО — сотрудники могут быть из разных групп.</i>\n\n"
+        f"Выбрано: {len(selected)}"
+    )
+    if not candidates:
+        text += "\n\n⚠️ Список пуст — воспользуйся поиском по ФИО."
+
+    await callback.message.edit_text(
+        text, parse_mode="HTML", reply_markup=get_broadcast_employees_keyboard(candidates, selected_ids, page)
+    )
+
+
+@router.callback_query(F.data == "broadcast_select_employee", BroadcastStates.selecting_roles)
+async def callback_broadcast_select_employee(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Старт поимённого выбора сотрудников с шага выбора ролей."""
+    try:
+        await callback.answer()
+        user, company_id, scope = await _bc_emp_company_scope(session, state, callback.from_user.id)
+        users = await ScopedUserRepository(session).list_activated(company_id, scope)
+        candidates = [{"id": u.id, "name": u.full_name} for u in users if not user or u.id != user.id]
+        await state.update_data(bc_emp_candidates=candidates, bc_emp_selected=[], bc_emp_page=0)
+        await state.set_state(BroadcastStates.selecting_employees)
+        await _render_employee_selection(callback, state)
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка при открытии выбора сотрудников")
+        log_user_error(callback.from_user.id, "broadcast_select_employee_error", str(e))
+
+
+@router.callback_query(F.data.startswith("bc_emp_toggle:"), BroadcastStates.selecting_employees)
+async def callback_bc_emp_toggle(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Переключить выбор сотрудника."""
+    await callback.answer()
+    emp_id = int(callback.data.split(":")[1])
+    data = await state.get_data()
+    selected = data.get("bc_emp_selected", [])
+    candidates = data.get("bc_emp_candidates", [])
+
+    if any(s["id"] == emp_id for s in selected):
+        selected = [s for s in selected if s["id"] != emp_id]
+    else:
+        cand = next((c for c in candidates if c["id"] == emp_id), None)
+        if cand:
+            selected = selected + [{"id": emp_id, "name": cand["name"]}]
+
+    await state.update_data(bc_emp_selected=selected)
+    await _render_employee_selection(callback, state)
+
+
+@router.callback_query(F.data.startswith("bc_emp_page:"), BroadcastStates.selecting_employees)
+async def callback_bc_emp_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Пагинация списка сотрудников."""
+    await callback.answer()
+    page = int(callback.data.split(":")[1])
+    await state.update_data(bc_emp_page=page)
+    await _render_employee_selection(callback, state)
+
+
+@router.callback_query(F.data == "bc_emp_search", BroadcastStates.selecting_employees)
+async def callback_bc_emp_search(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Запросить ФИО для поиска сотрудников."""
+    await callback.answer()
+    await callback.message.edit_text("🔍 <b>Поиск сотрудников</b>\n\nВведи ФИО (минимум 2 символа):", parse_mode="HTML")
+    await state.set_state(BroadcastStates.searching_employees)
+
+
+@router.message(BroadcastStates.searching_employees)
+async def process_bc_emp_search(message: Message, state: FSMContext, session: AsyncSession):
+    """Обработка поискового запроса по ФИО сотрудников."""
+    query = (message.text or "").strip()
+    if len(query) < 2:
+        await message.answer("❌ Введи минимум 2 символа для поиска.")
+        return
+
+    user, company_id, scope = await _bc_emp_company_scope(session, state, message.from_user.id)
+    users = await ScopedUserRepository(session).search_by_name(query, company_id, scope)
+    candidates = [{"id": u.id, "name": u.full_name} for u in users if not user or u.id != user.id]
+    await state.update_data(bc_emp_candidates=candidates, bc_emp_page=0)
+    await state.set_state(BroadcastStates.selecting_employees)
+
+    data = await state.get_data()
+    selected = data.get("bc_emp_selected", [])
+    selected_ids = [s["id"] for s in selected]
+
+    if candidates:
+        text = (
+            f"🔍 <b>Результаты по запросу «{query}»: {len(candidates)}</b>\n\n"
+            "Отметь сотрудников (✅).\n\n"
+            f"Выбрано: {len(selected)}"
+        )
+    else:
+        text = f"🔍 По запросу «{query}» никого не найдено.\n\nВыбрано: {len(selected)}"
+
+    await message.answer(
+        text, parse_mode="HTML", reply_markup=get_broadcast_employees_keyboard(candidates, selected_ids, 0)
+    )
+
+
+@router.callback_query(F.data == "bc_emp_back", BroadcastStates.selecting_employees)
+async def callback_bc_emp_back(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Вернуться от сводки к выбору сотрудников."""
+    await callback.answer()
+    await _render_employee_selection(callback, state)
+
+
+@router.callback_query(F.data == "bc_emp_next", BroadcastStates.selecting_employees)
+async def callback_bc_emp_next(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Сводка выбранных сотрудников с кнопкой «Отправить» (шаг групп пропускается)."""
+    data = await state.get_data()
+    selected = data.get("bc_emp_selected", [])
+    if not selected:
+        await callback.answer("⚠️ Выбери хотя бы одного сотрудника", show_alert=True)
+        return
+
+    await callback.answer()
+    names = "\n".join(f"• {s['name']}" for s in selected)
+    text = (
+        "✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"
+        f"👤 <b>Выбрано сотрудников: {len(selected)}</b>\n\n"
+        f"{names}\n\n"
+        "🟡 Нажми «Отправить», чтобы разослать выбранным сотрудникам."
+    )
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📨 Отправить", callback_data="bc_emp_send")],
+            [InlineKeyboardButton(text="⬅️ Назад к выбору", callback_data="bc_emp_back")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")],
+        ]
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "bc_emp_send", BroadcastStates.selecting_employees)
+async def callback_bc_emp_send(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot):
+    """Отправка рассылки выбранным поимённо сотрудникам (без фильтра по группам/объектам)."""
+    try:
+        await callback.answer()
+        data = await state.get_data()
+        selected = data.get("bc_emp_selected", [])
+        if not selected:
+            await callback.answer("⚠️ Никто не выбран", show_alert=True)
+            return
+
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user or not await check_user_permission(session, user.id, "send_broadcast"):
+            await callback.message.edit_text("❌ У тебя нет прав для массовой рассылки.")
+            return
+
+        broadcast_script = data.get("broadcast_script")
+        broadcast_photos = data.get("broadcast_photos", [])
+        broadcast_material_id = data.get("broadcast_material_id")
+        selected_test_id = data.get("selected_test_id")
+        broadcast_docs = data.get("broadcast_docs", [])
+        company_id = data.get("company_id") or user.company_id
+        scope = await get_scope_object_ids(session, user)
+
+        # Собираем валидных получателей: активные, в компании и в области видимости отправителя
+        recipients = []
+        for s in selected:
+            recipient = await get_user_by_id(session, s["id"])
+            if not recipient or not recipient.is_active or recipient.id == user.id:
+                continue
+            if company_id is not None and recipient.company_id != company_id:
+                continue
+            if scope is not None and not (
+                in_scope(scope, recipient.work_object_id)
+                or in_scope(scope, getattr(recipient, "internship_object_id", None))
+            ):
+                continue
+            recipients.append(recipient)
+
+        if not recipients:
+            await callback.message.edit_text("❌ Не удалось определить получателей рассылки.")
+            await state.clear()
+            return
+
+        if selected_test_id:
+            for recipient in recipients:
+                try:
+                    await grant_test_access(
+                        session, recipient.id, selected_test_id, user.id, company_id=recipient.company_id
+                    )
+                except Exception as grant_error:
+                    log_user_error(callback.from_user.id, "broadcast_emp_grant_error", str(grant_error))
+
+        semaphore = asyncio.Semaphore(20)
+
+        async def _send_to(recipient) -> bool:
+            async with semaphore:
+                return await send_broadcast_notification(
+                    bot=bot,
+                    user_tg_id=recipient.tg_id,
+                    broadcast_script=broadcast_script,
+                    broadcast_photos=broadcast_photos or [],
+                    broadcast_material_id=broadcast_material_id,
+                    test_id=selected_test_id,
+                    broadcast_docs=broadcast_docs or [],
+                )
+
+        results = await asyncio.gather(*[_send_to(r) for r in recipients], return_exceptions=True)
+        total_sent = sum(1 for r in results if r is True)
+        names = ", ".join(r.full_name for r in recipients)
+
+        await callback.message.edit_text(
+            "✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"
+            "✅ <b>Рассылка отправлена выбранным сотрудникам!</b>\n\n"
+            f"👤 <b>Получатели ({len(recipients)}):</b> {names}\n\n"
+            f"📊 <b>Статистика:</b>\n• Уведомлений отправлено: {total_sent}",
+            parse_mode="HTML",
+            reply_markup=get_broadcast_success_keyboard(),
+        )
+        await state.clear()
+        log_user_action(
+            callback.from_user.id, "broadcast_employees_completed", f"Отправлено {total_sent} выбранным сотрудникам"
+        )
+
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка при отправке рассылки")
+        log_user_error(callback.from_user.id, "broadcast_emp_send_error", str(e))
 
 
 @router.callback_query(F.data.startswith("broadcast_group:"), BroadcastStates.selecting_groups)
@@ -897,11 +1170,128 @@ async def callback_toggle_broadcast_group(callback: CallbackQuery, state: FSMCon
 
 @router.callback_query(F.data == "broadcast_send", BroadcastStates.selecting_groups)
 async def callback_send_broadcast(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot):
-    """Отправка рассылки с новыми параметрами"""
+    """Переход к шагу выбора объектов перед отправкой рассылки"""
     try:
         await callback.answer()
 
-        # Получаем данные рассылки
+        data = await state.get_data()
+        broadcast_script = data.get("broadcast_script")
+        selected_groups = data.get("selected_groups", [])
+
+        if not broadcast_script or not selected_groups:
+            await callback.answer("Не указан текст рассылки или группы", show_alert=True)
+            return
+
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.message.edit_text(
+                "❌ Не удалось определить компанию. Попробуй снова или обратись к администратору."
+            )
+            await state.clear()
+            log_user_error(callback.from_user.id, "broadcast_objects_company_missing", "company_id not resolved")
+            return
+
+        objects, _scope = await _resolve_available_objects(session, callback.from_user.id, company_id)
+
+        if not objects:
+            await callback.message.edit_text(
+                "✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"
+                "❌ <b>Нет доступных объектов</b>\n\n"
+                "Для рассылки не нашлось ни одного доступного объекта.\n"
+                "Обратись к администратору.",
+                parse_mode="HTML",
+                reply_markup=get_main_menu_keyboard(),
+            )
+            return
+
+        await state.update_data(selected_object_ids=[])
+        await callback.message.edit_text(
+            "✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"
+            "📝 <b>Шаг 7 из 7: Выбор объектов</b>\n\n"
+            "🟡 Выбери объекты, по которым уйдёт рассылка.\n\n"
+            "💡 <i>Рассылку получат только пользователи на выбранных объектах.</i>",
+            parse_mode="HTML",
+            reply_markup=_get_broadcast_objects_keyboard(objects, []),
+        )
+        await state.set_state(BroadcastObjectStates.selecting_objects)
+
+        log_user_action(callback.from_user.id, "broadcast_objects_step", "Открыт выбор объектов рассылки")
+
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка при выборе объектов")
+        log_user_error(callback.from_user.id, "broadcast_objects_step_error", str(e))
+
+
+@router.callback_query(F.data.startswith("broadcast_object:"), BroadcastObjectStates.selecting_objects)
+async def callback_toggle_broadcast_object(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Выбор/отмена объекта для рассылки"""
+    try:
+        await callback.answer()
+
+        object_id = int(callback.data.split(":")[1])
+
+        data = await state.get_data()
+        selected_object_ids = data.get("selected_object_ids", [])
+        company_id = data.get("company_id")
+
+        objects, _scope = await _resolve_available_objects(session, callback.from_user.id, company_id)
+        available_ids = {obj.id for obj in objects}
+
+        if object_id not in available_ids:
+            await callback.answer("Объект недоступен", show_alert=True)
+            return
+
+        if object_id in selected_object_ids:
+            selected_object_ids.remove(object_id)
+        else:
+            selected_object_ids.append(object_id)
+
+        await state.update_data(selected_object_ids=selected_object_ids)
+
+        await callback.message.edit_reply_markup(
+            reply_markup=_get_broadcast_objects_keyboard(objects, selected_object_ids)
+        )
+
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка при выборе объекта")
+        log_user_error(callback.from_user.id, "broadcast_object_toggle_error", str(e))
+
+
+@router.callback_query(F.data == "broadcast_objects_all", BroadcastObjectStates.selecting_objects)
+async def callback_select_all_objects(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Переключить все доступные объекты (выбрать все / снять все)"""
+    try:
+        await callback.answer()
+
+        data = await state.get_data()
+        company_id = data.get("company_id")
+        current = data.get("selected_object_ids", [])
+
+        objects, _scope = await _resolve_available_objects(session, callback.from_user.id, company_id)
+        available_ids = [obj.id for obj in objects]
+
+        if set(current) == set(available_ids):
+            selected_object_ids = []
+        else:
+            selected_object_ids = list(available_ids)
+
+        await state.update_data(selected_object_ids=selected_object_ids)
+
+        await callback.message.edit_reply_markup(
+            reply_markup=_get_broadcast_objects_keyboard(objects, selected_object_ids)
+        )
+
+    except Exception as e:
+        await callback.message.edit_text("Произошла ошибка")
+        log_user_error(callback.from_user.id, "broadcast_objects_all_error", str(e))
+
+
+@router.callback_query(F.data == "broadcast_objects_send", BroadcastObjectStates.selecting_objects)
+async def callback_send_broadcast_with_objects(callback: CallbackQuery, state: FSMContext, session: AsyncSession, bot):
+    """Отправка рассылки с фильтром по объектам"""
+    try:
+        await callback.answer()
+
         data = await state.get_data()
         broadcast_script = data.get("broadcast_script")
         broadcast_photos = data.get("broadcast_photos", [])
@@ -910,66 +1300,100 @@ async def callback_send_broadcast(callback: CallbackQuery, state: FSMContext, se
         selected_groups = data.get("selected_groups", [])
         selected_roles = data.get("selected_roles", [])
         broadcast_docs = data.get("broadcast_docs", [])
+        selected_object_ids = data.get("selected_object_ids", [])
         company_id = data.get("company_id")
 
-        # Проверяем обязательные поля
         if not broadcast_script or not selected_groups:
             await callback.answer("Не указан текст рассылки или группы", show_alert=True)
             return
 
-        # Получаем пользователя
+        if not selected_object_ids:
+            await callback.answer("⚠️ Выбери хотя бы один объект", show_alert=True)
+            return
+
         user = await get_user_by_tg_id(session, callback.from_user.id)
         if not user:
             await callback.message.edit_text("❌ Пользователь не найден")
             return
 
-        # Проверяем права на рассылку
-        has_permission = await check_user_permission(session, user.id, "create_tests")
+        has_permission = await check_user_permission(session, user.id, "send_broadcast")
         if not has_permission:
             await callback.message.edit_text("❌ У тебя нет прав для массовой рассылки.")
             return
 
-        # Преобразуем ключи ролей в названия для БД
-        target_role_names = None
-        if selected_roles:
-            role_mapping = {
-                "trainee": "Стажер",
-                "employee": "Сотрудник",
-                "mentor": "Наставник",
-                "recruiter": "Рекрутер",
-                "manager": "Руководитель",
-            }
-            target_role_names = [role_mapping[r] for r in selected_roles]
+        scope = await get_scope_object_ids(session, user)
+        object_filter = {oid for oid in selected_object_ids if in_scope(scope, oid)}
 
-        # Получаем company_id для изоляции
-        data = await state.get_data()
-        company_id = data.get("company_id")
-
-        # Выполняем массовую рассылку с новыми параметрами
-        result = await broadcast_test_to_groups(
-            session=session,
-            test_id=selected_test_id,
-            group_ids=selected_groups,
-            sent_by_id=user.id,
-            bot=bot,
-            broadcast_script=broadcast_script,
-            company_id=company_id,
-            broadcast_photos=broadcast_photos,
-            broadcast_material_id=broadcast_material_id,
-            broadcast_docs=broadcast_docs,
-            target_roles=target_role_names,
-        )
-
-        if not result["success"]:
+        if not object_filter:
             await callback.message.edit_text(
-                f"❌ <b>Ошибка рассылки</b>\n\nПроизошла ошибка: {result.get('error', 'Неизвестная ошибка')}",
+                "❌ <b>Нет доступных объектов</b>\n\nВыбранные объекты вне твоей области видимости.",
                 parse_mode="HTML",
                 reply_markup=get_main_menu_keyboard(),
             )
             return
 
-        # Формируем сообщение об успехе
-        groups_text = "; ".join(result["group_names"])
+        target_role_names = None
+        if selected_roles:
+            target_role_names = [BROADCAST_ROLE_NAMES[r] for r in selected_roles]
+
+        all_users = []
+        group_names = []
+        for group_id in selected_groups:
+            group = await get_group_by_id(session, group_id, company_id=company_id)
+            if group:
+                group_names.append(group.name)
+                users_in_group = await get_all_users_in_group(session, group_id, company_id=company_id)
+                all_users.extend(users_in_group)
+
+        unique_users = {u.id: u for u in all_users}
+        recipients = [u for u in unique_users.values() if u.id != user.id]
+
+        if target_role_names:
+            recipients = [u for u in recipients if any(r.name in target_role_names for r in u.roles)]
+
+        recipients = [
+            u for u in recipients if u.work_object_id in object_filter or u.internship_object_id in object_filter
+        ]
+
+        total_users = len(recipients)
+
+        # Выдача доступа к тесту — последовательно: общая AsyncSession, конкурентные коммиты небезопасны
+        if selected_test_id:
+            for recipient in recipients:
+                try:
+                    await grant_test_access(
+                        session, recipient.id, selected_test_id, user.id, company_id=recipient.company_id
+                    )
+                except Exception as grant_error:
+                    log_user_error(callback.from_user.id, "broadcast_grant_access_error", str(grant_error))
+
+        # Отправка уведомлений — параллельно (вызовы Bot API без сессии БД)
+        semaphore = asyncio.Semaphore(20)
+
+        async def _send_to(recipient) -> bool:
+            async with semaphore:
+                return await send_broadcast_notification(
+                    bot=bot,
+                    user_tg_id=recipient.tg_id,
+                    broadcast_script=broadcast_script,
+                    broadcast_photos=broadcast_photos or [],
+                    broadcast_material_id=broadcast_material_id,
+                    test_id=selected_test_id,
+                    broadcast_docs=broadcast_docs or [],
+                )
+
+        results = await asyncio.gather(*[_send_to(r) for r in recipients], return_exceptions=True)
+        total_sent = sum(1 for r in results if r is True)
+        failed_sends = total_users - total_sent
+
+        object_names = []
+        for oid in selected_object_ids:
+            obj = await get_object_by_id(session, oid, company_id=company_id)
+            if obj:
+                object_names.append(obj.name)
+
+        groups_text = "; ".join(group_names)
+        objects_text = "; ".join(object_names)
 
         success_parts = ["✉️<b>РЕДАКТОР РАССЫЛКИ</b>✉️\n\n"]
 
@@ -988,26 +1412,26 @@ async def callback_send_broadcast(callback: CallbackQuery, state: FSMContext, se
         if broadcast_docs:
             success_parts.append(f"🟢 <b>Документы-изображения:</b> {len(broadcast_docs)} шт.\n")
 
-        success_parts.append(f"🟢 <b>Группы:</b> {groups_text}\n\n")
+        success_parts.append(f"🟢 <b>Группы:</b> {groups_text}\n")
+        success_parts.append(f"🟢 <b>Объекты:</b> {objects_text}\n\n")
         success_parts.append("✅ <b>Ты успешно отправил рассылку!</b>\n\n")
         success_parts.append(
             f"📊 <b>Статистика:</b>\n"
-            f"• Получателей в группах: {result['total_users']}\n"
-            f"• Уведомлений отправлено: {result['total_sent']}\n"
-            f"• Ошибок отправки: {result['failed_sends']}"
+            f"• Получателей после фильтра: {total_users}\n"
+            f"• Уведомлений отправлено: {total_sent}\n"
+            f"• Ошибок отправки: {failed_sends}"
         )
 
         await callback.message.edit_text(
             "".join(success_parts), parse_mode="HTML", reply_markup=get_broadcast_success_keyboard()
         )
 
-        # Очищаем состояние
         await state.clear()
 
         log_user_action(
             callback.from_user.id,
             "broadcast_completed",
-            f"Рассылка завершена: группы {groups_text}, отправлено {result['total_sent']}",
+            f"Рассылка завершена: объекты {objects_text}, отправлено {total_sent}",
         )
 
     except Exception as e:

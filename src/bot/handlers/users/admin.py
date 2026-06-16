@@ -8,7 +8,6 @@ from bot.database.db import (
     add_user_role,
     check_user_permission,
     get_all_roles,
-    get_all_trainees,
     get_all_users,
     get_test_by_id,
     get_trainee_learning_path,
@@ -25,7 +24,13 @@ from bot.keyboards.keyboards import (
     get_user_action_keyboard,
     get_user_selection_keyboard,
 )
-from bot.repositories import AssessmentAssignmentRepository, AssessmentRepository
+from bot.repositories import (
+    AssessmentAssignmentRepository,
+    AssessmentRepository,
+    FranchiseeRepository,
+    ScopedUserRepository,
+)
+from bot.repositories.scope import can_assign_role, get_scope_object_ids
 from bot.states.states import AdminStates, RecruiterAttestationStates
 from bot.utils.auth.auth import check_auth
 from bot.utils.logger import log_user_action, log_user_error, logger
@@ -76,7 +81,12 @@ async def show_user_list(message: Message, state: FSMContext, session: AsyncSess
     """Отображает список пользователей с возможностью выбора"""
     data = await state.get_data()
     company_id = data.get("company_id")
-    users = await get_all_users(session, company_id)
+    current_user = await get_user_by_tg_id(session, message.from_user.id)
+    scope = await get_scope_object_ids(session, current_user) if current_user else None
+    if scope is not None:
+        users = await ScopedUserRepository(session).list_activated(company_id, scope)
+    else:
+        users = await get_all_users(session, company_id)
 
     if not users:
         await message.answer("В системе пока нет зарегистрированных пользователей.")
@@ -164,6 +174,12 @@ async def process_change_role(callback: CallbackQuery, state: FSMContext, sessio
         await callback.answer()
         return
 
+    actor = await get_user_by_tg_id(session, callback.from_user.id)
+    scope = await get_scope_object_ids(session, actor) if actor else None
+    if not ScopedUserRepository.can_edit(user, scope):
+        await callback.answer("❌ Этот пользователь вне твоих объектов", show_alert=True)
+        return
+
     roles = await get_all_roles(session)
 
     if not roles:
@@ -171,6 +187,7 @@ async def process_change_role(callback: CallbackQuery, state: FSMContext, sessio
         await callback.answer()
         return
 
+    roles = [role for role in roles if can_assign_role(scope, role.name)]
     keyboard = get_role_change_keyboard(user.id, roles)
 
     await callback.message.edit_text(f"Выбери новую роль для пользователя {user.full_name}:", reply_markup=keyboard)
@@ -256,6 +273,14 @@ async def process_confirm_role_change(callback: CallbackQuery, state: FSMContext
         await callback.answer()
         return
 
+    scope = await get_scope_object_ids(session, current_user)
+    if not ScopedUserRepository.can_edit(user, scope):
+        await callback.answer("❌ Этот пользователь вне твоих объектов", show_alert=True)
+        return
+    if not can_assign_role(scope, role_name):
+        await callback.answer("❌ Эту роль ты назначать не можешь", show_alert=True)
+        return
+
     if action == "add":
         success = await add_user_role(session, user.id, role_name)
         action_text = "добавлена"
@@ -264,11 +289,23 @@ async def process_confirm_role_change(callback: CallbackQuery, state: FSMContext
         action_text = "удалена"
 
     if success:
+        if action == "remove" and role_name == "Франчайзи":
+            await FranchiseeRepository(session).clear_objects(user.id)
+
         updated_roles = await get_user_roles(session, user.id)
         roles_str = ", ".join([role.name for role in updated_roles])
 
+        success_markup = None
+        if action == "add" and role_name == "Франчайзи":
+            success_markup = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="📍 Объекты Франчайзи", callback_data=f"franchisee_objects:{user.id}")]
+                ]
+            )
+
         await callback.message.answer(
-            f"✅ Роль '{role_name}' успешно {action_text} для пользователя {user.full_name}.\nТекущие роли: {roles_str}"
+            f"✅ Роль '{role_name}' успешно {action_text} для пользователя {user.full_name}.\nТекущие роли: {roles_str}",
+            reply_markup=success_markup,
         )
 
         log_user_action(
@@ -413,7 +450,9 @@ async def show_trainees_list(message: Message, state: FSMContext, session: Async
 
     data = await state.get_data()
     company_id = data.get("company_id")
-    trainees = await get_all_trainees(session, company_id)
+    current_user = await get_user_by_tg_id(session, message.from_user.id)
+    scope = await get_scope_object_ids(session, current_user) if current_user else None
+    trainees = await ScopedUserRepository(session).list_trainees(company_id, scope)
 
     if not trainees:
         await message.answer("В системе пока нет зарегистрированных Стажеров.")
@@ -435,7 +474,9 @@ async def callback_trainees_page(callback: CallbackQuery, state: FSMContext, ses
         page = int(callback.data.split(":")[1])
         data = await state.get_data()
         company_id = data.get("company_id")
-        trainees = await get_all_trainees(session, company_id)
+        current_user = await get_user_by_tg_id(session, callback.from_user.id)
+        scope = await get_scope_object_ids(session, current_user) if current_user else None
+        trainees = await ScopedUserRepository(session).list_trainees(company_id, scope)
 
         if not trainees:
             await callback.message.edit_text("В системе пока нет зарегистрированных Стажеров.")
@@ -473,7 +514,8 @@ async def callback_back_to_recruiter_trainees(callback: CallbackQuery, state: FS
         # Получаем company_id из пользователя (надёжнее чем из state)
         user = await get_user_by_tg_id(session, callback.from_user.id)
         company_id = user.company_id if user else None
-        trainees = await get_all_trainees(session, company_id)
+        scope = await get_scope_object_ids(session, user) if user else None
+        trainees = await ScopedUserRepository(session).list_trainees(company_id, scope)
 
         if not trainees:
             await callback.message.edit_text("В системе пока нет зарегистрированных Стажеров.")

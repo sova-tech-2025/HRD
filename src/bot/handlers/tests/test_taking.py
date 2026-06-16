@@ -365,8 +365,12 @@ async def show_user_test_scores(
         await message.answer("У тебя нет прав для просмотра результатов тестов.")
         return
 
-    # Определяем роль пользователя
-    user_roles = [role.name for role in user.roles]
+    # Определяем роль пользователя (с учётом активной FSM-роли ADMIN)
+    active_role = None
+    if state:
+        data = await state.get_data()
+        active_role = data.get("role") if data.get("is_admin") else None
+    user_roles = [active_role] if active_role else [role.name for role in user.roles]
     if "Стажер" in user_roles:
         user_role = "стажер"
     elif "Наставник" in user_roles:
@@ -535,8 +539,10 @@ async def callback_test_scores_pagination(callback: CallbackQuery, state: FSMCon
             await callback.message.edit_text("Ты пока не проходил тестов.")
             return
 
-        # Определяем роль пользователя
-        user_roles = [role.name for role in user.roles]
+        # Определяем роль пользователя (с учётом активной FSM-роли ADMIN)
+        data = await state.get_data()
+        active_role = data.get("role") if data.get("is_admin") else None
+        user_roles = [active_role] if active_role else [role.name for role in user.roles]
         if "Стажер" in user_roles:
             user_role = "стажер"
         elif "Наставник" in user_roles:

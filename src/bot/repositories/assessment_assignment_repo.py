@@ -278,13 +278,17 @@ class AssessmentAssignmentRepository(BaseRepository):
             return "\u26d4\ufe0f"
 
     async def get_managers(self, group_id: int, company_id: int = None) -> List[User]:
-        """Получение списка руководителей для назначения аттестации (по группе стажера, с изоляцией по компании)"""
+        """Получение списка проводящих аттестацию (Руководитель и Франчайзи, с изоляцией по компании).
+
+        Франчайзи — фактический управляющий в рамках своих объектов, поэтому также
+        может проводить аттестацию стажёров после траектории.
+        """
         try:
             query = (
                 select(User)
                 .join(user_roles, User.id == user_roles.c.user_id)
                 .join(Role, user_roles.c.role_id == Role.id)
-                .where(admin_inclusive_role_filter(["Руководитель"]))
+                .where(admin_inclusive_role_filter(["Руководитель", "Франчайзи"]))
                 .where(User.is_active == True)
                 .where(User.is_activated == True)
             )

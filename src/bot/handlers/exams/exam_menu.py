@@ -38,17 +38,21 @@ async def _get_user_exam_roles(user, active_role: str = None) -> dict:
         is_mentor = active_role == "Наставник"
         is_manager = active_role == "Руководитель"
         is_employee = active_role == "Сотрудник"
+        is_franchisee = active_role == "Франчайзи"
     else:
         is_recruiter = _user_has_role(user, "Рекрутер")
         is_mentor = _user_has_role(user, "Наставник")
         is_manager = _user_has_role(user, "Руководитель")
         is_employee = _user_has_role(user, "Сотрудник")
-    # Экзаменатор: руководитель, сотрудник или рекрутер
-    is_examiner = is_manager or is_employee or is_recruiter
+        is_franchisee = _user_has_role(user, "Франчайзи")
+    is_examiner = is_manager or is_employee or is_recruiter or is_franchisee
+    can_assign = is_recruiter or is_mentor or is_franchisee
     return {
         "is_recruiter": is_recruiter,
         "is_mentor": is_mentor,
         "is_examiner": is_examiner,
+        "is_franchisee": is_franchisee,
+        "can_assign": can_assign,
     }
 
 
@@ -76,7 +80,12 @@ async def show_exam_menu(message_or_callback, state: FSMContext, session: AsyncS
 
         text = "🔖<b>РЕДАКТОР Экзаменов</b>\nВыбери нужное действие"
 
-        keyboard = get_exam_menu_keyboard(exams, **roles)
+        keyboard = get_exam_menu_keyboard(
+            exams,
+            is_recruiter=roles["is_recruiter"],
+            is_examiner=roles["is_examiner"],
+            is_mentor=roles["is_mentor"] or roles["is_franchisee"],
+        )
 
         if isinstance(message_or_callback, CallbackQuery):
             # Главное меню Наставника/Стажёра — фото-сообщение, edit_text на нём упадёт.
@@ -409,7 +418,7 @@ async def callback_exam_view(callback: CallbackQuery, state: FSMContext, session
         keyboard = get_exam_card_keyboard(
             exam_id,
             is_recruiter=roles["is_recruiter"],
-            can_assign=roles["is_recruiter"] or roles["is_mentor"],
+            can_assign=roles["can_assign"],
         )
 
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
