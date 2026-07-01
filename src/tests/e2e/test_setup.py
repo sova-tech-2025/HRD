@@ -12,6 +12,7 @@ import asyncpg
 import pytest
 from telethon import TelegramClient
 
+from bot.keyboards.training_keyboards import INLINE_BUTTON_TEXT_MAX_LENGTH, MENTOR_REASSIGNMENT_PAGE_SIZE
 from tests.e2e.helpers.bot_client import BotClient
 from tests.e2e.helpers.waiters import (
     wait_between_actions,
@@ -550,6 +551,108 @@ class TestMentorAssignment:
         assert confirm_btn, "Confirm button not found"
 
         resp = await admin.click_and_wait(resp, data=confirm_btn, wait_pattern="назначен|успешно")
+
+    async def test_prepare_many_long_named_mentors_for_reassign(
+        self,
+        e2e_db: asyncpg.Connection,
+        shared_state: dict,
+    ):
+        """SQL: создаём много наставников с длинными объектами для регрессии reply_markup."""
+        admin_id = shared_state["admin_user_id"]
+        company_id = await e2e_db.fetchval("SELECT company_id FROM users WHERE id = $1", admin_id)
+        mentor_role_id = await e2e_db.fetchval("SELECT id FROM roles WHERE name = 'Наставник'")
+        assert company_id, "Admin company_id not found"
+        assert mentor_role_id, "Role 'Наставник' not found"
+
+        mentor_ids = []
+        for index in range(1, 19):
+            object_name = (
+                "E2E очень длинное название объекта для проверки переполнения клавиатуры "
+                f"при переназначении наставника #{index:02d}"
+            )
+            object_id = await e2e_db.fetchval(
+                "SELECT id FROM objects WHERE name = $1 AND company_id = $2",
+                object_name,
+                company_id,
+            )
+            if not object_id:
+                object_id = await e2e_db.fetchval(
+                    """
+                    INSERT INTO objects (name, created_date, is_active, company_id)
+                    VALUES ($1, now(), true, $2)
+                    RETURNING id
+                    """,
+                    object_name,
+                    company_id,
+                )
+
+            mentor_id = await e2e_db.fetchval(
+                """
+                INSERT INTO users (
+                    tg_id, username, full_name, phone_number, is_active, is_activated,
+                    work_object_id, company_id, registration_date, role_assigned_date
+                )
+                VALUES ($1, $2, $3, $4, true, true, $5, $6, now(), now())
+                ON CONFLICT (tg_id) DO UPDATE SET
+                    username = EXCLUDED.username,
+                    full_name = EXCLUDED.full_name,
+                    phone_number = EXCLUDED.phone_number,
+                    is_active = true,
+                    is_activated = true,
+                    work_object_id = EXCLUDED.work_object_id,
+                    company_id = EXCLUDED.company_id,
+                    role_assigned_date = now()
+                RETURNING id
+                """,
+                9100000000 + index,
+                f"e2e_reassign_mentor_{index:02d}",
+                f"Наставник с длинным ФИО для переназначения {index:02d}",
+                f"+79109999{index:04d}",
+                object_id,
+                company_id,
+            )
+            await e2e_db.execute(
+                "INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                mentor_id,
+                mentor_role_id,
+            )
+            mentor_ids.append(mentor_id)
+
+        shared_state["reassign_extra_mentor_ids"] = mentor_ids
+
+    async def test_reassign_mentor_selection_is_paginated_for_many_long_named_mentors(
+        self,
+        admin: BotClient,
+    ):
+        """Переназначение не должно падать на длинном списке наставников с длинными объектами."""
+        await wait_between_actions()
+        await admin.switch_role("Рекрутер")
+
+        resp = await admin.send_and_wait("Наставники 🦉", pattern="действие|[Нн]аставник")
+
+        manage_btn = admin.find_button_data(resp, data_prefix="mentor_assignment_management")
+        assert manage_btn, "Button 'mentor_assignment_management' not found"
+        resp = await admin.click_and_wait(resp, data=manage_btn, wait_pattern="Управление|действие|Переназначить")
+
+        reassign_btn = admin.find_button_data(resp, data_prefix="reassign_mentor")
+        assert reassign_btn, "Button 'reassign_mentor' not found"
+        resp = await admin.click_and_wait(resp, data=reassign_btn, wait_pattern="стажёр|стажер|Выбери стажера")
+
+        trainee_btn = admin.find_button_data(resp, text_contains="Стажёров", data_prefix="select_trainee_for_reassign:")
+        assert trainee_btn, f"Trainee 'Стажёров' not found for reassign. Buttons: {admin.get_button_data(resp)}"
+
+        resp = await admin.click_and_wait(
+            resp,
+            data=trainee_btn,
+            wait_pattern="Выбери нового наставника|Доступно наставников",
+        )
+
+        mentor_buttons = admin.find_all_buttons_data(resp, data_prefix="reassign_to_mentor:")
+        next_page_btn = admin.find_button_data(resp, data_prefix="reassign_mentors_page:")
+
+        assert len(mentor_buttons) == MENTOR_REASSIGNMENT_PAGE_SIZE
+        assert next_page_btn, f"Expected mentor pagination button. Buttons: {admin.get_button_data(resp)}"
+        assert all(len(text) <= INLINE_BUTTON_TEXT_MAX_LENGTH for text, _ in mentor_buttons)
 
 
 # =========================================================================
