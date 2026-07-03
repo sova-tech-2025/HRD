@@ -53,6 +53,7 @@ from bot.keyboards.keyboards import (
     get_trainees_with_mentors_keyboard,
     get_unassigned_trainees_keyboard,
 )
+from bot.keyboards.training_keyboards import MENTOR_REASSIGNMENT_PAGE_SIZE, get_reassign_mentor_keyboard
 from bot.repositories import AssessmentAssignmentRepository, AssessmentRepository, ScopedUserRepository
 from bot.repositories.scope import get_scope_object_ids, in_scope
 from bot.utils.formatters.test_progress import get_test_status_icon
@@ -1472,6 +1473,61 @@ async def _show_reassign_trainees(callback: CallbackQuery, session: AsyncSession
     )
 
 
+async def _get_available_reassign_mentors(session: AsyncSession, callback: CallbackQuery, trainee, current_mentor) -> list:
+    actor = await get_user_by_tg_id(session, callback.from_user.id)
+    scope = await get_scope_object_ids(session, actor) if actor else None
+    mentors = await ScopedUserRepository(session).list_mentors(company_id=trainee.company_id, scope=scope)
+    return [mentor for mentor in mentors if not current_mentor or mentor.id != current_mentor.id]
+
+
+async def _show_reassign_mentor_selection(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    trainee_id: int,
+    page: int = 0,
+) -> bool:
+    trainee = await get_user_by_id(session, trainee_id)
+
+    if not trainee:
+        await callback.answer("Стажер не найден")
+        return False
+
+    current_mentor = await get_trainee_mentor(session, trainee_id, company_id=trainee.company_id)
+    available_mentors = await _get_available_reassign_mentors(session, callback, trainee, current_mentor)
+
+    if not available_mentors:
+        await callback.message.edit_text(
+            f"🔄 <b>Переназначение наставника</b>\n\n"
+            f"👤 <b>Стажер:</b> {trainee.full_name}\n"
+            f"👨‍🏫 <b>Текущий наставник:</b> {current_mentor.full_name if current_mentor else 'Не назначен'}\n\n"
+            f"❌ Нет доступных наставников для переназначения.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="← назад", callback_data="reassign_mentor")]]
+            ),
+        )
+        return True
+
+    total_pages = max(1, (len(available_mentors) + MENTOR_REASSIGNMENT_PAGE_SIZE - 1) // MENTOR_REASSIGNMENT_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+
+    text = (
+        f"🔄 <b>Переназначение наставника</b>\n\n"
+        f"👤 <b>Стажер:</b> {trainee.full_name}\n"
+        f"👨‍🏫 <b>Текущий наставник:</b> {current_mentor.full_name if current_mentor else 'Не назначен'}\n"
+        f"📊 <b>Доступно наставников:</b> {len(available_mentors)}\n"
+        f"📄 <b>Страница:</b> {page + 1}/{total_pages}\n\n"
+        f"👇 <b>Выбери нового наставника:</b>"
+    )
+
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=get_reassign_mentor_keyboard(available_mentors, trainee_id=trainee_id, page=page),
+    )
+    return True
+
+
 @router.callback_query(F.data == "reassign_mentor")
 async def callback_reassign_mentor(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Переназначение наставника - выбор стажера"""
@@ -1502,66 +1558,31 @@ async def callback_select_trainee_for_reassign(callback: CallbackQuery, state: F
     """Выбор нового наставника для стажера"""
     try:
         trainee_id = int(callback.data.split(":")[1])
-        trainee = await get_user_by_id(session, trainee_id)
-
-        if not trainee:
-            await callback.answer("Стажер не найден")
-            return
-
-        # Получаем текущего наставника
-        current_mentor = await get_trainee_mentor(session, trainee_id, company_id=trainee.company_id)
-
-        # Получаем доступных наставников (исключая текущего)
-        actor = await get_user_by_tg_id(session, callback.from_user.id)
-        scope = await get_scope_object_ids(session, actor) if actor else None
-        available_mentors = await ScopedUserRepository(session).list_mentors(company_id=trainee.company_id, scope=scope)
-        available_mentors = [m for m in available_mentors if not current_mentor or m.id != current_mentor.id]
-
-        if not available_mentors:
-            await callback.message.edit_text(
-                f"🔄 <b>Переназначение наставника</b>\n\n"
-                f"👤 <b>Стажер:</b> {trainee.full_name}\n"
-                f"👨‍🏫 <b>Текущий наставник:</b> {current_mentor.full_name if current_mentor else 'Не назначен'}\n\n"
-                f"❌ Нет доступных наставников для переназначения.",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[[InlineKeyboardButton(text="← назад", callback_data="reassign_mentor")]]
-                ),
-            )
+        rendered = await _show_reassign_mentor_selection(callback, session, trainee_id=trainee_id, page=0)
+        if rendered:
             await callback.answer()
-            return
-
-        # Показываем информацию о стажере и предлагаем выбрать нового наставника
-        text = (
-            f"🔄 <b>Переназначение наставника</b>\n\n"
-            f"👤 <b>Стажер:</b> {trainee.full_name}\n"
-            f"👨‍🏫 <b>Текущий наставник:</b> {current_mentor.full_name if current_mentor else 'Не назначен'}\n\n"
-            f"👇 <b>Выбери нового наставника:</b>"
-        )
-
-        # Создаем клавиатуру с доступными наставниками
-        keyboard = []
-        for mentor in available_mentors:
-            work_object = mentor.work_object.name if mentor.work_object else "Не указан"
-            keyboard.append(
-                [
-                    InlineKeyboardButton(
-                        text=f"👨‍🏫 {mentor.full_name} ({work_object})",
-                        callback_data=f"reassign_to_mentor:{trainee_id}:{mentor.id}",
-                    )
-                ]
-            )
-
-        keyboard.append([InlineKeyboardButton(text="← назад", callback_data="reassign_mentor")])
-
-        await callback.message.edit_text(
-            text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
-        )
-        await callback.answer()
 
     except (ValueError, IndexError):
         await callback.answer("Ошибка при выборе стажера")
         log_user_error(callback.from_user.id, "select_trainee_for_reassign_error", f"Invalid data: {callback.data}")
+
+
+@router.callback_query(F.data.startswith("reassign_mentors_page:"))
+async def callback_reassign_mentors_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Пагинация списка наставников при переназначении."""
+    try:
+        data_parts = callback.data.split(":")
+        trainee_id = int(data_parts[1])
+        page = int(data_parts[2])
+        rendered = await _show_reassign_mentor_selection(callback, session, trainee_id=trainee_id, page=page)
+        if rendered:
+            await callback.answer()
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка навигации")
+        log_user_error(callback.from_user.id, "reassign_mentors_page_error", f"Invalid page data: {callback.data}")
+    except Exception as e:
+        await callback.answer("Ошибка при получении списка наставников")
+        log_user_error(callback.from_user.id, "reassign_mentors_page_error", str(e))
 
 
 @router.callback_query(F.data.startswith("reassign_to_mentor:"))
