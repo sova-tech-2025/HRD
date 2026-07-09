@@ -4359,6 +4359,21 @@ async def callback_toggle_stage(callback: CallbackQuery, state: FSMContext, sess
         parts = callback.data.split(":")
         trainee_id = int(parts[1])
         stage_id = int(parts[2])
+        requested_action = parts[3] if len(parts) > 3 and parts[3] in {"open", "close"} else None
+
+        if requested_action is None:
+            reply_markup = getattr(callback.message, "reply_markup", None)
+            for row in getattr(reply_markup, "inline_keyboard", []):
+                for button in row:
+                    if button.callback_data != callback.data:
+                        continue
+                    if "Открыть" in button.text:
+                        requested_action = "open"
+                    elif "Закрыть" in button.text:
+                        requested_action = "close"
+                    break
+                if requested_action is not None:
+                    break
 
         # Получаем company_id для изоляции
         trainee = await get_user_by_id(session, trainee_id)
@@ -4382,8 +4397,15 @@ async def callback_toggle_stage(callback: CallbackQuery, state: FSMContext, sess
             await callback.answer("❌ Завершенные этапы нельзя изменять", show_alert=True)
             return
 
-        # Переключаем статус этапа
-        if current_stage_progress.is_opened:
+        if requested_action is None:
+            await update_stages_management_interface(callback, session, trainee_id)
+            return
+
+        requested_is_opened = requested_action == "open"
+
+        if current_stage_progress.is_opened == requested_is_opened:
+            action_text = "уже открыт" if requested_is_opened else "уже закрыт"
+        elif not requested_is_opened:
             # Закрываем этап
             from bot.database.models import TraineeSessionProgress, TraineeStageProgress
 
@@ -4474,33 +4496,33 @@ async def update_stages_management_interface(callback: CallbackQuery, session: A
             stages_info += "\n"
 
             # Добавляем кнопки для всех этапов с toggle-функциональностью
-            if not stage_progress.is_opened:
-                # Кнопка для закрытых этапов
-                keyboard_buttons.append(
-                    [
-                        InlineKeyboardButton(
-                            text=f"🔓 Открыть этап {stage.order_number}",
-                            callback_data=f"toggle_stage:{trainee_id}:{stage.id}",
-                        )
-                    ]
-                )
-            elif stage_progress.is_opened and not stage_progress.is_completed:
-                # Кнопка для открытых этапов (можно закрыть)
-                keyboard_buttons.append(
-                    [
-                        InlineKeyboardButton(
-                            text=f"🔒 Закрыть этап {stage.order_number}",
-                            callback_data=f"toggle_stage:{trainee_id}:{stage.id}",
-                        )
-                    ]
-                )
-            elif stage_progress.is_completed:
+            if stage_progress.is_completed:
                 # Завершенные этапы нельзя закрыть
                 keyboard_buttons.append(
                     [
                         InlineKeyboardButton(
                             text=f"✅ Этап {stage.order_number} завершен",
                             callback_data=f"stage_completed_stub:{trainee_id}:{stage.id}",
+                        )
+                    ]
+                )
+            elif not stage_progress.is_opened:
+                # Кнопка для закрытых этапов
+                keyboard_buttons.append(
+                    [
+                        InlineKeyboardButton(
+                            text=f"🔓 Открыть этап {stage.order_number}",
+                            callback_data=f"toggle_stage:{trainee_id}:{stage.id}:open",
+                        )
+                    ]
+                )
+            else:
+                # Кнопка для открытых этапов (можно закрыть)
+                keyboard_buttons.append(
+                    [
+                        InlineKeyboardButton(
+                            text=f"🔒 Закрыть этап {stage.order_number}",
+                            callback_data=f"toggle_stage:{trainee_id}:{stage.id}:close",
                         )
                     ]
                 )
