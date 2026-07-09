@@ -10,6 +10,8 @@ E2E Сценарий 4: Закрытие этапа — согласованно
 Зависит от предыдущих тестов (trainee: этап 1 закрыт, тест 1 пройден).
 """
 
+import asyncio
+
 import pytest
 
 from tests.e2e.helpers.bot_client import BotClient
@@ -126,3 +128,46 @@ class TestScenario4_StageOpenCloseConsistency:
         assert has_open_or_completed, (
             f"Stage 1 should show 'Открыть этап 1' or '✅ Этап 1 завершен'. Buttons: {buttons}"
         )
+
+    async def test_step8_duplicate_open_callback_is_idempotent(self, admin: BotClient):
+        await wait_between_actions()
+
+        resp = await admin.send_and_wait("Мои стажеры 👥", pattern="стажер|стажёр")
+        trainee_btn = admin.find_button_data(
+            resp, text_contains="Стажёров", data_prefix="select_trainee_for_trajectory:"
+        )
+        if not trainee_btn:
+            trainee_btn = admin.find_button_data(
+                resp, text_contains="Тест", data_prefix="select_trainee_for_trajectory:"
+            )
+        assert trainee_btn, "Trainee not found"
+
+        resp = await admin.click_and_wait(resp, data=trainee_btn, wait_pattern="[Тт]раектори|[Ээ]тап|карточка")
+        stages_btn = admin.find_button_data(resp, data_prefix="manage_stages:")
+        assert stages_btn, "Stage management button not found"
+
+        resp = await admin.click_and_wait(resp, data=stages_btn, wait_pattern="[Ээ]тап|[Оо]ткрыть|[Зз]акрыть")
+        open_btn = admin.find_button_data(
+            resp,
+            text_contains="Открыть этап 2",
+            data_prefix="toggle_stage:",
+        )
+        assert open_btn, f"Open button for stage 2 not found. Buttons: {admin.get_button_texts(resp)}"
+        assert open_btn.decode().endswith(":open")
+
+        open_button = next(
+            button for row in resp.buttons for button in row if getattr(button, "data", None) == open_btn
+        )
+        await asyncio.gather(open_button.click(), open_button.click())
+        await wait_between_actions()
+
+        resp = await admin.get_last_message()
+        close_btn = admin.find_button_data(
+            resp,
+            text_contains="Закрыть этап 2",
+            data_prefix="toggle_stage:",
+        )
+        assert close_btn, f"Duplicate open callback closed stage 2. Buttons: {admin.get_button_texts(resp)}"
+        assert close_btn.decode().endswith(":close")
+
+        await admin.click_and_wait(resp, data=close_btn, wait_pattern="[Ээ]тап|[Оо]ткрыть|[Зз]акрыть")
