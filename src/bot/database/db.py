@@ -96,6 +96,7 @@ async def ensure_company_id(session: AsyncSession, state: FSMContext, user_id: i
         user = await get_user_by_tg_id(session, user_id)
         if user and user.company_id:
             company_id = user.company_id
+            await state.update_data(company_id=company_id)
 
     return company_id
 

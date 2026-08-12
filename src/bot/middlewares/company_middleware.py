@@ -5,7 +5,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.db import get_user_by_tg_id
+from bot.database.db import get_company_by_id, get_user_by_tg_id
 from bot.utils.logger import logger
 from bot.utils.timezone import moscow_now
 
@@ -86,8 +86,7 @@ class CompanyMiddleware(BaseMiddleware):
                 logger.warning(f"User {user_id} has no company")
                 return
 
-            # Получаем компанию (через relationship)
-            company = user.company
+            company = await get_company_by_id(session, user.company_id)
 
             if not company:
                 error_msg = "❌ Компания не найдена. Обратись к администратору."
@@ -141,9 +140,7 @@ class CompanyMiddleware(BaseMiddleware):
 
             logger.debug(f"CompanyMiddleware: user {user_id} in company {company.id}")
 
-        except Exception as e:
-            logger.error(f"Error in CompanyMiddleware: {e}")
-            # При ошибке пропускаем middleware и продолжаем
-            pass
+        except Exception:
+            logger.exception("Error in CompanyMiddleware")
 
         return await handler(event, data)

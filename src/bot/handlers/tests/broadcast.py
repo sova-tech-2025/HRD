@@ -77,13 +77,23 @@ def _get_broadcast_objects_keyboard(objects, selected_ids):
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-async def _resolve_available_objects(session: AsyncSession, tg_id: int, company_id: int):
+async def _resolve_available_objects(session: AsyncSession, state: FSMContext, tg_id: int):
+    """Объекты компании, доступные отправителю: (company_id, objects, scope).
+
+    company_id резолвится строго через ensure_company_id: сырой data.get("company_id")
+    может быть пустым, а get_all_objects при company_id=None по deny-by-default
+    возвращает пустой список — тогда ни один объект нельзя выбрать.
+    """
+    company_id = await ensure_company_id(session, state, tg_id)
+    if company_id is None:
+        return None, [], None
+
     user = await get_user_by_tg_id(session, tg_id)
     scope = await get_scope_object_ids(session, user)
     all_objects = await get_all_objects(session, company_id)
     if scope is None:
-        return all_objects, scope
-    return [obj for obj in all_objects if obj.id in scope], scope
+        return company_id, all_objects, scope
+    return company_id, [obj for obj in all_objects if obj.id in scope], scope
 
 
 # ===============================
@@ -1182,7 +1192,7 @@ async def callback_send_broadcast(callback: CallbackQuery, state: FSMContext, se
             await callback.answer("Не указан текст рассылки или группы", show_alert=True)
             return
 
-        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        company_id, objects, _scope = await _resolve_available_objects(session, state, callback.from_user.id)
         if company_id is None:
             await callback.message.edit_text(
                 "❌ Не удалось определить компанию. Попробуй снова или обратись к администратору."
@@ -1190,8 +1200,6 @@ async def callback_send_broadcast(callback: CallbackQuery, state: FSMContext, se
             await state.clear()
             log_user_error(callback.from_user.id, "broadcast_objects_company_missing", "company_id not resolved")
             return
-
-        objects, _scope = await _resolve_available_objects(session, callback.from_user.id, company_id)
 
         if not objects:
             await callback.message.edit_text(
@@ -1232,9 +1240,13 @@ async def callback_toggle_broadcast_object(callback: CallbackQuery, state: FSMCo
 
         data = await state.get_data()
         selected_object_ids = data.get("selected_object_ids", [])
-        company_id = data.get("company_id")
 
-        objects, _scope = await _resolve_available_objects(session, callback.from_user.id, company_id)
+        company_id, objects, _scope = await _resolve_available_objects(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.answer("Не удалось определить компанию. Повтори попытку позже.", show_alert=True)
+            log_user_error(callback.from_user.id, "broadcast_object_toggle_company_missing", "company_id not resolved")
+            return
+
         available_ids = {obj.id for obj in objects}
 
         if object_id not in available_ids:
@@ -1264,10 +1276,14 @@ async def callback_select_all_objects(callback: CallbackQuery, state: FSMContext
         await callback.answer()
 
         data = await state.get_data()
-        company_id = data.get("company_id")
         current = data.get("selected_object_ids", [])
 
-        objects, _scope = await _resolve_available_objects(session, callback.from_user.id, company_id)
+        company_id, objects, _scope = await _resolve_available_objects(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.answer("Не удалось определить компанию. Повтори попытку позже.", show_alert=True)
+            log_user_error(callback.from_user.id, "broadcast_objects_all_company_missing", "company_id not resolved")
+            return
+
         available_ids = [obj.id for obj in objects]
 
         if set(current) == set(available_ids):
@@ -1301,7 +1317,6 @@ async def callback_send_broadcast_with_objects(callback: CallbackQuery, state: F
         selected_roles = data.get("selected_roles", [])
         broadcast_docs = data.get("broadcast_docs", [])
         selected_object_ids = data.get("selected_object_ids", [])
-        company_id = data.get("company_id")
 
         if not broadcast_script or not selected_groups:
             await callback.answer("Не указан текст рассылки или группы", show_alert=True)
@@ -1309,6 +1324,13 @@ async def callback_send_broadcast_with_objects(callback: CallbackQuery, state: F
 
         if not selected_object_ids:
             await callback.answer("⚠️ Выбери хотя бы один объект", show_alert=True)
+            return
+
+        # Без company_id получатели собираются без изоляции по компании
+        company_id = await ensure_company_id(session, state, callback.from_user.id)
+        if company_id is None:
+            await callback.answer("Не удалось определить компанию. Повтори попытку позже.", show_alert=True)
+            log_user_error(callback.from_user.id, "broadcast_send_company_missing", "company_id not resolved")
             return
 
         user = await get_user_by_tg_id(session, callback.from_user.id)
