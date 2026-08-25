@@ -2231,27 +2231,6 @@ def get_session_tests_keyboard(tests: list, session_id: int, stage_id: int) -> I
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-def get_test_selection_for_session_keyboard(
-    tests: list, session_id: int, existing_test_ids: list = None
-) -> InlineKeyboardMarkup:
-    """Клавиатура выбора тестов для добавления в сессию"""
-    keyboard = []
-
-    if existing_test_ids is None:
-        existing_test_ids = []
-
-    for test in tests:
-        # Показываем только тесты, которых еще нет в сессии
-        if test.id not in existing_test_ids:
-            keyboard.append(
-                [InlineKeyboardButton(text=test.name, callback_data=f"select_test_for_session:{session_id}:{test.id}")]
-            )
-
-    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_session_view:{session_id}")])
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-
 def get_group_selection_for_trajectory_keyboard(groups: list, path_id: int) -> InlineKeyboardMarkup:
     """Клавиатура выбора группы для траектории"""
     keyboard = []

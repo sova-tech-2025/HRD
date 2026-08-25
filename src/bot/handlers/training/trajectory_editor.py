@@ -35,9 +35,12 @@ from bot.keyboards.keyboards import (
     get_session_tests_keyboard,
     get_stage_deletion_confirmation_keyboard,
     get_stage_editor_keyboard,
-    get_test_selection_for_session_keyboard,
     get_trajectory_attestation_management_keyboard,
     get_trajectory_editor_main_keyboard,
+)
+from bot.keyboards.training_keyboards import (
+    SESSION_TEST_SELECTION_PAGE_SIZE,
+    get_test_selection_for_session_keyboard,
 )
 from bot.repositories import AssessmentRepository
 from bot.states.states import LearningPathStates
@@ -833,6 +836,52 @@ async def callback_confirm_delete_session(callback: CallbackQuery, state: FSMCon
 # ===============================
 
 
+async def _show_test_selection(
+    callback: CallbackQuery, state: FSMContext, session: AsyncSession, session_id: int, page: int = 0
+):
+    """Экран выбора теста для добавления в сессию (с пагинацией)"""
+    company_id = await ensure_company_id(session, state, callback.from_user.id)
+    all_tests = await get_all_active_tests(session, company_id)
+
+    # Получаем тесты, уже добавленные в сессию
+    existing_tests = await get_session_tests(session, session_id, company_id=company_id)
+    existing_test_ids = [test.id for test in existing_tests]
+
+    # Фильтруем тесты, убирая уже добавленные
+    available_tests = [test for test in all_tests if test.id not in existing_test_ids]
+
+    if not available_tests:
+        await callback.message.edit_text(
+            "📝 <b>Нет доступных тестов</b>\n\nВсе тесты уже добавлены в эту сессию.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_session_view:{session_id}")]
+                ]
+            ),
+        )
+        return
+
+    total_pages = max(
+        1, (len(available_tests) + SESSION_TEST_SELECTION_PAGE_SIZE - 1) // SESSION_TEST_SELECTION_PAGE_SIZE
+    )
+    page = max(0, min(page, total_pages - 1))
+
+    text = (
+        "📝 <b>Добавление теста в сессию</b>\n\n"
+        f"📊 <b>Доступно тестов:</b> {len(available_tests)}\n"
+        f"📄 <b>Страница:</b> {page + 1}/{total_pages}\n\n"
+        "Выбери тест для добавления:"
+    )
+
+    keyboard = get_test_selection_for_session_keyboard(available_tests, session_id, existing_test_ids, page=page)
+
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+    await state.set_state(LearningPathStates.selecting_test_to_add)
+    await state.update_data(session_id=session_id)
+
+
 @router.callback_query(F.data.startswith("add_test_to_session:"))
 async def callback_add_test_to_session(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Добавление теста в сессию - выбор теста"""
@@ -842,47 +891,37 @@ async def callback_add_test_to_session(callback: CallbackQuery, state: FSMContex
         await callback.answer()
 
         session_id = int(callback.data.split(":")[1])
-
-        # Получаем все активные тесты
-        company_id = await ensure_company_id(session, state, callback.from_user.id)
-        all_tests = await get_all_active_tests(session, company_id)
-
-        # Получаем тесты, уже добавленные в сессию
-        existing_tests = await get_session_tests(session, session_id, company_id=company_id)
-        existing_test_ids = [test.id for test in existing_tests]
-
-        # Фильтруем тесты, убирая уже добавленные
-        available_tests = [test for test in all_tests if test.id not in existing_test_ids]
-
-        if not available_tests:
-            await callback.message.edit_text(
-                "📝 <b>Нет доступных тестов</b>\n\nВсе тесты уже добавлены в эту сессию.",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_session_view:{session_id}")]
-                    ]
-                ),
-            )
-            return
-
-        text = "📝 <b>Добавление теста в сессию</b>\n\nВыбери тест для добавления:"
-
-        keyboard = get_test_selection_for_session_keyboard(available_tests, session_id, existing_test_ids)
-
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-
-        await state.set_state(LearningPathStates.selecting_test_to_add)
-        await state.update_data(session_id=session_id)
+        await _show_test_selection(callback, state, session, session_id)
 
     except (ValueError, IndexError) as e:
-        await callback.answer("Ошибка при обработке данных", show_alert=True)
+        await callback.message.answer("❌ Ошибка при обработке данных")
         log_user_error(
             callback.from_user.id, "add_test_to_session_start_error", f"Invalid data: {callback.data}, {str(e)}"
         )
     except Exception as e:
-        await callback.answer("Произошла ошибка")
+        # callback.answer() уже израсходован выше, поэтому ошибку показываем сообщением
+        await callback.message.answer("❌ Не удалось открыть список тестов. Попробуй ещё раз.")
         log_user_error(callback.from_user.id, "add_test_to_session_start_error", str(e))
+
+
+@router.callback_query(F.data.startswith("select_test_page:"), LearningPathStates.selecting_test_to_add)
+async def callback_select_test_page(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Переключение страницы в списке тестов для добавления в сессию"""
+    try:
+        await callback.answer()
+
+        parts = callback.data.split(":")
+        session_id = int(parts[1])
+        page = int(parts[2])
+
+        await _show_test_selection(callback, state, session, session_id, page=page)
+
+    except (ValueError, IndexError) as e:
+        await callback.message.answer("❌ Ошибка при обработке данных")
+        log_user_error(callback.from_user.id, "select_test_page_error", f"Invalid data: {callback.data}, {str(e)}")
+    except Exception as e:
+        await callback.message.answer("❌ Не удалось открыть список тестов. Попробуй ещё раз.")
+        log_user_error(callback.from_user.id, "select_test_page_error", str(e))
 
 
 @router.callback_query(F.data.startswith("select_test_for_session:"), LearningPathStates.selecting_test_to_add)
