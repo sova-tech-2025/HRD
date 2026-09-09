@@ -112,6 +112,25 @@ class ScopedUserRepository(BaseRepository):
         result = await self.session.execute(query.order_by(User.full_name))
         return list(result.scalars().all())
 
+    async def list_by_role(
+        self, role_id: int, company_id: int | None = None, scope: set[int] | None = None
+    ) -> list[User]:
+        query = (
+            select(User)
+            .options(*self._DETAILS)
+            .join(user_roles, User.id == user_roles.c.user_id)
+            .where(
+                user_roles.c.role_id == role_id,
+                User.is_activated == True,  # noqa: E712
+                User.is_active == True,  # noqa: E712
+            )
+        )
+        if company_id is not None:
+            query = query.where(User.company_id == company_id)
+        query = apply_object_scope_any(query, scope, _MIXED_SCOPE_COLUMNS)
+        result = await self.session.execute(query.order_by(User.full_name))
+        return list(result.scalars().all())
+
     async def list_by_object(
         self, object_id: int, company_id: int | None = None, scope: set[int] | None = None
     ) -> list[User]:

@@ -10,6 +10,7 @@ from bot.database.db import (
     assign_learning_path_to_trainee,
     assign_manager_to_trainee,
     assign_mentor,
+    change_trainee_to_employee,
     check_user_permission,
     ensure_company_id,
     get_accessible_knowledge_folders_for_user,
@@ -1473,7 +1474,9 @@ async def _show_reassign_trainees(callback: CallbackQuery, session: AsyncSession
     )
 
 
-async def _get_available_reassign_mentors(session: AsyncSession, callback: CallbackQuery, trainee, current_mentor) -> list:
+async def _get_available_reassign_mentors(
+    session: AsyncSession, callback: CallbackQuery, trainee, current_mentor
+) -> list:
     actor = await get_user_by_tg_id(session, callback.from_user.id)
     scope = await get_scope_object_ids(session, actor) if actor else None
     mentors = await ScopedUserRepository(session).list_mentors(company_id=trainee.company_id, scope=scope)
@@ -1869,6 +1872,7 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
                 ],
                 [InlineKeyboardButton(text="Поменять траекторию", callback_data=f"change_trajectory:{trainee_id}")],
                 [InlineKeyboardButton(text="Посмотреть прогресс", callback_data=f"mentor_view_progress:{trainee_id}")],
+                [InlineKeyboardButton(text="Сделать сотрудником", callback_data=f"mentor_make_employee:{trainee_id}")],
                 [InlineKeyboardButton(text="← назад", callback_data="mentor_my_trainees")],
             ]
         )
@@ -1881,10 +1885,195 @@ async def callback_select_trainee_for_trajectory(callback: CallbackQuery, sessio
                 keyboard.inline_keyboard.append(
                     [InlineKeyboardButton(text=lp.name, callback_data=f"assign_trajectory:{trainee_id}:{lp.id}")]
                 )
+        keyboard.inline_keyboard.append(
+            [InlineKeyboardButton(text="Сделать сотрудником", callback_data=f"mentor_make_employee:{trainee_id}")]
+        )
         keyboard.inline_keyboard.append([InlineKeyboardButton(text="← назад", callback_data="mentor_my_trainees")])
 
     await callback.message.edit_text(profile_text, parse_mode="HTML", reply_markup=keyboard)
     await callback.answer()
+
+
+def _back_to_trainee_keyboard(trainee_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура возврата к карточке стажёра."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="← назад", callback_data=f"select_trainee_for_trajectory:{trainee_id}")]
+        ]
+    )
+
+
+async def _resolve_trainee_for_transition(callback: CallbackQuery, session: AsyncSession):
+    """Проверки перед переводом стажёра в сотрудники.
+
+    Возвращает ``(mentor, trainee)`` либо ``(None, None)``, если действие
+    недоступно — сообщение пользователю при этом уже показано.
+    """
+    trainee_id = int(callback.data.split(":")[1])
+
+    mentor = await get_user_by_tg_id(session, callback.from_user.id)
+    if not mentor:
+        await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+        return None, None
+
+    trainee = await get_user_by_id(session, trainee_id)
+    if not trainee or trainee.company_id != mentor.company_id:
+        await callback.answer("❌ Стажер не найден", show_alert=True)
+        return None, None
+
+    mentor_role_names = [role.name for role in mentor.roles]
+    if "ADMIN" not in mentor_role_names:
+        actual_mentor = await get_trainee_mentor(session, trainee.id, company_id=trainee.company_id)
+        if not actual_mentor or actual_mentor.id != mentor.id:
+            await callback.answer("❌ Это не твой стажер", show_alert=True)
+            return None, None
+
+    if "Стажер" not in [role.name for role in trainee.roles]:
+        await callback.answer("❌ Пользователь уже не стажер", show_alert=True)
+        return None, None
+
+    return mentor, trainee
+
+
+async def _check_trajectory_completed(callback: CallbackQuery, session: AsyncSession, trainee) -> bool:
+    """Гейт перевода: все этапы и тесты траектории должны быть пройдены.
+
+    Показывает причину отказа и возвращает False, если перевод недоступен.
+    """
+    trainee_path = await get_trainee_learning_path(session, trainee.id, company_id=trainee.company_id)
+
+    if not trainee_path:
+        await callback.message.edit_text(
+            "❌ <b>Перевод недоступен</b>\n\n"
+            "У стажера нет назначенной траектории обучения.\n"
+            "Назначь траекторию и дождись, когда стажер пройдет все этапы и тесты.",
+            parse_mode="HTML",
+            reply_markup=_back_to_trainee_keyboard(trainee.id),
+        )
+        return False
+
+    all_stages_completed = await AssessmentAssignmentRepository(session).check_all_stages_completed(trainee.id)
+    if not all_stages_completed:
+        await callback.message.edit_text(
+            "❌ <b>Перевод недоступен</b>\n\n"
+            "Стажер еще не завершил траекторию обучения.\n\n"
+            "📋 <b>Требования для перевода в сотрудники:</b>\n"
+            "• ✅ Все этапы траектории должны быть пройдены\n"
+            "• ✅ Все тесты в этапах должны быть сданы\n\n"
+            "Открой стажеру недостающие этапы и дождись их завершения.",
+            parse_mode="HTML",
+            reply_markup=_back_to_trainee_keyboard(trainee.id),
+        )
+        return False
+
+    return True
+
+
+@router.callback_query(F.data.startswith("mentor_make_employee:"))
+async def callback_mentor_make_employee(callback: CallbackQuery, session: AsyncSession):
+    """Кнопка «Сделать сотрудником» — проверка условий и запрос подтверждения."""
+    try:
+        await callback.answer()
+
+        mentor, trainee = await _resolve_trainee_for_transition(callback, session)
+        if not trainee:
+            return
+
+        if not await _check_trajectory_completed(callback, session, trainee):
+            return
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Да, перевести", callback_data=f"confirm_mentor_make_employee:{trainee.id}"
+                    )
+                ],
+                [InlineKeyboardButton(text="← назад", callback_data=f"select_trainee_for_trajectory:{trainee.id}")],
+            ]
+        )
+
+        await callback.message.edit_text(
+            f"❓ <b>Вы уверены, что хотите перевести {trainee.full_name} в сотрудники?</b>\n\n"
+            "<i>После перевода стажер получит роль «Сотрудник» и пропадет из списка твоих стажеров.</i>",
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+
+        log_user_action(
+            callback.from_user.id,
+            callback.from_user.username,
+            f"requested trainee {trainee.id} transition to employee",
+        )
+
+    except Exception as e:
+        log_user_error(callback.from_user.id, "mentor_make_employee_error", str(e))
+        await callback.answer("Произошла ошибка", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("confirm_mentor_make_employee:"))
+async def callback_confirm_mentor_make_employee(callback: CallbackQuery, session: AsyncSession):
+    """Подтверждение перевода стажёра в сотрудники наставником."""
+    try:
+        await callback.answer()
+
+        # Проверки повторяются: клавиатура могла устареть, а состояние стажёра — измениться
+        mentor, trainee = await _resolve_trainee_for_transition(callback, session)
+        if not trainee:
+            return
+
+        if not await _check_trajectory_completed(callback, session, trainee):
+            return
+
+        trainee_name = trainee.full_name
+        trainee_tg_id = trainee.tg_id
+
+        success = await change_trainee_to_employee(session, trainee.id, None, company_id=trainee.company_id)
+        if not success:
+            await callback.message.edit_text(
+                "❌ Произошла ошибка при переводе стажера в сотрудники.",
+                reply_markup=_back_to_trainee_keyboard(trainee.id),
+            )
+            return
+
+        await callback.message.edit_text(
+            f"✅ <b>Стажер переведен в сотрудники</b>\n\n"
+            f"🧑 <b>ФИО:</b> {trainee_name}\n"
+            f"👑 <b>Новая роль:</b> Сотрудник\n"
+            f"📅 <b>Дата перевода:</b> {moscow_now().strftime('%d.%m.%Y %H:%M')}",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="← к моим стажерам", callback_data="mentor_my_trainees")],
+                    [InlineKeyboardButton(text="☰ Главное меню", callback_data="main_menu")],
+                ]
+            ),
+        )
+
+        # Уведомление стажёру: у него меняется меню, без сообщения это выглядит как сбой
+        try:
+            await callback.message.bot.send_message(
+                chat_id=trainee_tg_id,
+                text=(
+                    "🎉 <b>Поздравляем! Ты стал сотрудником!</b>\n\n"
+                    f"👨‍🏫 <b>Наставник:</b> {mentor.full_name}\n"
+                    f"📅 <b>Дата перевода:</b> {moscow_now().strftime('%d.%m.%Y %H:%M')}\n\n"
+                    "🚀 <b>Используй /start чтобы обновить меню</b>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception as notify_error:
+            logger.warning(f"Не удалось уведомить стажера {trainee_tg_id} о переводе в сотрудники: {notify_error}")
+
+        log_user_action(
+            callback.from_user.id,
+            callback.from_user.username,
+            f"trainee {trainee_name} became employee",
+        )
+
+    except Exception as e:
+        log_user_error(callback.from_user.id, "confirm_mentor_make_employee_error", str(e))
+        await callback.answer("Произошла ошибка", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("select_trajectory_for_trainee:"))

@@ -187,7 +187,7 @@ class UserFilterKeyboards:
         return self._paginated_list(
             roles,
             page,
-            lambda r: InlineKeyboardButton(text=f"👑 {r.name}", callback_data=self.cb_role(r.id)),
+            lambda r: InlineKeyboardButton(text=f"{self.emojis['roles']} {r.name}", callback_data=self.cb_role(r.id)),
             self.cb_rpage,
         )
 
@@ -227,7 +227,7 @@ examiner_filters = UserFilterKeyboards(
 # Фильтры при редактировании пользователей (раздел «Пользователи» рекрутера).
 user_edit_filters = UserFilterKeyboards(
     prefix="uf",
-    emojis={"all": "👥", "groups": "🗂️", "objects": "📍", "roles": "👑", "search": "🔍"},
+    emojis={"all": "👥", "groups": "🗂️", "objects": "📍", "roles": "🏷️", "search": "🔍"},
     per_page=5,
     show_role=True,
     back_text="↩️ Назад к фильтрам",

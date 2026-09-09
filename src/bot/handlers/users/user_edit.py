@@ -8,6 +8,7 @@ from bot.database.db import (
     ensure_company_id,
     get_all_groups,
     get_all_objects,
+    get_all_roles,
     get_group_by_id,
     get_object_by_id,
     get_role_change_warnings,
@@ -44,6 +45,23 @@ from bot.utils.logger import log_user_action, log_user_error
 from bot.utils.validation.input import validate_full_name, validate_phone_number
 
 router = Router()
+
+
+async def _roles_for_filter(session: AsyncSession) -> list:
+    """Роли для фильтра «По ролям».
+
+    ADMIN исключён: это служебная тестовая мульти-роль, фильтровать по ней
+    рекрутеру нечего.
+    """
+    return [role for role in await get_all_roles(session) if role.name != "ADMIN"]
+
+
+async def _role_name_by_id(session: AsyncSession, role_id: int) -> str:
+    """Название роли по id — для заголовков списка (роли глобальные, без company_id)."""
+    for role in await get_all_roles(session):
+        if role.id == role_id:
+            return role.name
+    return "Неизвестная"
 
 
 def format_user_groups(user) -> str:
@@ -154,7 +172,7 @@ async def cmd_all_users(message: Message, session: AsyncSession, state: FSMConte
         "Выбери способ фильтрации пользователей:"
     )
 
-    keyboard = user_edit_filters.filter_menu(groups, objects)
+    keyboard = user_edit_filters.filter_menu(groups, objects, await _roles_for_filter(session))
 
     await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     await state.set_state(UserEditStates.waiting_for_filter_selection)
@@ -300,7 +318,9 @@ async def callback_filter_group(callback: CallbackQuery, state: FSMContext, sess
             objects = await get_all_objects(session, company_id)
             if scope is not None:
                 objects = [o for o in objects if o.id in scope]
-            keyboard = user_edit_filters.filter_menu(await get_all_groups(session, company_id), objects)
+            keyboard = user_edit_filters.filter_menu(
+                await get_all_groups(session, company_id), objects, await _roles_for_filter(session)
+            )
             await state.set_state(UserEditStates.waiting_for_filter_selection)
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
@@ -348,7 +368,9 @@ async def callback_filter_object(callback: CallbackQuery, state: FSMContext, ses
             objects = await get_all_objects(session, company_id)
             if scope is not None:
                 objects = [o for o in objects if o.id in scope]
-            keyboard = user_edit_filters.filter_menu(await get_all_groups(session, company_id), objects)
+            keyboard = user_edit_filters.filter_menu(
+                await get_all_groups(session, company_id), objects, await _roles_for_filter(session)
+            )
             await state.set_state(UserEditStates.waiting_for_filter_selection)
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
@@ -360,7 +382,80 @@ async def callback_filter_object(callback: CallbackQuery, state: FSMContext, ses
         log_user_error(callback.from_user.id, "filter_object_error", str(e))
 
 
-# ===================== ОБРАБОТЧИКИ ПОИСКА ПО ФИО =====================
+@router.callback_query(F.data == user_edit_filters.cb_roles, UserEditStates.waiting_for_filter_selection)
+async def callback_filter_by_roles(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Показать фильтр по ролям"""
+    try:
+        await callback.answer()
+
+        roles = await _roles_for_filter(session)
+
+        if not roles:
+            await callback.message.edit_text("📭 Нет доступных ролей для фильтрации")
+            return
+
+        text = (
+            f"🏷️ <b>ФИЛЬТР ПО РОЛЯМ</b> 🏷️\n\n"
+            f"📊 Доступно ролей: <b>{len(roles)}</b>\n\n"
+            "Выбери роль, чтобы посмотреть пользователей:"
+        )
+
+        keyboard = user_edit_filters.role_list(roles, 0)
+
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        await state.update_data(available_roles=roles, filter_page=0)
+
+        log_user_action(callback.from_user.id, "opened_role_filter", f"Available {len(roles)} roles")
+
+    except Exception as e:
+        await callback.answer("Произошла ошибка")
+        log_user_error(callback.from_user.id, "filter_by_roles_error", str(e))
+
+
+@router.callback_query(
+    F.data.startswith(user_edit_filters.prefix + "_role:"), UserEditStates.waiting_for_filter_selection
+)
+async def callback_filter_role(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Показать пользователей выбранной роли"""
+    try:
+        await callback.answer()
+
+        user = await get_user_by_tg_id(session, callback.from_user.id)
+        if not user:
+            await callback.answer("❌ Ты не зарегистрирован в системе.", show_alert=True)
+            return
+
+        role_id = int(callback.data.split(":")[1])
+        role_name = await _role_name_by_id(session, role_id)
+
+        scope = await get_scope_object_ids(session, user)
+        users = await ScopedUserRepository(session).list_by_role(role_id, user.company_id, scope)
+
+        text = f"🏷️ <b>РОЛЬ: {role_name}</b> 🏷️\n\n📊 Пользователей с ролью: <b>{len(users)}</b>\n\n"
+
+        if users:
+            text += "Выбери пользователя для просмотра и редактирования:"
+            keyboard = user_edit_filters.user_list(users, 0)
+            await state.set_state(UserEditStates.waiting_for_user_selection)
+            await state.update_data(current_users=users, filter_type=f"role:{role_id}", current_page=0)
+        else:
+            text += "С данной ролью пока нет пользователей."
+            company_id = await ensure_company_id(session, state, callback.from_user.id)
+            objects = await get_all_objects(session, company_id)
+            if scope is not None:
+                objects = [o for o in objects if o.id in scope]
+            keyboard = user_edit_filters.filter_menu(
+                await get_all_groups(session, company_id), objects, await _roles_for_filter(session)
+            )
+            await state.set_state(UserEditStates.waiting_for_filter_selection)
+
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+        log_user_action(callback.from_user.id, "filter_by_role", f"Role: {role_name}, Users: {len(users)}")
+
+    except Exception as e:
+        await callback.answer("Произошла ошибка")
+        log_user_error(callback.from_user.id, "filter_role_error", str(e))
 
 
 @router.callback_query(F.data == user_edit_filters.cb_search, UserEditStates.waiting_for_filter_selection)
@@ -479,7 +574,6 @@ async def callback_view_user(callback: CallbackQuery, state: FSMContext, session
         data = await state.get_data()
         filter_type = data.get("filter_type", "all")
 
-        # Используем общую функцию для отображения информации
         data = await state.get_data()
         company_id = data.get("company_id")
         success = await show_user_info_detail(callback, user_id, session, filter_type, company_id=company_id)
@@ -544,7 +638,6 @@ async def callback_edit_user(callback: CallbackQuery, state: FSMContext, session
             f"📍 <b>Объект:</b>\n"
         )
 
-        # Добавляем объект стажировки только для стажеров
         if role_name in ["Стажер", "Стажёр"]:
             if user.internship_object:
                 text += f"<b>Стажировки:</b> {user.internship_object.name}\n"
@@ -596,7 +689,7 @@ async def callback_back_to_filters(callback: CallbackQuery, state: FSMContext, s
             "Выбери способ фильтрации пользователей:"
         )
 
-        keyboard = user_edit_filters.filter_menu(groups, objects)
+        keyboard = user_edit_filters.filter_menu(groups, objects, await _roles_for_filter(session))
 
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
         await state.set_state(UserEditStates.waiting_for_filter_selection)
@@ -637,6 +730,9 @@ async def callback_back_to_users(callback: CallbackQuery, state: FSMContext, ses
                 text = f"📍 <b>ОБЪЕКТ: {obj.name if obj else 'Неизвестный'}</b> 📍\n\n📊 Пользователей на объекте: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
             else:
                 text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
+        elif filter_type.startswith("role:"):
+            role_name = await _role_name_by_id(session, int(filter_type.split(":")[1]))
+            text = f"🏷️ <b>РОЛЬ: {role_name}</b> 🏷️\n\n📊 Пользователей с ролью: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
         else:
             text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
 
@@ -650,10 +746,6 @@ async def callback_back_to_users(callback: CallbackQuery, state: FSMContext, ses
     except Exception as e:
         await callback.answer("Произошла ошибка")
         log_user_error(callback.from_user.id, "back_to_users_error", str(e))
-
-
-# ===================== ОБРАБОТЧИКИ ПАГИНАЦИИ =====================
-
 
 @router.callback_query(F.data.startswith(user_edit_filters.prefix + "_upage:"))
 async def callback_users_pagination(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
@@ -688,6 +780,9 @@ async def callback_users_pagination(callback: CallbackQuery, state: FSMContext, 
                 text = f"📍 <b>ОБЪЕКТ: {obj.name if obj else 'Неизвестный'}</b> 📍\n\n📊 Пользователей на объекте: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
             else:
                 text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
+        elif filter_type.startswith("role:"):
+            role_name = await _role_name_by_id(session, int(filter_type.split(":")[1]))
+            text = f"🏷️ <b>РОЛЬ: {role_name}</b> 🏷️\n\n📊 Пользователей с ролью: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
         else:
             text = f"👥 <b>СПИСОК ПОЛЬЗОВАТЕЛЕЙ</b> 👥\n\n📊 Найдено пользователей: <b>{len(users)}</b>\n\nВыбери пользователя для просмотра и редактирования:"
 
@@ -727,6 +822,31 @@ async def callback_group_filter_pagination(callback: CallbackQuery, state: FSMCo
     except Exception as e:
         await callback.answer("Произошла ошибка")
         log_user_error(callback.from_user.id, "group_filter_pagination_error", str(e))
+
+
+@router.callback_query(F.data.startswith(user_edit_filters.prefix + "_rpage:"))
+async def callback_role_filter_pagination(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Обработка пагинации списка ролей для фильтрации"""
+    try:
+        await callback.answer()
+
+        page = int(callback.data.split(":")[1])
+        data = await state.get_data()
+        roles = data.get("available_roles", [])
+
+        if not roles:
+            roles = await _roles_for_filter(session)
+
+        keyboard = user_edit_filters.role_list(roles, page)
+
+        await callback.message.edit_reply_markup(reply_markup=keyboard)
+        await state.update_data(filter_page=page)
+
+        log_user_action(callback.from_user.id, "role_filter_pagination", f"Page: {page}")
+
+    except Exception as e:
+        await callback.answer("Произошла ошибка")
+        log_user_error(callback.from_user.id, "role_filter_pagination_error", str(e))
 
 
 @router.callback_query(F.data.startswith(user_edit_filters.prefix + "_opage:"))
