@@ -46,6 +46,22 @@ def get_test_status_icon(is_passed: bool, is_stage_opened: bool) -> str:
         return TEST_ICON_CLOSED
 
 
+def latest_results_by_test(test_results) -> dict:
+    """
+    Последняя попытка по каждому тесту: {test_id: TestResult}.
+
+    Выбирает по created_date, а не по порядку списка — перезапись словаря
+    по списку из get_user_test_results() (DESC) оставляла самую старую попытку,
+    и наставник видел проваленный тест, который стажёр уже пересдал.
+    """
+    latest = {}
+    for result in test_results or []:
+        current = latest.get(result.test_id)
+        if current is None or result.created_date > current.created_date:
+            latest[result.test_id] = result
+    return latest
+
+
 def format_test_line(test_num: int, test_name: str, icon: str) -> str:
     """
     Форматирует базовую строку теста.

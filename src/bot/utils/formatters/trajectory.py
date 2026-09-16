@@ -3,7 +3,11 @@
 from typing import List, Optional
 
 from bot.database.models import LearningPath, LearningSession, LearningStage, Test
-from bot.utils.formatters.test_progress import format_test_with_percentage, get_test_status_icon
+from bot.utils.formatters.test_progress import (
+    format_test_with_percentage,
+    get_test_status_icon,
+    latest_results_by_test,
+)
 
 
 async def generate_trajectory_progress_with_attestation_status(
@@ -18,11 +22,7 @@ async def generate_trajectory_progress_with_attestation_status(
 
     progress = f"📚<b>Название траектории:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
 
-    # Создаем словарь результатов тестов для быстрого поиска
-    test_results_dict = {}
-    if test_results:
-        for result in test_results:
-            test_results_dict[result.test_id] = result
+    test_results_dict = latest_results_by_test(test_results)
 
     for stage_progress in stages_progress:
         sessions_progress = stage_progress.session_progress

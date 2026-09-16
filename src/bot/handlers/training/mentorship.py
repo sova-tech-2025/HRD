@@ -57,7 +57,7 @@ from bot.keyboards.keyboards import (
 from bot.keyboards.training_keyboards import MENTOR_REASSIGNMENT_PAGE_SIZE, get_reassign_mentor_keyboard
 from bot.repositories import AssessmentAssignmentRepository, AssessmentRepository, ScopedUserRepository
 from bot.repositories.scope import get_scope_object_ids, in_scope
-from bot.utils.formatters.test_progress import get_test_status_icon
+from bot.utils.formatters.test_progress import get_test_status_icon, latest_results_by_test
 from bot.utils.formatters.trajectory import generate_trajectory_progress_with_attestation_status
 from bot.utils.timezone import moscow_now
 
@@ -2473,71 +2473,6 @@ async def callback_mentor_view_progress(callback: CallbackQuery, session: AsyncS
     await callback.answer()
 
 
-def generate_trajectory_progress_for_mentor(trainee_path, stages_progress, test_results=None):
-    """Генерация текста прогресса траектории для наставника (формат по Figma)"""
-    if not trainee_path:
-        return "📖 <b>Траектория:</b> не выбрано"
-
-    progress = (
-        f"📖 <b>Траектория:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
-    )
-
-    test_results_dict = {}
-    if test_results:
-        for result in test_results:
-            test_results_dict[result.test_id] = result
-
-    for stage_progress in stages_progress:
-        sessions_progress = stage_progress.session_progress
-
-        # Подсчитываем тесты в этапе
-        total_tests = 0
-        passed_tests = 0
-        for sp in sessions_progress:
-            if hasattr(sp.session, "tests") and sp.session.tests:
-                for test in sp.session.tests:
-                    total_tests += 1
-                    if test.id in test_results_dict and test_results_dict[test.id].is_passed:
-                        passed_tests += 1
-
-        # Определяем статус этапа
-        all_completed = total_tests > 0 and passed_tests == total_tests and stage_progress.is_opened
-
-        if all_completed:
-            access_text = "этап пройден ✅"
-        elif stage_progress.is_opened:
-            access_text = "открыт ♻️"
-        else:
-            access_text = "закрыт ❌"
-
-        progress += f"<b>Этап {stage_progress.stage.order_number} ▾</b>\n"
-        progress += f"{stage_progress.stage.name}\n"
-        progress += f"<b>Доступ:</b> {access_text}\n\n"
-
-        # Сессии и тесты
-        for session_progress in sessions_progress:
-            progress += f"<b>{session_progress.session.name}</b>\n"
-
-            if hasattr(session_progress.session, "tests"):
-                for test in session_progress.session.tests:
-                    result = test_results_dict.get(test.id)
-                    is_passed = bool(result and result.is_passed)
-                    icon = get_test_status_icon(is_passed, stage_progress.is_opened)
-                    progress += f"{icon} Тест: {test.name}\n"
-
-        # Итог этапа
-        if all_completed:
-            progress += "\n👉 <b>Этап завершен!</b>\n"
-        elif stage_progress.is_opened and total_tests > 0:
-            progress += f"\n👉 <b>Пройдено:</b> {passed_tests}/{total_tests} тестов\n"
-
-    # Аттестация
-    if trainee_path.learning_path.attestation:
-        progress += f"🏁 <b>Аттестация:</b> {trainee_path.learning_path.attestation.name}\n"
-
-    return progress
-
-
 async def generate_trajectory_progress_with_attestation_status(
     session, trainee_path, stages_progress, test_results=None
 ):
@@ -2549,10 +2484,7 @@ async def generate_trajectory_progress_with_attestation_status(
         f"📖 <b>Траектория:</b> {trainee_path.learning_path.name if trainee_path.learning_path else 'Не указано'}\n\n"
     )
 
-    test_results_dict = {}
-    if test_results:
-        for result in test_results:
-            test_results_dict[result.test_id] = result
+    test_results_dict = latest_results_by_test(test_results)
 
     for stage_progress in stages_progress:
         sessions_progress = stage_progress.session_progress
