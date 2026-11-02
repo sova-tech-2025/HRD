@@ -68,13 +68,15 @@ class TestScenario4_StageOpenCloseConsistency:
 
         text = resp.text or ""
 
-        # Этап 1 должен быть ❌ (закрыт) в UI стажёра — это by design
-        assert "❌" in text, f"Stage 1 should show ❌ after closing. Got: {text[:500]}"
+        # Закрытый этап с несданными тестами показывает ❌, но пройденный тест
+        # остаётся ✅ — закрытие доступа прохождение не отменяет
+        assert "❌" in text, f"Closed stage should show ❌. Got: {text[:500]}"
+        assert "❌ Тест: E2E Тест Кофе" not in text, f"Passed test must stay ✅. Got: {text[:500]}"
 
     async def test_step6_mentor_progress_shows_closed_stage(self, admin: BotClient, shared_state: dict):
         """
-        Наставник видит закрытый этап 1 как ❌ (by design: закрытые этапы
-        показывают ❌ для всех тестов, независимо от прохождения).
+        Наставник видит ❌ у несданных тестов закрытого этапа, а пройденный
+        тест остаётся ✅ — иначе текст противоречит кнопкам управления этапами.
         """
         await wait_between_actions()
 
@@ -93,9 +95,9 @@ class TestScenario4_StageOpenCloseConsistency:
 
         text = resp.text or ""
 
-        # Закрытый этап 1 показывает ❌ (by design: get_test_status_icon
-        # возвращает ❌ для всех тестов в закрытом этапе)
+        # ❌ помечаются только несданные тесты закрытого этапа
         assert "❌" in text, f"Closed stage should show ❌ icons. Got: {text[:500]}"
+        assert "❌ Тест: E2E Тест Кофе" not in text, f"Passed test must stay ✅. Got: {text[:500]}"
 
     async def test_step7_mentor_stage_management_shows_correct_toggle(self, admin: BotClient, shared_state: dict):
         """Управление этапами показывает корректную кнопку для закрытого этапа."""

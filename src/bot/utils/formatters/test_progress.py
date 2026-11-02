@@ -3,6 +3,7 @@
 
 Этот модуль реализует Single Responsibility Principle (SRP):
 - get_test_status_icon() - определение иконки по статусу
+- is_stage_passed() - пройден ли этап
 - format_test_line() - базовое форматирование строки теста
 - format_test_with_percentage() - форматирование с процентами
 
@@ -34,16 +35,32 @@ def get_test_status_icon(is_passed: bool, is_stage_opened: bool) -> str:
         Строка с эмодзи-иконкой
 
     Логика (единая для всего приложения):
-        - Пройден И этап открыт: ✅
+        - Пройден: ✅ (закрытие этапа прохождение не отменяет)
         - Не пройден И этап открыт: ⏳
-        - Этап закрыт: ❌
+        - Не пройден И этап закрыт: ❌
     """
-    if is_passed and is_stage_opened:
+    if is_passed:
         return TEST_ICON_PASSED
     elif is_stage_opened:
         return TEST_ICON_AVAILABLE
     else:
         return TEST_ICON_CLOSED
+
+
+def is_stage_passed(is_completed: bool, total_tests: int, passed_tests: int) -> bool:
+    """
+    Пройден ли этап.
+
+    Args:
+        is_completed: Флаг TraineeStageProgress.is_completed
+        total_tests: Всего тестов в этапе
+        passed_tests: Сколько из них сдано
+
+    Статус не зависит от is_opened: наставник закрывает пройденный этап, и
+    раньше тот выглядел непройденным, хотя кнопки управления этапами в том же
+    сообщении показывали «✅ Этап N завершен».
+    """
+    return bool(is_completed) or (total_tests > 0 and passed_tests == total_tests)
 
 
 def latest_results_by_test(test_results) -> dict:

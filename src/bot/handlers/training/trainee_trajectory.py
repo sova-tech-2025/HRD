@@ -22,7 +22,7 @@ from bot.database.db import (
 from bot.keyboards.keyboards import get_mentor_contact_keyboard
 from bot.repositories import AssessmentAssignmentRepository
 from bot.utils.auth.auth import check_auth
-from bot.utils.formatters.test_progress import format_test_line_figma, get_test_status_icon
+from bot.utils.formatters.test_progress import format_test_line_figma, get_test_status_icon, is_stage_passed
 from bot.utils.handlers.callback import ensure_callback_auth
 from bot.utils.handlers.user import get_current_user
 from bot.utils.logger import log_user_action, log_user_error, logger
@@ -63,10 +63,10 @@ async def build_trajectory_text(session, user, trainee_path, company_id=None):
                     if test_result and test_result.is_passed:
                         passed_tests += 1
 
-        all_completed = passed_tests == total_tests and total_tests > 0
+        all_completed = is_stage_passed(stage_progress.is_completed, total_tests, passed_tests)
 
         # Статус доступа этапа (Figma)
-        if all_completed and stage_progress.is_opened:
+        if all_completed:
             access_text = "этап пройден ✅"
         elif stage_progress.is_opened:
             access_text = "открыт ♻️"
@@ -90,7 +90,7 @@ async def build_trajectory_text(session, user, trainee_path, company_id=None):
                     text += format_test_line_figma(test.name, icon)
 
         # Прогресс этапа
-        if all_completed and stage_progress.is_opened:
+        if all_completed:
             text += "\n👉 Этап завершен!\n"
         elif total_tests > 0:
             text += f"\n👉 Пройдено: {passed_tests}/{total_tests} тестов\n"

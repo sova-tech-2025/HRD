@@ -6,6 +6,7 @@ from bot.database.models import LearningPath, LearningSession, LearningStage, Te
 from bot.utils.formatters.test_progress import (
     format_test_with_percentage,
     get_test_status_icon,
+    is_stage_passed,
     latest_results_by_test,
 )
 
@@ -27,16 +28,15 @@ async def generate_trajectory_progress_with_attestation_status(
     for stage_progress in stages_progress:
         sessions_progress = stage_progress.session_progress
 
-        # Проверяем, все ли тесты в сессиях пройдены (только если этап открыт)
-        all_sessions_completed = False
-        if sessions_progress and stage_progress.is_opened:
-            all_sessions_completed = all(
-                all(test.id in test_results_dict and test_results_dict[test.id].is_passed for test in sp.session.tests)
-                for sp in sessions_progress
-                if hasattr(sp.session, "tests") and sp.session.tests
-            )
+        # Считаем тесты этапа: статус не зависит от того, открыт ли этап сейчас
+        stage_tests = [
+            test for sp in sessions_progress if getattr(sp.session, "tests", None) for test in sp.session.tests
+        ]
+        passed_stage_tests = sum(
+            1 for test in stage_tests if test.id in test_results_dict and test_results_dict[test.id].is_passed
+        )
 
-        if all_sessions_completed and sessions_progress:
+        if is_stage_passed(stage_progress.is_completed, len(stage_tests), passed_stage_tests):
             stage_status_icon = "✅"
         elif stage_progress.is_opened:
             stage_status_icon = "🟡"
@@ -47,14 +47,12 @@ async def generate_trajectory_progress_with_attestation_status(
 
         for session_progress in sessions_progress:
             if hasattr(session_progress.session, "tests") and session_progress.session.tests:
-                all_tests_passed = False
-                if stage_progress.is_opened:
-                    all_tests_passed = all(
-                        test.id in test_results_dict and test_results_dict[test.id].is_passed
-                        for test in session_progress.session.tests
-                    )
+                all_tests_passed = all(
+                    test.id in test_results_dict and test_results_dict[test.id].is_passed
+                    for test in session_progress.session.tests
+                )
 
-                if all_tests_passed and stage_progress.is_opened:
+                if all_tests_passed:
                     session_status_icon = "✅"
                 elif stage_progress.is_opened:
                     session_status_icon = "🟡"

@@ -15,10 +15,10 @@ class TestGetTestStatusIcon:
         icon = get_test_status_icon(is_passed=True, is_stage_opened=True)
         assert icon == "✅"
 
-    def test_passed_but_stage_closed_returns_closed(self):
-        """Если тест пройден, но этап закрыт - закрытый"""
+    def test_passed_stays_passed_when_stage_closed(self):
+        """Если тест пройден, закрытие этапа прохождение не отменяет"""
         icon = get_test_status_icon(is_passed=True, is_stage_opened=False)
-        assert icon == "❌"
+        assert icon == "✅"
 
     def test_not_passed_stage_open_returns_available(self):
         """Если тест не пройден и этап открыт - доступен"""

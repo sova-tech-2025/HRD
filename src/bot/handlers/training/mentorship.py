@@ -57,7 +57,7 @@ from bot.keyboards.keyboards import (
 from bot.keyboards.training_keyboards import MENTOR_REASSIGNMENT_PAGE_SIZE, get_reassign_mentor_keyboard
 from bot.repositories import AssessmentAssignmentRepository, AssessmentRepository, ScopedUserRepository
 from bot.repositories.scope import get_scope_object_ids, in_scope
-from bot.utils.formatters.test_progress import get_test_status_icon, latest_results_by_test
+from bot.utils.formatters.test_progress import get_test_status_icon, is_stage_passed, latest_results_by_test
 from bot.utils.formatters.trajectory import generate_trajectory_progress_with_attestation_status
 from bot.utils.timezone import moscow_now
 
@@ -2500,7 +2500,7 @@ async def generate_trajectory_progress_with_attestation_status(
                         passed_tests += 1
 
         # Определяем статус этапа
-        all_completed = total_tests > 0 and passed_tests == total_tests and stage_progress.is_opened
+        all_completed = is_stage_passed(stage_progress.is_completed, total_tests, passed_tests)
 
         if all_completed:
             access_text = "этап пройден ✅"
